@@ -204,6 +204,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
 
+  const sortedProducts = useMemo(
+    () => [...products].sort((a, b) => a.name.localeCompare(b.name, "tr")),
+    [products]
+  );
+  const sortedActiveProducts = useMemo(
+    () => sortedProducts.filter((p) => !p.passive),
+    [sortedProducts]
+  );
+  const sortedCustomers = useMemo(
+    () => [...customers].sort((a, b) => a.name.localeCompare(b.name, "tr")),
+    [customers]
+  );
+  const sortedActiveCustomers = useMemo(
+    () => sortedCustomers.filter((c) => !c.passive),
+    [sortedCustomers]
+  );
+  const sortedBatches = useMemo(
+    () => [...batches].sort((a, b) => a.name.localeCompare(b.name, "tr", { numeric: true })),
+    [batches]
+  );
+
   const showError = (error: unknown) => {
     const msg = error instanceof Error ? error.message : String(error || "Bilinmeyen hata");
     setMessage(msg);
@@ -319,9 +340,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const filteredCustomers = useMemo(() => {
     const query = customerSearch.trim().toLowerCase();
-    if (!query) return customers;
-    return customers.filter((customer) => customer.name.toLowerCase().includes(query));
-  }, [customers, customerSearch]);
+    if (!query) return sortedCustomers;
+    return sortedCustomers.filter((customer) => customer.name.toLowerCase().includes(query));
+  }, [sortedCustomers, customerSearch]);
 
   const recentMovements = useMemo(() => {
     const saleRows = activeSales.map((sale) => ({
@@ -794,7 +815,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   ];
 
-  const filteredProducts = products.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
+  const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
 
   if (loadingData) {
     return <main className="p-8">Veriler yükleniyor...</main>;
@@ -927,7 +948,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <Card title="Kaynak Ürünler Tablosu">
               <Table
                 headers={["Ürün Kodu", "Ürün Adı", "Kategori", "Resim", "Durum", "İşlem"]}
-                rows={products.map((p) => [
+                rows={sortedProducts.map((p) => [
                   p.code,
                   editingProductId === p.id ? <input className="input" maxLength={50} value={p.name} onChange={(e) => updateProduct(p.id, { name: e.target.value })} /> : p.name,
                   editingProductId === p.id ? (
@@ -948,7 +969,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <Card title="Ürün Özet Raporu">
               <Table
                 headers={["Ürün Adı", "Toplam Sipariş", "Toplam Satış", "Kalan Stok"]}
-                rows={products.map((p) => [p.name, getProductTotalBought(p.id), getProductSoldQty(p.id), getProductStock(p.id)])}
+                rows={sortedProducts.map((p) => [p.name, getProductTotalBought(p.id), getProductSoldQty(p.id), getProductStock(p.id)])}
               />
             </Card>
 
@@ -994,7 +1015,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <button type="button" className="btn-secondary" onClick={addBatchName}>Parti Adı Ekle</button>
               </div>
               <div className="mb-5 flex flex-wrap gap-2">
-                {batches.map((batch) => (
+                {sortedBatches.map((batch) => (
                   <div key={batch.id} className="flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
                     <span>{batch.name}</span>
                     <button type="button" className="text-red-600" onClick={() => deleteBatchName(batch.id)}>Sil</button>
@@ -1008,11 +1029,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div className="grid gap-3 md:grid-cols-4">
                 <select className="input" value={batchForm.batchId} onChange={(e) => setBatchForm({ ...batchForm, batchId: e.target.value })}>
                   <option value="">Parti seçin</option>
-                  {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                  {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                 </select>
                 <select className="input" value={batchForm.productId} onChange={(e) => setBatchForm({ ...batchForm, productId: e.target.value })}>
                   <option value="">Kaynak ürün seçin</option>
-                  {products.filter((p) => !p.passive).map((p) => <option key={p.id} value={p.id}>{p.code} - {p.name}</option>)}
+                  {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
@@ -1025,7 +1046,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <Card title="Parti Bazlı Ürün / Stok Raporu">
               <select className="input mb-4 max-w-xs" value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
                 <option value="Tümü">Tüm Partiler</option>
-                {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
               </select>
               <Table
                 headers={["Parti", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
@@ -1035,7 +1056,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   return [
                     editingBatchItemId === key ? (
                       <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
-                        {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                        {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                       </select>
                     ) : batchMap.get(item.batch_id)?.name || "-",
                     p?.name || "-",
@@ -1158,11 +1179,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div className="grid gap-3 md:grid-cols-4">
                 <select className="input" value={saleForm.customerId} onChange={(e) => setSaleForm({ ...saleForm, customerId: e.target.value })}>
                   <option value="">Cari seçin</option>
-                  {customers.filter((c) => !c.passive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {sortedActiveCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value })}>
                   <option value="">Ürün seçin</option>
-                  {products.filter((p) => !p.passive).map((p) => <option key={p.id} value={p.id}>{p.name} - Stok: {getProductStock(p.id)}</option>)}
+                  {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name} - Stok: {getProductStock(p.id)}</option>)}
                 </select>
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
                 <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
