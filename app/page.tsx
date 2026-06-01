@@ -189,17 +189,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
 
-  const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
-  const [customerDrafts, setCustomerDrafts] = useState<Record<string, string>>({});
-  const [batchItemDrafts, setBatchItemDrafts] = useState<Record<string, Partial<BatchItem>>>({});
-  const [saleDrafts, setSaleDrafts] = useState<Record<string, Partial<Sale>>>({});
-  const [partnerDrafts, setPartnerDrafts] = useState<Record<string, Partial<PartnerRow>>>({});
-
-  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", minStock: "5" });
+  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", minStock: "0" });
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
-  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "5" });
+  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "0" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
@@ -373,11 +367,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       code: `URN-${idTail}`,
       gender_category: newProduct.genderCategory,
       image_url: newProduct.image || null,
-      min_stock: Number(newProduct.minStock || 5),
+      min_stock: Number(newProduct.minStock || 0),
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code: `URN-${idTail}` });
-    setNewProduct({ name: "", genderCategory: "Kadın", image: "", minStock: "5" });
+    setNewProduct({ name: "", genderCategory: "Kadın", image: "", minStock: "0" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
   };
@@ -507,9 +501,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       sale_price: salePrice,
     });
     if (error) return showError(error);
-    if (batchForm.minStock) await supabase.from("products").update({ min_stock: Number(batchForm.minStock || 5) }).eq("id", productId);
+    if (batchForm.minStock) await supabase.from("products").update({ min_stock: Number(batchForm.minStock || 0) }).eq("id", productId);
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice });
-    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "5" });
+    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "0" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
   };
@@ -596,17 +590,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const dbPatch: Record<string, unknown> = {};
     if (patch.seller !== undefined) dbPatch.seller = patch.seller;
     if (patch.sale_type !== undefined) dbPatch.sale_type = patch.sale_type;
-    if (patch.total !== undefined) dbPatch.total = Number(patch.total || 0);
-    if (patch.cost !== undefined) dbPatch.cost = Number(patch.cost || 0);
-    if (patch.paid_amount !== undefined) dbPatch.paid_amount = Number(patch.paid_amount || 0);
-    if (patch.paid !== undefined) {
-      dbPatch.paid = patch.paid;
-      if (patch.paid) {
-        dbPatch.paid_amount = Number(patch.total ?? sales.find((sale) => sale.id === saleId)?.total ?? 0);
-      }
-    }
+    if (patch.paid !== undefined) dbPatch.paid = patch.paid;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
+    const updatedSale = sales.find((sale) => sale.id === saleId);
+    if (updatedSale && patch.paid !== undefined) {
+      try {
+        await allocatePaymentsForCustomer(updatedSale.customer_id);
+      } catch (err) {
+        return showError(err);
+      }
+    }
     await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
     loadAll();
   };
@@ -786,121 +780,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-
-  const startProductEdit = (product: Product) => {
-    setProductDrafts({ ...productDrafts, [product.id]: { name: product.name, gender_category: product.gender_category } });
-    setEditingProductId(product.id);
-  };
-
-  const cancelProductEdit = (productId: string) => {
-    const next = { ...productDrafts };
-    delete next[productId];
-    setProductDrafts(next);
-    setEditingProductId(null);
-  };
-
-  const saveProductEdit = async (productId: string) => {
-    await updateProduct(productId, productDrafts[productId] || {});
-    cancelProductEdit(productId);
-  };
-
-  const startCustomerEdit = (customer: Customer) => {
-    setCustomerDrafts({ ...customerDrafts, [customer.id]: customer.name });
-    setEditingCustomerId(customer.id);
-  };
-
-  const cancelCustomerEdit = (customerId: string) => {
-    const next = { ...customerDrafts };
-    delete next[customerId];
-    setCustomerDrafts(next);
-    setEditingCustomerId(null);
-  };
-
-  const saveCustomerEdit = async (customerId: string) => {
-    await updateCustomerName(customerId, customerDrafts[customerId] || "");
-    cancelCustomerEdit(customerId);
-  };
-
-  const startBatchItemEdit = (item: BatchItem) => {
-    setBatchItemDrafts({
-      ...batchItemDrafts,
-      [item.id]: {
-        batch_id: item.batch_id,
-        bought: item.bought,
-        buy_price: item.buy_price,
-        sale_price: item.sale_price,
-      },
-    });
-    setEditingBatchItemId(item.id);
-  };
-
-  const cancelBatchItemEdit = (itemId: string) => {
-    const next = { ...batchItemDrafts };
-    delete next[itemId];
-    setBatchItemDrafts(next);
-    setEditingBatchItemId(null);
-  };
-
-  const saveBatchItemEdit = async (itemId: string) => {
-    await updateBatchItem(itemId, batchItemDrafts[itemId] || {});
-    cancelBatchItemEdit(itemId);
-  };
-
-  const startSaleEdit = (sale: Sale) => {
-    setSaleDrafts({
-      ...saleDrafts,
-      [sale.id]: {
-        seller: sale.seller,
-        sale_type: sale.sale_type,
-        total: sale.total,
-        cost: sale.cost,
-        paid: sale.paid,
-        paid_amount: sale.paid_amount,
-      },
-    });
-    setEditingSaleId(sale.id);
-  };
-
-  const cancelSaleEdit = (saleId: string) => {
-    const next = { ...saleDrafts };
-    delete next[saleId];
-    setSaleDrafts(next);
-    setEditingSaleId(null);
-  };
-
-  const saveSaleEdit = async (saleId: string) => {
-    await updateSale(saleId, saleDrafts[saleId] || {});
-    cancelSaleEdit(saleId);
-  };
-
-  const startPartnerEdit = (row: PartnerRow) => {
-    setPartnerDrafts({
-      ...partnerDrafts,
-      [row.id]: {
-        contribution: row.contribution,
-        receivable: row.receivable,
-        debt: row.debt,
-        profit_share: row.profit_share,
-      },
-    });
-    setEditingPartnerId(row.id);
-  };
-
-  const cancelPartnerEdit = (id: string) => {
-    const next = { ...partnerDrafts };
-    delete next[id];
-    setPartnerDrafts(next);
-    setEditingPartnerId(null);
-  };
-
-  const savePartnerEdit = async (id: string) => {
-    const draft = partnerDrafts[id] || {};
-    for (const [field, value] of Object.entries(draft)) {
-      await updatePartner(id, field as keyof PartnerRow, Number(value || 0));
-    }
-    cancelPartnerEdit(id);
-  };
-
   const menu = [
     ["dashboard", "Dashboard"],
     ["products", "Ürünler"],
@@ -1050,23 +929,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 headers={["Ürün Kodu", "Ürün Adı", "Kategori", "Resim", "Durum", "İşlem"]}
                 rows={products.map((p) => [
                   p.code,
-                  editingProductId === p.id ? <input className="input" maxLength={50} value={productDrafts[p.id]?.name ?? p.name} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /> : p.name,
+                  editingProductId === p.id ? <input className="input" maxLength={50} value={p.name} onChange={(e) => updateProduct(p.id, { name: e.target.value })} /> : p.name,
                   editingProductId === p.id ? (
-                    <select className="input" value={(productDrafts[p.id]?.gender_category as GenderCategory) ?? p.gender_category} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}>
+                    <select className="input" value={p.gender_category} onChange={(e) => updateProduct(p.id, { gender_category: e.target.value as GenderCategory })}>
                       <option>Kadın</option><option>Erkek</option><option>Unisex</option>
                     </select>
                   ) : p.gender_category,
                   p.image_url ? "Var" : "Yok",
                   p.passive ? "Pasif" : "Aktif",
                   <div key={p.id} className="flex gap-2">
-                    {editingProductId === p.id ? (
-                      <>
-                        <button type="button" className="btn-secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
-                        <button type="button" className="btn-secondary" onClick={() => cancelProductEdit(p.id)}>Vazgeç</button>
-                      </>
-                    ) : (
-                      <button type="button" className="btn-secondary" onClick={() => startProductEdit(p)}>Değiştir</button>
-                    )}
+                    <button type="button" className="btn-secondary" onClick={() => setEditingProductId(editingProductId === p.id ? null : p.id)}>Değiştir</button>
                     <button type="button" className="btn-danger" onClick={() => deleteProduct(p.id)}>Sil</button>
                   </div>,
                 ])}
@@ -1162,25 +1034,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const p = productMap.get(item.product_id);
                   return [
                     editingBatchItemId === key ? (
-                      <select className="input" value={String(batchItemDrafts[item.id]?.batch_id ?? item.batch_id)} onChange={(e) => setBatchItemDrafts({ ...batchItemDrafts, [item.id]: { ...(batchItemDrafts[item.id] || {}), batch_id: e.target.value } })}>
+                      <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
                         {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                       </select>
                     ) : batchMap.get(item.batch_id)?.name || "-",
                     p?.name || "-",
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={String(batchItemDrafts[item.id]?.bought ?? item.bought)} onChange={(e) => setBatchItemDrafts({ ...batchItemDrafts, [item.id]: { ...(batchItemDrafts[item.id] || {}), bought: Number(e.target.value || 0) } })} /> : item.bought,
+                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
                     getBatchSoldQty(item.product_id, item.batch_id),
                     item.bought - getBatchSoldQty(item.product_id, item.batch_id),
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={String(batchItemDrafts[item.id]?.buy_price ?? item.buy_price)} onChange={(e) => setBatchItemDrafts({ ...batchItemDrafts, [item.id]: { ...(batchItemDrafts[item.id] || {}), buy_price: Number(e.target.value || 0) } })} /> : money(item.buy_price),
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={String(batchItemDrafts[item.id]?.sale_price ?? item.sale_price)} onChange={(e) => setBatchItemDrafts({ ...batchItemDrafts, [item.id]: { ...(batchItemDrafts[item.id] || {}), sale_price: Number(e.target.value || 0) } })} /> : money(item.sale_price),
+                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
+                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
                     <div key={key} className="flex gap-2">
-                      {editingBatchItemId === key ? (
-                        <>
-                          <button type="button" className="btn-secondary" onClick={() => saveBatchItemEdit(item.id)}>Kaydet</button>
-                          <button type="button" className="btn-secondary" onClick={() => cancelBatchItemEdit(item.id)}>Vazgeç</button>
-                        </>
-                      ) : (
-                        <button type="button" className="btn-secondary" onClick={() => startBatchItemEdit(item)}>Değiştir</button>
-                      )}
+                      <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
                       <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
                     </div>,
                   ];
@@ -1230,21 +1095,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <Table
                 headers={["Cari Adı", "Toplam Sipariş", "Peşin Satış", "Toplam Ödeme", "Kalan Borç", "Durum", "İşlem"]}
                 rows={filteredCustomers.map((c) => [
-                  editingCustomerId === c.id ? <input className="input" maxLength={50} value={customerDrafts[c.id] ?? c.name} onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: e.target.value })} /> : c.name,
+                  editingCustomerId === c.id ? <input className="input" maxLength={50} value={c.name} onChange={(e) => updateCustomerName(c.id, e.target.value)} /> : c.name,
                   money(getCustomerSalesTotal(c.id)),
                   money(getCustomerPaidSalesTotal(c.id)),
                   money(getCustomerCollectedTotal(c.id)),
                   money(getCustomerBalance(c.id)),
                   c.passive ? "Pasif" : getCustomerBalance(c.id) <= 0 ? "Ödendi" : "Borç Açık",
                   <div key={c.id} className="flex gap-2">
-                    {editingCustomerId === c.id ? (
-                      <>
-                        <button type="button" className="btn-secondary" onClick={() => saveCustomerEdit(c.id)}>Kaydet</button>
-                        <button type="button" className="btn-secondary" onClick={() => cancelCustomerEdit(c.id)}>Vazgeç</button>
-                      </>
-                    ) : (
-                      <button type="button" className="btn-secondary" onClick={() => startCustomerEdit(c)}>Değiştir</button>
-                    )}
+                    <button type="button" className="btn-secondary" onClick={() => setEditingCustomerId(editingCustomerId === c.id ? null : c.id)}>Değiştir</button>
                     <button type="button" className="btn-danger" onClick={() => deleteCustomer(c.id)}>Sil</button>
                   </div>,
                 ])}
@@ -1325,30 +1183,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   customerMap.get(sale.customer_id)?.name || "-",
                   productMap.get(sale.product_id)?.name || "-",
                   batchMap.get(sale.batch_id)?.name || "-",
-                  editingSaleId === sale.id ? <select className="input" value={(saleDrafts[sale.id]?.seller as Seller) ?? sale.seller} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), seller: e.target.value as Seller } })}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
-                  editingSaleId === sale.id ? <select className="input" value={(saleDrafts[sale.id]?.sale_type as SaleType) ?? sale.sale_type} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), sale_type: e.target.value as SaleType } })}><option>Normal satış</option><option>İndirimli satış</option><option>Kârsız satış</option><option>Zararına satış</option><option>Hibe</option></select> : sale.sale_type,
+                  editingSaleId === sale.id ? <select className="input" value={sale.seller} onChange={(e) => updateSale(sale.id, { seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
+                  editingSaleId === sale.id ? <select className="input" value={sale.sale_type} onChange={(e) => updateSale(sale.id, { sale_type: e.target.value as SaleType })}><option>Normal satış</option><option>İndirimli satış</option><option>Kârsız satış</option><option>Zararına satış</option><option>Hibe</option></select> : sale.sale_type,
                   sale.qty,
-                  editingSaleId === sale.id ? <input className="input w-28" type="number" value={String(saleDrafts[sale.id]?.total ?? sale.total)} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), total: Number(e.target.value || 0) } })} /> : money(sale.total),
-                  editingSaleId === sale.id ? <input className="input w-28" type="number" value={String(saleDrafts[sale.id]?.cost ?? sale.cost)} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), cost: Number(e.target.value || 0) } })} /> : money(sale.cost),
-                  <span key={sale.id} className={(Number(saleDrafts[sale.id]?.total ?? sale.total) - Number(saleDrafts[sale.id]?.cost ?? sale.cost)) < 0 ? "text-red-600" : ""}>{money(Number(saleDrafts[sale.id]?.total ?? sale.total) - Number(saleDrafts[sale.id]?.cost ?? sale.cost))}</span>,
-                  editingSaleId === sale.id ? (
-                    <div className="flex flex-col gap-2">
-                      <select className="input w-36" value={String(saleDrafts[sale.id]?.paid ?? sale.paid)} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), paid: e.target.value === "true" } })}>
-                        <option value="false">Cari</option>
-                        <option value="true">Peşin</option>
-                      </select>
-                      <input className="input w-36" type="number" placeholder="Ödenen" value={String(saleDrafts[sale.id]?.paid_amount ?? sale.paid_amount ?? 0)} onChange={(e) => setSaleDrafts({ ...saleDrafts, [sale.id]: { ...(saleDrafts[sale.id] || {}), paid_amount: Number(e.target.value || 0) } })} />
-                    </div>
-                  ) : getSaleStatus(sale),
+                  money(sale.total),
+                  money(sale.cost),
+                  <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                  getSaleStatus(sale),
                   <div key={sale.id} className="flex gap-2">
-                    {editingSaleId === sale.id ? (
-                      <>
-                        <button type="button" className="btn-secondary" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button>
-                        <button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button>
-                      </>
-                    ) : (
-                      <button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button>
-                    )}
+                    <button type="button" className="btn-secondary" onClick={() => setEditingSaleId(editingSaleId === sale.id ? null : sale.id)}>Değiştir</button>
                     <button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button>
                   </div>,
                 ])}
@@ -1368,21 +1211,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div className="flex items-center justify-between gap-3" key={field}>
                       <span>{field === "contribution" ? "Katılım" : field === "receivable" ? "Alacak" : field === "debt" ? "Borç" : "Kâr Payı/Mahsup"}</span>
                       {editingPartnerId === row.id ? (
-                        <input className="input w-32" type="number" value={String(partnerDrafts[row.id]?.[field] ?? row[field])} onChange={(e) => setPartnerDrafts({ ...partnerDrafts, [row.id]: { ...(partnerDrafts[row.id] || {}), [field]: Number(e.target.value || 0) } })} />
+                        <input className="input w-32" type="number" value={row[field]} onChange={(e) => updatePartner(row.id, field, Number(e.target.value || 0))} />
                       ) : (
                         <b className={field === "debt" && row.debt > 0 ? "text-red-600" : ""}>{money(Number(row[field] || 0))}</b>
                       )}
                     </div>
                   ))}
                 </div>
-                {editingPartnerId === row.id ? (
-                  <div className="mt-4 flex gap-2">
-                    <button type="button" className="btn-secondary" onClick={() => savePartnerEdit(row.id)}>Kaydet</button>
-                    <button type="button" className="btn-secondary" onClick={() => cancelPartnerEdit(row.id)}>Vazgeç</button>
-                  </div>
-                ) : (
-                  <button type="button" className="btn-secondary mt-4" onClick={() => startPartnerEdit(row)}>Değiştir</button>
-                )}
+                <button type="button" className="btn-secondary mt-4" onClick={() => setEditingPartnerId(editingPartnerId === row.id ? null : row.id)}>Değiştir</button>
               </Card>
             ))}
           </div>
