@@ -1,0 +1,11 @@
+update batch_items
+set product_id = '8582c25d-dd0a-42f2-a005-c6883ee2bb83'        # burada doğru ürün kodu set ediliyor
+where product_id = 'c9d70397-0dd3-40d0-811c-8838bb94cc7c';    # bu silinen ürün 
+
+update sales
+set product_id = '8582c25d-dd0a-42f2-a005-c6883ee2bb83'
+where product_id = 'c9d70397-0dd3-40d0-811c-8838bb94cc7c';
+
+update products
+set passive = true
+where id = 'c9d70397-0dd3-40d0-811c-8838bb94cc7c';   # bu silinen ürün pasife alınıyor

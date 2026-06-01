@@ -1,0 +1,19 @@
+truncate table
+  sales,
+  payments,
+  batch_items,
+  products,
+  customers,
+  batches,
+  partner_ledger,
+  periods
+restart identity cascade;
+
+insert into products select * from backup_products;
+insert into customers select * from backup_customers;
+insert into batches select * from backup_batches;
+insert into batch_items select * from backup_batch_items;
+insert into sales select * from backup_sales;
+insert into payments select * from backup_payments;
+insert into partner_ledger select * from backup_partner_ledger;
+insert into periods select * from backup_periods;

@@ -77,22 +77,9 @@ type Period = {
   mihrimah_contribution: number;
   product_cost: number;
   shipping_cost: number;
-  closing_cash?: number | null;
-  asli_distribution?: number | null;
-  mihrimah_distribution?: number | null;
   closed: boolean;
   created_at: string;
   closed_at: string | null;
-};
-
-type AuditLog = {
-  id: string;
-  action: string;
-  entity_type: string;
-  entity_name: string | null;
-  user_email: string | null;
-  details: Record<string, unknown> | null;
-  created_at: string;
 };
 
 const money = (n: number) =>
@@ -174,10 +161,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [periods, setPeriods] = useState<Period[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   const [search, setSearch] = useState("");
-  const [customerSearch, setCustomerSearch] = useState("");
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
@@ -209,7 +194,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const loadAll = async () => {
     setLoadingData(true);
     try {
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes] = await Promise.all([
         supabase.from("products").select("*").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -218,10 +203,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("payments").select("*").order("created_at", { ascending: false }),
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
-        supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -233,7 +217,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPayments((paymentsRes.data || []) as Payment[]);
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
-      setAuditLogs((auditLogsRes.data || []) as AuditLog[]);
     } catch (err) {
       showError(err);
     } finally {
@@ -245,26 +228,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   }, []);
 
-  const logAction = async (
-    action: string,
-    entityType: string,
-    entityName?: string,
-    details?: Record<string, unknown>
-  ) => {
-    try {
-      const { data } = await supabase.auth.getUser();
-      await supabase.from("audit_log").insert({
-        action,
-        entity_type: entityType,
-        entity_name: entityName || "",
-        user_email: data.user?.email || "",
-        details: details || {},
-      });
-    } catch (err) {
-      console.warn("Audit log yazılamadı", err);
-    }
-  };
-
   const batchItemsForProduct = (productId: string) => batchItems.filter((item) => item.product_id === productId);
 
   const getBatchSoldQty = (productId: string, batchId: string) =>
@@ -273,31 +236,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const getProductTotalBought = (productId: string) => batchItemsForProduct(productId).reduce((sum, item) => sum + item.bought, 0);
   const getProductSoldQty = (productId: string) => activeSales.filter((sale) => sale.product_id === productId).reduce((sum, sale) => sum + sale.qty, 0);
   const getProductStock = (productId: string) => getProductTotalBought(productId) - getProductSoldQty(productId);
-  const getCustomerSalesTotal = (customerId: string) =>
-    activeSales
-      .filter((sale) => sale.customer_id === customerId)
-      .reduce((sum, sale) => sum + toNum(sale.total), 0);
-
-  const getCustomerUnpaidSalesTotal = (customerId: string) =>
-    activeSales
-      .filter((sale) => sale.customer_id === customerId && !sale.paid)
-      .reduce((sum, sale) => sum + toNum(sale.total), 0);
-
-  const getCustomerPaidSalesTotal = (customerId: string) =>
-    activeSales
-      .filter((sale) => sale.customer_id === customerId && sale.paid)
-      .reduce((sum, sale) => sum + toNum(sale.total), 0);
-
-  const getCustomerManualPaymentsTotal = (customerId: string) =>
-    payments
-      .filter((payment) => payment.customer_id === customerId)
-      .reduce((sum, payment) => sum + toNum(payment.amount), 0);
-
-  const getCustomerCollectedTotal = (customerId: string) =>
-    getCustomerPaidSalesTotal(customerId) + getCustomerManualPaymentsTotal(customerId);
-
-  const getCustomerBalance = (customerId: string) =>
-    Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
+  const getCustomerSalesTotal = (customerId: string) => activeSales.filter((sale) => sale.customer_id === customerId).reduce((sum, sale) => sum + sale.total, 0);
+  const getCustomerUnpaidSalesTotal = (customerId: string) => activeSales.filter((sale) => sale.customer_id === customerId && !sale.paid).reduce((sum, sale) => sum + sale.total, 0);
+  const getCustomerPaidSalesTotal = (customerId: string) => activeSales.filter((sale) => sale.customer_id === customerId && sale.paid).reduce((sum, sale) => sum + sale.total, 0);
+  const getCustomerPaymentsTotal = (customerId: string) => payments.filter((p) => p.customer_id === customerId).reduce((sum, p) => sum + p.amount, 0);
+  const getCustomerBalance = (customerId: string) => Math.max(getCustomerUnpaidSalesTotal(customerId) - getCustomerPaymentsTotal(customerId), 0);
 
   const totals = useMemo(() => {
     const revenue = activeSales.reduce((sum, item) => sum + item.total, 0);
@@ -305,53 +248,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQty(item.product_id, item.batch_id), 0) * item.buy_price, 0);
     const lowStock = products.filter((p) => !p.passive && getProductStock(p.id) <= p.min_stock).length;
-    const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + payments.reduce((sum, item) => sum + item.amount, 0);
-    const distributedCash = periods
-      .filter((period) => period.closed)
-      .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
-    const cash = Math.max(grossCash - distributedCash, 0);
-    return { revenue, profit, customerDebt, stockValue, lowStock, grossCash, distributedCash, cash };
-  }, [products, customers, batchItems, activeSales, payments, periods]);
-
-
-  const filteredCustomers = useMemo(() => {
-    const query = customerSearch.trim().toLowerCase();
-    if (!query) return customers;
-    return customers.filter((customer) => customer.name.toLowerCase().includes(query));
-  }, [customers, customerSearch]);
-
-  const recentMovements = useMemo(() => {
-    const saleRows = activeSales.map((sale) => ({
-      id: `sale-${sale.id}`,
-      date: sale.created_at,
-      type: sale.paid ? "Peşin satış" : "Cari satış",
-      customer: customerMap.get(sale.customer_id)?.name || "-",
-      detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet`,
-      amount: toNum(sale.total),
-    }));
-
-    const paymentRows = payments.map((payment) => ({
-      id: `payment-${payment.id}`,
-      date: payment.created_at,
-      type: "Tahsilat",
-      customer: customerMap.get(payment.customer_id)?.name || "-",
-      detail: "Cari ödeme",
-      amount: toNum(payment.amount),
-    }));
-
-    const auditRows = auditLogs.map((log) => ({
-      id: `audit-${log.id}`,
-      date: log.created_at,
-      type: log.action,
-      customer: log.entity_type,
-      detail: log.entity_name || "-",
-      amount: 0,
-    }));
-
-    return [...saleRows, ...paymentRows, ...auditRows]
-      .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())
-      .slice(0, 20);
-  }, [activeSales, payments, auditLogs, customerMap, productMap, batchMap]);
+    const cash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + payments.reduce((sum, item) => sum + item.amount, 0);
+    return { revenue, profit, customerDebt, stockValue, lowStock, cash };
+  }, [products, customers, batchItems, activeSales, payments]);
 
   const addProductDefinition = async () => {
     const name = newProduct.name.trim();
@@ -367,7 +266,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       min_stock: Number(newProduct.minStock || 5),
     });
     if (error) return showError(error);
-    await logAction("Ürün eklendi", "products", name, { code: `URN-${idTail}` });
     setNewProduct({ name: "", genderCategory: "Kadın", image: "", minStock: "5" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
@@ -383,27 +281,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
-    await logAction("Ürün değiştirildi", "products", products.find((p) => p.id === productId)?.name || productId, dbPatch);
     loadAll();
   };
 
   const deleteProduct = async (productId: string) => {
-
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
-
-
     const hasSales = activeSales.some((sale) => sale.product_id === productId);
     if (hasSales) {
       await updateProduct(productId, { passive: true });
-      await logAction("Ürün pasife alındı", "products", product.name);
       return setMessage("Ürün satışlarda kullanıldığı için silinmedi, pasife alındı.");
     }
     const hasBatch = batchItems.some((item) => item.product_id === productId);
     if (hasBatch) return setMessage("Bu ürüne bağlı parti girişi var. Önce parti satırlarını silin.");
     const { error } = await supabase.from("products").delete().eq("id", productId);
     if (error) return showError(error);
-    await logAction("Ürün silindi", "products", product.name);
     setMessage("Ürün silindi.");
     loadAll();
   };
@@ -414,35 +304,28 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
     const { error } = await supabase.from("customers").insert({ name });
     if (error) return showError(error);
-    await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
     loadAll();
   };
 
   const updateCustomerName = async (customerId: string, name: string) => {
     if (name.length > 50) return;
-    const oldName = customers.find((c) => c.id === customerId)?.name || customerId;
     const { error } = await supabase.from("customers").update({ name }).eq("id", customerId);
     if (error) return showError(error);
-    await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name });
     loadAll();
   };
 
   const deleteCustomer = async (customerId: string) => {
-    const customer = customers.find((c) => c.id === customerId);
-    if (!customer) return;	
     const hasSales = activeSales.some((sale) => sale.customer_id === customerId);
     const hasPayments = payments.some((p) => p.customer_id === customerId);
     if (hasSales || hasPayments) {
       const { error } = await supabase.from("customers").update({ passive: true }).eq("id", customerId);
       if (error) return showError(error);
-      await logAction("Cari pasife alındı", "customers", customer.name);
       setMessage("Cari hareket gördüğü için silinmedi, pasife alındı.");
       return loadAll();
     }
     const { error } = await supabase.from("customers").delete().eq("id", customerId);
     if (error) return showError(error);
-    await logAction("Cari silindi", "customers", customer.name);
     setMessage("Cari silindi.");
     loadAll();
   };
@@ -453,7 +336,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (batches.some((b) => b.name === name)) return setMessage("Bu parti zaten kayıtlı.");
     const { error } = await supabase.from("batches").insert({ name });
     if (error) return showError(error);
-    await logAction("Parti eklendi", "batches", name);
     setNewBatchName("");
     setMessage("Yeni parti adı kaynak listeye eklendi.");
     loadAll();
@@ -462,10 +344,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const deleteBatchName = async (batchId: string) => {
     const used = batchItems.some((item) => item.batch_id === batchId) || activeSales.some((sale) => sale.batch_id === batchId);
     if (used) return setMessage("Bu parti kullanıldığı için silinemez.");
-    const batchName = batches.find((b) => b.id === batchId)?.name || batchId;
     const { error } = await supabase.from("batches").delete().eq("id", batchId);
     if (error) return showError(error);
-    await logAction("Parti silindi", "batches", batchName);
     loadAll();
   };
 
@@ -473,10 +353,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const clean = newName.trim();
     if (!clean) return;
     if (batches.some((b) => b.name === clean && b.id !== batchId)) return setMessage("Bu parti adı zaten var.");
-    const oldName = batches.find((b) => b.id === batchId)?.name || batchId;
     const { error } = await supabase.from("batches").update({ name: clean }).eq("id", batchId);
     if (error) return showError(error);
-    await logAction("Parti değiştirildi", "batches", oldName, { yeni_ad: clean });
     loadAll();
   };
 
@@ -499,7 +377,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     });
     if (error) return showError(error);
     if (batchForm.minStock) await supabase.from("products").update({ min_stock: Number(batchForm.minStock || 5) }).eq("id", productId);
-    await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice });
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "5" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
@@ -513,7 +390,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.sale_price !== undefined) dbPatch.sale_price = patch.sale_price;
     const { error } = await supabase.from("batch_items").update(dbPatch).eq("id", itemId);
     if (error) return showError(error);
-    await logAction("Parti ürün satırı değiştirildi", "batch_items", itemId, dbPatch);
     loadAll();
   };
 
@@ -522,7 +398,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (sold > 0) return setMessage("Bu parti satırına bağlı aktif satış var. Önce ilgili satışları iptal edin.");
     const { error } = await supabase.from("batch_items").delete().eq("id", item.id);
     if (error) return showError(error);
-    await logAction("Parti ürün satırı silindi", "batch_items", `${productMap.get(item.product_id)?.name || item.product_id} / ${batchMap.get(item.batch_id)?.name || item.batch_id}`);
     loadAll();
   };
 
@@ -560,17 +435,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
     const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
-    await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
     setSaleForm({ customerId: "", productId: "", qty: "1", seller: "Aslı", saleType: "Normal satış", paid: "false", customSalePrice: "" });
     setMessage("Satış kaydedildi.");
     loadAll();
   };
 
   const deleteSale = async (saleId: string) => {
-    const sale = sales.find((s) => s.id === saleId);
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
-    await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${productMap.get(sale.product_id)?.name || sale.product_id}` : saleId, { tutar: sale?.total || 0 });
     setMessage("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.");
     loadAll();
   };
@@ -582,7 +454,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.paid !== undefined) dbPatch.paid = patch.paid;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
-    await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
     loadAll();
   };
 
@@ -591,7 +462,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!amount || amount <= 0) return;
     const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount });
     if (error) return showError(error);
-    await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
     loadAll();
   };
@@ -601,16 +471,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (balance <= 0) return;
     const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance });
     if (error) return showError(error);
-    await logAction("Tamamı ödendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: balance });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
     loadAll();
   };
 
   const updatePartner = async (id: string, field: keyof PartnerRow, value: number | string) => {
-    const partner = partners.find((p) => p.id === id);
     const { error } = await supabase.from("partner_ledger").update({ [field]: value }).eq("id", id);
     if (error) return showError(error);
-    await logAction("Ortaklık kaydı değiştirildi", "partner_ledger", partner?.partner_name || id, { alan: field, deger: value });
     loadAll();
   };
 
@@ -644,57 +511,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const results = await Promise.all(updates);
     const firstError = results.find((r) => r.error)?.error;
     if (firstError) return showError(firstError);
-    await logAction("Dönem açıldı", "periods", periodForm.name || `Dönem ${today()}`, { sponsor, asliContribution, mihrimahContribution, productCost, shippingCost });
     setMessage("Yeni dönem açılışı ve katkılar işlendi.");
     loadAll();
   };
 
   const closePeriod = async () => {
-    const distributableCash = Number(totals.cash || 0);
-    if (distributableCash <= 0) {
-      setMessage("Kasada dağıtılacak para yok.");
-      return;
-    }
-
-    const half = distributableCash / 2;
-    const closedAt = new Date().toISOString();
+    const half = totals.cash / 2;
     const asli = partners.find((p) => p.partner_name === "Aslı");
     const mihrimah = partners.find((p) => p.partner_name === "Mihrimah");
     const updates = [];
-
     if (asli) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(asli.debt - half, 0), profit_share: asli.profit_share + half }).eq("id", asli.id));
     if (mihrimah) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(mihrimah.debt - half, 0), profit_share: mihrimah.profit_share + half }).eq("id", mihrimah.id));
-
     const openPeriod = periods.find((p) => !p.closed);
-    const periodPayload = {
-      closed: true,
-      closed_at: closedAt,
-      closing_cash: distributableCash,
-      asli_distribution: half,
-      mihrimah_distribution: half,
-    };
-
-    if (openPeriod) {
-      updates.push(supabase.from("periods").update(periodPayload).eq("id", openPeriod.id));
-    } else {
-      updates.push(
-        supabase.from("periods").insert({
-          name: `Kapanış ${today()}`,
-          sponsor_contribution: 0,
-          asli_contribution: 0,
-          mihrimah_contribution: 0,
-          product_cost: 0,
-          shipping_cost: 0,
-          ...periodPayload,
-        })
-      );
-    }
-
+    if (openPeriod) updates.push(supabase.from("periods").update({ closed: true, closed_at: new Date().toISOString() }).eq("id", openPeriod.id));
     const results = await Promise.all(updates);
     const firstError = results.find((r) => r.error)?.error;
     if (firstError) return showError(firstError);
-    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kasa: distributableCash, asli_payi: half, mihrimah_payi: half });
-    setMessage(`Dönem kapatıldı; ${money(distributableCash)} kasa Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
+    setMessage("Dönem kapatıldı; kasa %50/%50 mahsuplaştırıldı.");
     loadAll();
   };
 
@@ -706,10 +539,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["sales", "Satışlar"],
     ["partners", "Ortaklık Muhasebesi"],
     ["period", "Dönem Açılış/Kapanış"],
-    ["recent", "Son Hareketler"],
-    ["audit", "İşlem Geçmişi"],
-
-
   ];
 
   const filteredProducts = products.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
@@ -735,7 +564,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       </aside>
 
       <section className="p-5 lg:ml-72 lg:p-8">
-        <button type="button" onClick={onLogout} className="fixed right-6 top-6 z-[99999] rounded-xl border-2 border-slate-400 bg-white px-5 py-3 text-sm font-bold text-black shadow-2xl">
+        <button type="button" onClick={onLogout} className="fixed right-26 top-6 z-[99999] rounded-xl border-2 border-slate-400 bg-white px-5 py-3 text-sm font-bold text-black shadow-2xl">
           Çıkış
         </button>
 
@@ -762,60 +591,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         </div>
 
         {active === "dashboard" && (
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
-              <StatCard title="Kasadaki Nakit" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
-              <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
-              <StatCard title="Düşük Stok" value={totals.lowStock} note="Minimum seviyenin altında" />
-            </div>
-            <Card title="Son Hareketler">
-              <Table
-                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
-                rows={recentMovements.map((movement) => [
-                  movement.date?.slice(0, 16).replace("T", " ") || "-",
-                  movement.type,
-                  movement.customer,
-                  movement.detail,
-                  money(movement.amount),
-                ])}
-              />
-            </Card>
-          </div>
-        )}
-
-
-        {active === "recent" && (
-          <div className="space-y-4">
-            <Card title="Son Hareketler">
-              <Table
-                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
-                rows={recentMovements.map((movement) => [
-                  movement.date?.slice(0, 16).replace("T", " ") || "-",
-                  movement.type,
-                  movement.customer,
-                  movement.detail,
-                  money(movement.amount),
-                ])}
-              />
-            </Card>
-          </div>
-        )}
-
-        {active === "audit" && (
-          <div className="space-y-4">
-            <Card title="İşlem Geçmişi">
-              <Table
-                headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı"]}
-                rows={auditLogs.map((log) => [
-                  log.created_at?.slice(0, 16).replace("T", " ") || "-",
-                  log.action,
-                  log.entity_type,
-                  log.entity_name || "-",
-                  log.user_email || "-",
-                ])}
-              />
-            </Card>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
+            <StatCard title="Kasadaki Nakit" value={money(totals.cash)} note="Peşin satış + cari tahsilat" />
+            <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
+            <StatCard title="Düşük Stok" value={totals.lowStock} note="Minimum seviyenin altında" />
           </div>
         )}
 
@@ -982,41 +762,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
             </Card>
 
-            <Card title="Cari Arama">
-              <input
-                className="input"
-                placeholder="Cari adı yazın; yazdıkça sonuçlar filtrelenir"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-              />
-              {customerSearch.trim() ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {filteredCustomers.slice(0, 10).map((customer) => (
-                    <button
-                      key={customer.id}
-                      type="button"
-                      className="btn-secondary"
-                      onClick={() => {
-                        setExpandedCustomerId(customer.id);
-                        setCustomerSearch(customer.name);
-                      }}
-                    >
-                      {customer.name}
-                    </button>
-                  ))}
-                  {!filteredCustomers.length ? <span className="text-sm text-slate-500">Eşleşen cari yok.</span> : null}
-                </div>
-              ) : null}
-            </Card>
-
             <Card title="Cari Liste Raporu">
               <Table
                 headers={["Cari Adı", "Toplam Sipariş", "Peşin Satış", "Toplam Ödeme", "Kalan Borç", "Durum", "İşlem"]}
-                rows={filteredCustomers.map((c) => [
+                rows={customers.map((c) => [
                   editingCustomerId === c.id ? <input className="input" maxLength={50} value={c.name} onChange={(e) => updateCustomerName(c.id, e.target.value)} /> : c.name,
                   money(getCustomerSalesTotal(c.id)),
                   money(getCustomerPaidSalesTotal(c.id)),
-                  money(getCustomerCollectedTotal(c.id)),
+                  money(getCustomerPaymentsTotal(c.id)),
                   money(getCustomerBalance(c.id)),
                   c.passive ? "Pasif" : getCustomerBalance(c.id) <= 0 ? "Ödendi" : "Borç Açık",
                   <div key={c.id} className="flex gap-2">
@@ -1027,7 +780,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               />
             </Card>
 
-            {filteredCustomers.map((c) => {
+            {customers.map((c) => {
               const balance = getCustomerBalance(c.id);
               const customerSales = activeSales.filter((sale) => sale.customer_id === c.id);
               const customerPayments = payments.filter((p) => p.customer_id === c.id);
@@ -1039,8 +792,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <p className="text-sm text-slate-500">Cari kart</p>
                     </div>
                     <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>Cari Satış<br /><b>{money(getCustomerSalesTotal(c.id))}</b></div>
-                      <div>Ödeme<br /><b>{money(getCustomerCollectedTotal(c.id))}</b></div>
+                      <div>Cari Satış<br /><b>{money(getCustomerUnpaidSalesTotal(c.id))}</b></div>
+                      <div>Ödeme<br /><b>{money(getCustomerPaymentsTotal(c.id))}</b></div>
                       <div>Kalan<br /><b className={balance > 0 ? "text-red-600" : "text-emerald-600"}>{money(balance)}</b></div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1159,9 +912,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             <Card title="Dönem Kapatma Simülasyonu">
               <p className="mb-5 text-slate-500">Yeni parti alımından önce kasa eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
-              <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
-                <div className="rounded-xl bg-slate-100 p-4">Toplam tahsilat<br /><b>{money(totals.grossCash)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Önceki dağıtımlar<br /><b>{money(totals.distributedCash)}</b></div>
+              <div className="mb-5 grid gap-4 text-sm md:grid-cols-4">
                 <div className="rounded-xl bg-slate-100 p-4">Kasadaki para<br /><b>{money(totals.cash)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(totals.cash / 2)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(totals.cash / 2)}</b></div>
@@ -1172,20 +923,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             <Card title="Dönem Geçmişi">
               <Table
-                headers={["Dönem", "Sponsor", "Aslı Katkı", "Mihrimah Katkı", "Ürün Maliyeti", "Kargo", "Dağıtılan Kasa", "Aslı Dağıtım", "Mihrimah Dağıtım", "Durum", "Kapanış"]}
-                rows={periods.map((p) => [
-                  p.name,
-                  money(p.sponsor_contribution),
-                  money(p.asli_contribution),
-                  money(p.mihrimah_contribution),
-                  money(p.product_cost),
-                  money(p.shipping_cost),
-                  money(Number(p.closing_cash || 0)),
-                  money(Number(p.asli_distribution || 0)),
-                  money(Number(p.mihrimah_distribution || 0)),
-                  p.closed ? "Kapalı" : "Açık",
-                  p.closed_at ? new Date(p.closed_at).toLocaleDateString("tr-TR") : "-",
-                ])}
+                headers={["Dönem", "Sponsor", "Aslı", "Mihrimah", "Ürün Maliyeti", "Kargo", "Durum"]}
+                rows={periods.map((p) => [p.name, money(p.sponsor_contribution), money(p.asli_contribution), money(p.mihrimah_contribution), money(p.product_cost), money(p.shipping_cost), p.closed ? "Kapalı" : "Açık"])}
               />
             </Card>
           </div>

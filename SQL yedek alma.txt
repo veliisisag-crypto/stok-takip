@@ -1,0 +1,17 @@
+drop table if exists backup_products;
+drop table if exists backup_customers;
+drop table if exists backup_batches;
+drop table if exists backup_batch_items;
+drop table if exists backup_sales;
+drop table if exists backup_payments;
+drop table if exists backup_partner_ledger;
+drop table if exists backup_periods;
+
+create table backup_products as table products;
+create table backup_customers as table customers;
+create table backup_batches as table batches;
+create table backup_batch_items as table batch_items;
+create table backup_sales as table sales;
+create table backup_payments as table payments;
+create table backup_partner_ledger as table partner_ledger;
+create table backup_periods as table periods;
