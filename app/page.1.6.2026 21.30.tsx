@@ -48,7 +48,6 @@ type Sale = {
   total: number;
   cost: number;
   paid: boolean;
-  paid_amount: number;
   cancelled: boolean;
   created_at: string;
 };
@@ -57,7 +56,6 @@ type Payment = {
   id: string;
   customer_id: string;
   amount: number;
-  cancelled?: boolean;
   created_at: string;
 };
 
@@ -198,7 +196,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
-  const activePayments = payments.filter((payment) => !payment.cancelled);
 
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
@@ -292,7 +289,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .reduce((sum, sale) => sum + toNum(sale.total), 0);
 
   const getCustomerManualPaymentsTotal = (customerId: string) =>
-    activePayments
+    payments
       .filter((payment) => payment.customer_id === customerId)
       .reduce((sum, payment) => sum + toNum(payment.amount), 0);
 
@@ -308,13 +305,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQty(item.product_id, item.batch_id), 0) * item.buy_price, 0);
     const lowStock = products.filter((p) => !p.passive && getProductStock(p.id) <= p.min_stock).length;
-    const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + activePayments.reduce((sum, item) => sum + item.amount, 0);
+    const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + payments.reduce((sum, item) => sum + item.amount, 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     return { revenue, profit, customerDebt, stockValue, lowStock, grossCash, distributedCash, cash };
-  }, [products, customers, batchItems, activeSales, activePayments, periods]);
+  }, [products, customers, batchItems, activeSales, payments, periods]);
 
 
   const filteredCustomers = useMemo(() => {
@@ -333,7 +330,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       amount: toNum(sale.total),
     }));
 
-    const paymentRows = activePayments.map((payment) => ({
+    const paymentRows = payments.map((payment) => ({
       id: `payment-${payment.id}`,
       date: payment.created_at,
       type: "Tahsilat",
@@ -354,7 +351,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return [...saleRows, ...paymentRows, ...auditRows]
       .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())
       .slice(0, 20);
-  }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
+  }, [activeSales, payments, auditLogs, customerMap, productMap, batchMap]);
 
   const addProductDefinition = async () => {
     const name = newProduct.name.trim();
@@ -435,7 +432,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customer = customers.find((c) => c.id === customerId);
     if (!customer) return;	
     const hasSales = activeSales.some((sale) => sale.customer_id === customerId);
-    const hasPayments = activePayments.some((p) => p.customer_id === customerId);
+    const hasPayments = payments.some((p) => p.customer_id === customerId);
     if (hasSales || hasPayments) {
       const { error } = await supabase.from("customers").update({ passive: true }).eq("id", customerId);
       if (error) return showError(error);
@@ -555,7 +552,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         total: unitSalePrice * take,
         cost: item.buy_price * take,
         paid: saleForm.paid === "true" || saleForm.saleType === "Hibe",
-        paid_amount: saleForm.paid === "true" || saleForm.saleType === "Hibe" ? unitSalePrice * take : 0,
         cancelled: false,
       });
       remainingQty -= take;
@@ -574,13 +570,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const sale = sales.find((s) => s.id === saleId);
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
-    if (sale) {
-      try {
-        await allocatePaymentsForCustomer(sale.customer_id);
-      } catch (err) {
-        return showError(err);
-      }
-    }
     await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${productMap.get(sale.product_id)?.name || sale.product_id}` : saleId, { tutar: sale?.total || 0 });
     setMessage("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.");
     loadAll();
@@ -593,69 +582,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.paid !== undefined) dbPatch.paid = patch.paid;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
-    const updatedSale = sales.find((sale) => sale.id === saleId);
-    if (updatedSale && patch.paid !== undefined) {
-      try {
-        await allocatePaymentsForCustomer(updatedSale.customer_id);
-      } catch (err) {
-        return showError(err);
-      }
-    }
     await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
     loadAll();
-  };
-
-  const getSalePaidAmount = (sale: Sale) => {
-    if (sale.paid) return toNum(sale.total);
-    return Math.min(toNum(sale.total), Math.max(toNum(sale.paid_amount), 0));
-  };
-
-  const getSaleStatus = (sale: Sale) => {
-    if (sale.paid) return "Peşin";
-    const paidAmount = getSalePaidAmount(sale);
-    if (paidAmount >= toNum(sale.total)) return "Ödendi";
-    if (paidAmount > 0) return `Kısmi (${money(paidAmount)})`;
-    return "Cari borç";
-  };
-
-  const allocatePaymentsForCustomer = async (customerId: string) => {
-    const [salesRes, paymentsRes] = await Promise.all([
-      supabase
-        .from("sales")
-        .select("id,total,paid,paid_amount,cancelled,created_at")
-        .eq("customer_id", customerId)
-        .eq("cancelled", false)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("payments")
-        .select("amount,cancelled")
-        .eq("customer_id", customerId),
-    ]);
-
-    if (salesRes.error) throw salesRes.error;
-    if (paymentsRes.error) throw paymentsRes.error;
-
-    let remainingManualPayments = (paymentsRes.data || [])
-      .filter((payment) => !payment.cancelled)
-      .reduce((sum, payment) => sum + toNum(payment.amount), 0);
-
-    const updates = (salesRes.data || []).map((sale) => {
-      const total = toNum(sale.total);
-      let paidAmount = 0;
-
-      if (sale.paid) {
-        paidAmount = total;
-      } else {
-        paidAmount = Math.max(0, Math.min(total, remainingManualPayments));
-        remainingManualPayments -= paidAmount;
-      }
-
-      return supabase.from("sales").update({ paid_amount: paidAmount }).eq("id", sale.id);
-    });
-
-    const results = await Promise.all(updates);
-    const firstError = results.find((result) => result.error)?.error;
-    if (firstError) throw firstError;
   };
 
   const addCustomerPayment = async (customerId: string) => {
@@ -663,11 +591,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!amount || amount <= 0) return;
     const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount });
     if (error) return showError(error);
-    try {
-      await allocatePaymentsForCustomer(customerId);
-    } catch (err) {
-      return showError(err);
-    }
     await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
     loadAll();
@@ -678,11 +601,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (balance <= 0) return;
     const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance });
     if (error) return showError(error);
-    try {
-      await allocatePaymentsForCustomer(customerId);
-    } catch (err) {
-      return showError(err);
-    }
     await logAction("Tamamı ödendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: balance });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
     loadAll();
@@ -1112,7 +1030,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             {filteredCustomers.map((c) => {
               const balance = getCustomerBalance(c.id);
               const customerSales = activeSales.filter((sale) => sale.customer_id === c.id);
-              const customerPayments = activePayments.filter((p) => p.customer_id === c.id);
+              const customerPayments = payments.filter((p) => p.customer_id === c.id);
               return (
                 <Card key={c.id}>
                   <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1137,7 +1055,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div className="mt-4 space-y-4">
                       <Table
                         headers={["Tarih", "Ürün", "Parti", "Satıcı", "Adet", "Tutar", "Durum"]}
-                        rows={customerSales.map((sale) => [sale.created_at?.slice(0, 10), productMap.get(sale.product_id)?.name || "-", batchMap.get(sale.batch_id)?.name || "-", sale.seller, sale.qty, money(sale.total), getSaleStatus(sale)])}
+                        rows={customerSales.map((sale) => [sale.created_at?.slice(0, 10), productMap.get(sale.product_id)?.name || "-", batchMap.get(sale.batch_id)?.name || "-", sale.seller, sale.qty, money(sale.total), sale.paid ? "Peşin" : "Cari borç"])}
                       />
                       <Table
                         headers={["Ödeme Tarihi", "Tutar"]}
@@ -1189,7 +1107,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   money(sale.total),
                   money(sale.cost),
                   <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
-                  getSaleStatus(sale),
+                  sale.paid ? "Peşin" : "Cari borç",
                   <div key={sale.id} className="flex gap-2">
                     <button type="button" className="btn-secondary" onClick={() => setEditingSaleId(editingSaleId === sale.id ? null : sale.id)}>Değiştir</button>
                     <button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button>
