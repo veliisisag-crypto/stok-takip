@@ -237,15 +237,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setLoadingData(true);
     try {
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes] = await Promise.all([
-        supabase.from("products").select("*").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,gender_category,image_url,min_stock,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
-        supabase.from("sales").select("*").order("created_at", { ascending: false }),
-        supabase.from("payments").select("*").order("created_at", { ascending: false }),
+        supabase.from("sales").select("*").order("created_at", { ascending: false }).limit(500),
+        supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500),
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
-        supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100),
+        supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(50),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes]) {
@@ -929,10 +929,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
 
-  if (loadingData) {
-    return <main className="p-8">Veriler yükleniyor...</main>;
-  }
-
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       {/* Lightbox */}
@@ -975,6 +971,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
           ↑ En Üste
         </button>
+
+        {loadingData && (
+          <div style={{position:"fixed",top:0,left:0,right:0,height:3,zIndex:99998,background:"linear-gradient(90deg,#0f172a 0%,#64748b 50%,#0f172a 100%)",backgroundSize:"200% 100%",animation:"loadbar 1.2s linear infinite"}} />
+        )}
 
         {message ? (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border bg-white p-3 text-sm shadow-sm">
@@ -1604,6 +1604,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
       <style jsx global>{`
         .field-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: #334155; }
+        @keyframes loadbar { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
         .input { width: 100%; border: 1px solid #cbd5e1; border-radius: 0.75rem; background: white; padding: 0.625rem 0.75rem; outline: none; }
         .input:focus { border-color: #0f172a; }
         .btn { border-radius: 0.75rem; background: #0f172a; color: white; padding: 0.625rem 1rem; font-size: 0.875rem; }
