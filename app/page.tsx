@@ -969,7 +969,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       <section className="p-5 lg:ml-72 lg:p-8">
         {/* Scroll to top button - top right */}
         <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
-          ↑ Ent Üste
+          ↑ En Üste
         </button>
 
         {loadingData && (
