@@ -13,7 +13,7 @@ type Product = {
   code: string;
   gender_category: GenderCategory;
   image_url: string | null;
-  min_stock: number;
+
   passive: boolean;
 };
 
@@ -193,11 +193,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
-  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", minStock: "0" });
+  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "" });
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
-  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "0" });
+  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
@@ -238,7 +238,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setLoadingData(true);
     try {
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,min_stock,passive").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -332,13 +332,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQty(item.product_id, item.batch_id), 0) * item.buy_price, 0);
-    const lowStock = products.filter((p) => !p.passive && getProductStock(p.id) <= p.min_stock).length;
+    const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
     const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + activePayments.reduce((sum, item) => sum + item.amount, 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
-    return { revenue, profit, customerDebt, stockValue, lowStock, grossCash, distributedCash, cash };
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash };
   }, [products, customers, batchItems, activeSales, activePayments, periods]);
 
 
@@ -416,11 +416,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       code,
       gender_category: newProduct.genderCategory,
       image_url: imageUrl,
-      min_stock: Number(newProduct.minStock || 0),
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code });
-    setNewProduct({ name: "", genderCategory: "Kadın", image: "", minStock: "0" });
+    setNewProduct({ name: "", genderCategory: "Kadın", image: "" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
   };
@@ -431,7 +430,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.code !== undefined) dbPatch.code = patch.code;
     if (patch.gender_category !== undefined) dbPatch.gender_category = patch.gender_category;
     if (patch.image_url !== undefined) dbPatch.image_url = patch.image_url;
-    if (patch.min_stock !== undefined) dbPatch.min_stock = patch.min_stock;
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
@@ -550,9 +548,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       sale_price: salePrice,
     });
     if (error) return showError(error);
-    if (batchForm.minStock) await supabase.from("products").update({ min_stock: Number(batchForm.minStock || 0) }).eq("id", productId);
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice });
-    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", minStock: "0" });
+    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
   };
@@ -874,7 +871,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       [product.id]: {
         name: product.name,
         gender_category: product.gender_category,
-        min_stock: product.min_stock,
         image_url: product.image_url,
       },
     });
@@ -902,7 +898,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await updateProduct(productId, {
       name: String(draft.name || "").trim(),
       gender_category: draft.gender_category as GenderCategory,
-      min_stock: Number(draft.min_stock || 0),
       image_url: imageUrl,
     });
     cancelProductEdit(productId);
@@ -1041,7 +1036,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
               <StatCard title="Kasadaki Nakit" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
-              <StatCard title="Mevcut Stok" value={totals.lowStock} note="." />
+              <StatCard title="Mevcut Stok" value={totals.totalStock} />
             </div>
             <Card title="Son Hareketler">
               <Table
@@ -1181,7 +1176,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-edit-fields">
                                 <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
                                 <label className="field-label"><span>Kategori</span><select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select></label>
-                                <label className="field-label"><span>Min stok</span><input className="input" type="number" value={String(draft.min_stock ?? p.min_stock)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), min_stock: Number(e.target.value || 0) } })} /></label>
                               </div>
                               <div className="product-action-row">
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
@@ -1290,7 +1284,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
-                <input className="input" type="number" placeholder="Min stok" value={batchForm.minStock} onChange={(e) => setBatchForm({ ...batchForm, minStock: e.target.value })} />
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
               </div>
             </Card>
@@ -1534,7 +1527,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 }}>
                   <option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option>
                 </select>
-                <input className="input" type="number" min="0" placeholder="satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
                 <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
                 <button type="button" className="btn" onClick={addSaleFromForm}>Satışı Kaydet</button>
               </div>
