@@ -890,10 +890,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["sales", "Satışlar"],
     ["partners", "Ortaklık Muhasebesi"],
     ["period", "Dönem Açılış/Kapanış"],
-    ["recent", "Son Hareketler"],
     ["audit", "İşlem Geçmişi"],
-
-
   ];
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
@@ -915,12 +912,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {label}
             </button>
           ))}
+          <button type="button" onClick={onLogout} className="w-full rounded-xl px-4 py-3 text-left text-red-600 hover:bg-red-50 font-semibold">
+            Çıkış
+          </button>
         </nav>
       </aside>
 
       <section className="p-5 lg:ml-72 lg:p-8">
-        <button type="button" onClick={onLogout} className="fixed right-6 top-6 z-[99999] rounded-xl border-2 border-slate-400 bg-white px-5 py-3 text-sm font-bold text-black shadow-2xl">
-          Çıkış
+        {/* Scroll to top button - top right */}
+        <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
+          ↑ En Üste
         </button>
 
         {message ? (
@@ -943,6 +944,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {label}
             </button>
           ))}
+          <button type="button" onClick={onLogout} className="rounded-xl px-3 py-2 bg-white text-red-600 font-semibold col-span-2">
+            Çıkış
+          </button>
         </div>
 
         {active === "dashboard" && (
@@ -1041,7 +1045,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const totalBought = getProductTotalBought(p.id);
                   const totalSold = getProductSoldQty(p.id);
                   const stock = getProductStock(p.id);
-                  const isLowStock = stock <= p.min_stock;
+                  const isLowStock = stock === 0;
                   return (
                     <div key={p.id} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
                       <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
