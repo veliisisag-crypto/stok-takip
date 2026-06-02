@@ -188,6 +188,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
+  const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
+  const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
 
   const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", minStock: "0" });
   const [newCustomerName, setNewCustomerName] = useState("");
@@ -801,6 +803,85 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
+  const openProductDetail = (product: Product) => {
+    const nextId = expandedProductId === product.id ? null : product.id;
+    setExpandedProductId(nextId);
+    setEditingProductId(null);
+  };
+
+  const startProductEdit = (product: Product) => {
+    setProductDrafts({
+      ...productDrafts,
+      [product.id]: {
+        name: product.name,
+        gender_category: product.gender_category,
+        min_stock: product.min_stock,
+        image_url: product.image_url,
+      },
+    });
+    setEditingProductId(product.id);
+  };
+
+  const cancelProductEdit = (productId: string) => {
+    const next = { ...productDrafts };
+    delete next[productId];
+    setProductDrafts(next);
+    setEditingProductId(null);
+  };
+
+  const saveProductEdit = async (productId: string) => {
+    const draft = productDrafts[productId] || {};
+    await updateProduct(productId, {
+      name: String(draft.name || "").trim(),
+      gender_category: draft.gender_category as GenderCategory,
+      min_stock: Number(draft.min_stock || 0),
+      image_url: draft.image_url ?? null,
+    });
+    cancelProductEdit(productId);
+  };
+
+  const openCustomerDetail = (customer: Customer) => {
+    const nextId = expandedCustomerId === customer.id ? null : customer.id;
+    setExpandedCustomerId(nextId);
+    setEditingCustomerId(null);
+  };
+
+  const startCustomerEdit = (customer: Customer) => {
+    setCustomerDrafts({
+      ...customerDrafts,
+      [customer.id]: {
+        name: customer.name,
+        passive: customer.passive,
+      },
+    });
+    setEditingCustomerId(customer.id);
+  };
+
+  const cancelCustomerEdit = (customerId: string) => {
+    const next = { ...customerDrafts };
+    delete next[customerId];
+    setCustomerDrafts(next);
+    setEditingCustomerId(null);
+  };
+
+  const saveCustomerEdit = async (customerId: string) => {
+    const draft = customerDrafts[customerId] || {};
+    const name = String(draft.name || "").trim();
+    if (!name || name.length > 50) {
+      setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
+      return;
+    }
+    const oldName = customers.find((c) => c.id === customerId)?.name || customerId;
+    const { error } = await supabase
+      .from("customers")
+      .update({ name, passive: Boolean(draft.passive) })
+      .eq("id", customerId);
+    if (error) return showError(error);
+    await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name, passive: Boolean(draft.passive) });
+    cancelCustomerEdit(customerId);
+    loadAll();
+  };
+
   const menu = [
     ["dashboard", "Özet Tablo"],
     ["products", "Ürünler"],
@@ -945,64 +1026,139 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
             </Card>
 
-            <Card title="Kaynak Ürünler Tablosu">
-              <Table
-                headers={["Ürün Kodu", "Ürün Adı", "Kategori", "Resim", "Durum", "İşlem"]}
-                rows={sortedProducts.map((p) => [
-                  p.code,
-                  editingProductId === p.id ? <input className="input" maxLength={50} value={p.name} onChange={(e) => updateProduct(p.id, { name: e.target.value })} /> : p.name,
-                  editingProductId === p.id ? (
-                    <select className="input" value={p.gender_category} onChange={(e) => updateProduct(p.id, { gender_category: e.target.value as GenderCategory })}>
-                      <option>Kadın</option><option>Erkek</option><option>Unisex</option>
-                    </select>
-                  ) : p.gender_category,
-                  p.image_url ? "Var" : "Yok",
-                  p.passive ? "Pasif" : "Aktif",
-                  <div key={p.id} className="flex gap-2">
-                    <button type="button" className="btn-secondary" onClick={() => setEditingProductId(editingProductId === p.id ? null : p.id)}>Değiştir</button>
-                    <button type="button" className="btn-danger" onClick={() => deleteProduct(p.id)}>Sil</button>
-                  </div>,
-                ])}
-              />
-            </Card>
+            <Card title="Ürün Listesi ve Stok Özeti">
+              <input className="input mb-4" placeholder="Ürün ara" value={search} onChange={(e) => setSearch(e.target.value)} />
 
-            <Card title="Ürün Özet Raporu">
-              <Table
-                headers={["Ürün Adı", "Toplam Sipariş", "Toplam Satış", "Kalan Stok"]}
-                rows={sortedProducts.map((p) => [p.name, getProductTotalBought(p.id), getProductSoldQty(p.id), getProductStock(p.id)])}
-              />
-            </Card>
+              <div className="space-y-3">
+                {filteredProducts.length ? filteredProducts.map((p) => {
+                  const isOpen = expandedProductId === p.id;
+                  const isEditing = editingProductId === p.id;
+                  const draft = productDrafts[p.id] || {};
+                  const totalBought = getProductTotalBought(p.id);
+                  const totalSold = getProductSoldQty(p.id);
+                  const stock = getProductStock(p.id);
 
-            <input className="input" placeholder="Ürün ara" value={search} onChange={(e) => setSearch(e.target.value)} />
+                  return (
+                    <div key={p.id} className="rounded-2xl border bg-white shadow-sm">
+                      <button
+                        type="button"
+                        className="w-full p-4 text-left hover:bg-slate-50"
+                        onClick={() => openProductDetail(p)}
+                      >
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="font-semibold">{p.name}</div>
+                            <div className="mt-1 text-xs text-slate-500">{p.code} • {p.gender_category}</div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center text-sm md:min-w-[360px]">
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Alınan</div>
+                              <b>{totalBought}</b>
+                            </div>
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Satılan</div>
+                              <b>{totalSold}</b>
+                            </div>
+                            <div className={`rounded-xl p-2 ${stock <= p.min_stock ? "bg-red-50 text-red-700" : "bg-slate-100"}`}>
+                              <div className="text-xs">Stok</div>
+                              <b>{stock}</b>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredProducts.map((p) => (
-                <Card key={p.id}>
-                  <div className="mb-4 flex h-36 items-center justify-center overflow-hidden rounded-xl bg-slate-200">
-                    {p.image_url ? <img src={p.image_url} alt={p.name} className="h-full w-full object-cover" /> : <span className="text-slate-400">Resim yok</span>}
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <button type="button" className="font-semibold text-left underline" onClick={() => setExpandedProductId(expandedProductId === p.id ? null : p.id)}>{p.name}</button>
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{p.code}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-500">{p.gender_category} • Kod: {p.code}</p>
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <div>Toplam Alınan: <b>{getProductTotalBought(p.id)}</b></div>
-                    <div>Toplam Satılan: <b>{getProductSoldQty(p.id)}</b></div>
-                    <div>Stok: <b>{getProductStock(p.id)}</b></div>
-                    <div className={getProductStock(p.id) <= p.min_stock ? "text-red-600" : ""}>Min: <b>{p.min_stock}</b></div>
-                  </div>
-                  {expandedProductId === p.id ? (
-                    <div className="mt-4">
-                      <Table
-                        headers={["Parti", "Alındı", "Satıldı", "Kalan", "Alış", "Satış"]}
-                        rows={batchItemsForProduct(p.id).map((item) => [batchMap.get(item.batch_id)?.name || "-", item.bought, getBatchSoldQty(p.id, item.batch_id), item.bought - getBatchSoldQty(p.id, item.batch_id), money(item.buy_price), money(item.sale_price)])}
-                      />
+                      {isOpen ? (
+                        <div className="border-t p-4">
+                          <div className="grid gap-4 lg:grid-cols-[180px_1fr]">
+                            <div>
+                              <div className="flex h-36 items-center justify-center overflow-hidden rounded-xl bg-slate-200">
+                                {(isEditing ? draft.image_url : p.image_url) ? (
+                                  <img src={String(isEditing ? draft.image_url : p.image_url)} alt={p.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <span className="text-sm text-slate-400">Resim yok</span>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <label className="btn-secondary mt-3 block cursor-pointer text-center">
+                                  Resim Ekle / Değiştir
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => setProductDrafts({
+                                      ...productDrafts,
+                                      [p.id]: { ...(productDrafts[p.id] || {}), image_url: String(reader.result || "") },
+                                    });
+                                    reader.readAsDataURL(file);
+                                  }} />
+                                </label>
+                              ) : null}
+                            </div>
+
+                            <div className="space-y-4">
+                              {isEditing ? (
+                                <div className="grid gap-3 md:grid-cols-3">
+                                  <label className="field-label">
+                                    <span>Ürün adı</span>
+                                    <input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} />
+                                  </label>
+                                  <label className="field-label">
+                                    <span>Kategori</span>
+                                    <select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}>
+                                      <option>Kadın</option><option>Erkek</option><option>Unisex</option>
+                                    </select>
+                                  </label>
+                                  <label className="field-label">
+                                    <span>Min stok</span>
+                                    <input className="input" type="number" value={String(draft.min_stock ?? p.min_stock)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), min_stock: Number(e.target.value || 0) } })} />
+                                  </label>
+                                </div>
+                              ) : (
+                                <div className="grid gap-3 text-sm md:grid-cols-4">
+                                  <div className="rounded-xl bg-slate-100 p-3">Kod<br /><b>{p.code}</b></div>
+                                  <div className="rounded-xl bg-slate-100 p-3">Kategori<br /><b>{p.gender_category}</b></div>
+                                  <div className="rounded-xl bg-slate-100 p-3">Min Stok<br /><b>{p.min_stock}</b></div>
+                                  <div className="rounded-xl bg-slate-100 p-3">Durum<br /><b>{p.passive ? "Pasif" : "Aktif"}</b></div>
+                                </div>
+                              )}
+
+                              <div>
+                                <h4 className="mb-2 font-semibold">Parti Detayları</h4>
+                                <Table
+                                  headers={["Parti", "Alındı", "Satıldı", "Kalan", "Alış", "Satış"]}
+                                  rows={batchItemsForProduct(p.id).map((item) => [
+                                    batchMap.get(item.batch_id)?.name || "-",
+                                    item.bought,
+                                    getBatchSoldQty(p.id, item.batch_id),
+                                    item.bought - getBatchSoldQty(p.id, item.batch_id),
+                                    money(item.buy_price),
+                                    money(item.sale_price),
+                                  ])}
+                                />
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <button type="button" className="btn-secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
+                                    <button type="button" className="btn-secondary" onClick={() => cancelProductEdit(p.id)}>Vazgeç</button>
+                                  </>
+                                ) : (
+                                  <button type="button" className="btn-secondary" onClick={() => startProductEdit(p)}>Ürün Bilgilerini Değiştir</button>
+                                )}
+                                <button type="button" className="btn-danger" onClick={() => deleteProduct(p.id)}>Sil</button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : <p className="mt-4 text-xs text-slate-500">Parti detayları için ürün adına tıklayın.</p>}
-                </Card>
-              ))}
-            </div>
+                  );
+                }) : (
+                  <p className="text-sm text-slate-500">Kayıt yok.</p>
+                )}
+              </div>
+            </Card>
           </div>
         )}
 
@@ -1050,27 +1206,29 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </select>
               <Table
                 headers={["Parti", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
-                rows={batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter).map((item) => {
-                  const key = item.id;
-                  const p = productMap.get(item.product_id);
-                  return [
-                    editingBatchItemId === key ? (
-                      <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
-                        {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-                      </select>
-                    ) : batchMap.get(item.batch_id)?.name || "-",
-                    p?.name || "-",
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                    getBatchSoldQty(item.product_id, item.batch_id),
-                    item.bought - getBatchSoldQty(item.product_id, item.batch_id),
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
-                    editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
-                    <div key={key} className="flex gap-2">
-                      <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
-                      <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
-                    </div>,
-                  ];
-                })}
+                rows={batchItems
+                  .filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter)
+                  .map((item) => {
+                    const key = item.id;
+                    const p = productMap.get(item.product_id);
+                    return [
+                      editingBatchItemId === key ? (
+                        <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
+                          {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                        </select>
+                      ) : batchMap.get(item.batch_id)?.name || "-",
+                      p?.name || "-",
+                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
+                      getBatchSoldQty(item.product_id, item.batch_id),
+                      item.bought - getBatchSoldQty(item.product_id, item.batch_id),
+                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
+                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
+                      <div key={key} className="flex gap-2">
+                        <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
+                        <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
+                      </div>,
+                    ];
+                  })}
               />
             </Card>
           </div>
@@ -1085,15 +1243,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
             </Card>
 
-            <Card title="Cari Arama">
+            <Card title="Cari Listesi">
               <input
-                className="input"
-                placeholder="Cari adı yazın; yazdıkça sonuçlar filtrelenir"
+                className="input mb-4"
+                placeholder="Cari adı yazın; yazdıkça liste filtrelenir"
                 value={customerSearch}
                 onChange={(e) => setCustomerSearch(e.target.value)}
               />
+
               {customerSearch.trim() ? (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mb-4 flex flex-wrap gap-2">
                   {filteredCustomers.slice(0, 10).map((customer) => (
                     <button
                       key={customer.id}
@@ -1110,65 +1269,129 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   {!filteredCustomers.length ? <span className="text-sm text-slate-500">Eşleşen cari yok.</span> : null}
                 </div>
               ) : null}
-            </Card>
 
-            <Card title="Cari Liste Raporu">
-              <Table
-                headers={["Cari Adı", "Toplam Sipariş", "Peşin Satış", "Toplam Ödeme", "Kalan Borç", "Durum", "İşlem"]}
-                rows={filteredCustomers.map((c) => [
-                  editingCustomerId === c.id ? <input className="input" maxLength={50} value={c.name} onChange={(e) => updateCustomerName(c.id, e.target.value)} /> : c.name,
-                  money(getCustomerSalesTotal(c.id)),
-                  money(getCustomerPaidSalesTotal(c.id)),
-                  money(getCustomerCollectedTotal(c.id)),
-                  money(getCustomerBalance(c.id)),
-                  c.passive ? "Pasif" : getCustomerBalance(c.id) <= 0 ? "Ödendi" : "Borç Açık",
-                  <div key={c.id} className="flex gap-2">
-                    <button type="button" className="btn-secondary" onClick={() => setEditingCustomerId(editingCustomerId === c.id ? null : c.id)}>Değiştir</button>
-                    <button type="button" className="btn-danger" onClick={() => deleteCustomer(c.id)}>Sil</button>
-                  </div>,
-                ])}
-              />
-            </Card>
+              <div className="space-y-3">
+                {filteredCustomers.length ? filteredCustomers.map((c) => {
+                  const isOpen = expandedCustomerId === c.id;
+                  const isEditing = editingCustomerId === c.id;
+                  const draft = customerDrafts[c.id] || {};
+                  const balance = getCustomerBalance(c.id);
+                  const customerSales = activeSales.filter((sale) => sale.customer_id === c.id);
+                  const customerPayments = activePayments.filter((p) => p.customer_id === c.id);
+                  const totalSales = getCustomerSalesTotal(c.id);
+                  const collected = getCustomerCollectedTotal(c.id);
+                  const paidSales = getCustomerPaidSalesTotal(c.id);
 
-            {filteredCustomers.map((c) => {
-              const balance = getCustomerBalance(c.id);
-              const customerSales = activeSales.filter((sale) => sale.customer_id === c.id);
-              const customerPayments = activePayments.filter((p) => p.customer_id === c.id);
-              return (
-                <Card key={c.id}>
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">{c.name}</h3>
-                      <p className="text-sm text-slate-500">Cari kart</p>
+                  return (
+                    <div key={c.id} className="rounded-2xl border bg-white shadow-sm">
+                      <button
+                        type="button"
+                        className="w-full p-4 text-left hover:bg-slate-50"
+                        onClick={() => openCustomerDetail(c)}
+                      >
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="font-semibold">{c.name}</div>
+                            <div className="mt-1 text-xs text-slate-500">Cari kart</div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center text-sm md:min-w-[420px]">
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Cari Satış</div>
+                              <b>{money(totalSales)}</b>
+                            </div>
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Ödeme</div>
+                              <b>{money(collected)}</b>
+                            </div>
+                            <div className={`rounded-xl p-2 ${balance > 0 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                              <div className="text-xs">Kalan</div>
+                              <b>{money(balance)}</b>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="border-t p-4">
+                          <div className="space-y-4">
+                            {isEditing ? (
+                              <div className="grid gap-3 md:grid-cols-3">
+                                <label className="field-label">
+                                  <span>Cari adı</span>
+                                  <input
+                                    className="input"
+                                    maxLength={50}
+                                    value={String(draft.name ?? c.name)}
+                                    onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), name: e.target.value } })}
+                                  />
+                                </label>
+                                <label className="field-label">
+                                  <span>Durum</span>
+                                  <select
+                                    className="input"
+                                    value={String(draft.passive ?? c.passive)}
+                                    onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), passive: e.target.value === "true" } })}
+                                  >
+                                    <option value="false">Aktif</option>
+                                    <option value="true">Pasif</option>
+                                  </select>
+                                </label>
+                                <div className="flex items-end gap-2">
+                                  <button type="button" className="btn-secondary" onClick={() => saveCustomerEdit(c.id)}>Kaydet</button>
+                                  <button type="button" className="btn-secondary" onClick={() => cancelCustomerEdit(c.id)}>Vazgeç</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="grid gap-3 text-sm md:grid-cols-5">
+                                <div className="rounded-xl bg-slate-100 p-3">Toplam Satış<br /><b>{money(totalSales)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Peşin Satış<br /><b>{money(paidSales)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Toplam Ödeme<br /><b>{money(collected)}</b></div>
+                                <div className={`rounded-xl p-3 ${balance > 0 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>Kalan Borç<br /><b>{money(balance)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Durum<br /><b>{c.passive ? "Pasif" : balance <= 0 ? "Ödendi" : "Borç Açık"}</b></div>
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input className="input w-48" type="number" min="0" placeholder="Ödeme tutarı" value={paymentInputs[c.id] || ""} onChange={(e) => setPaymentInputs({ ...paymentInputs, [c.id]: e.target.value })} />
+                              <button type="button" className="btn-secondary" onClick={() => addCustomerPayment(c.id)}>Ödeme Ekle</button>
+                              <button type="button" className="btn-secondary" onClick={() => markPayment(c.id)}>Tamamı Ödendi</button>
+                              {!isEditing ? <button type="button" className="btn-secondary" onClick={() => startCustomerEdit(c)}>Cari Bilgilerini Değiştir</button> : null}
+                              <button type="button" className="btn-danger" onClick={() => deleteCustomer(c.id)}>Sil / Pasife Al</button>
+                            </div>
+
+                            <div>
+                              <h4 className="mb-2 font-semibold">Satış Hareketleri</h4>
+                              <Table
+                                headers={["Tarih", "Ürün", "Parti", "Satıcı", "Adet", "Tutar", "Durum"]}
+                                rows={customerSales.map((sale) => [
+                                  sale.created_at?.slice(0, 10),
+                                  productMap.get(sale.product_id)?.name || "-",
+                                  batchMap.get(sale.batch_id)?.name || "-",
+                                  sale.seller,
+                                  sale.qty,
+                                  money(sale.total),
+                                  getSaleStatus(sale),
+                                ])}
+                              />
+                            </div>
+
+                            <div>
+                              <h4 className="mb-2 font-semibold">Ödeme Hareketleri</h4>
+                              <Table
+                                headers={["Ödeme Tarihi", "Tutar"]}
+                                rows={customerPayments.map((p) => [p.created_at?.slice(0, 10), money(p.amount)])}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>Cari Satış<br /><b>{money(getCustomerSalesTotal(c.id))}</b></div>
-                      <div>Ödeme<br /><b>{money(getCustomerCollectedTotal(c.id))}</b></div>
-                      <div>Kalan<br /><b className={balance > 0 ? "text-red-600" : "text-emerald-600"}>{money(balance)}</b></div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input className="input w-40" type="number" min="0" placeholder="Ödeme tutarı" value={paymentInputs[c.id] || ""} onChange={(e) => setPaymentInputs({ ...paymentInputs, [c.id]: e.target.value })} />
-                      <button type="button" className="btn-secondary" onClick={() => addCustomerPayment(c.id)}>Ödeme Ekle</button>
-                      <button type="button" className="btn-secondary" onClick={() => markPayment(c.id)}>Tamamı Ödendi</button>
-                      <button type="button" className="btn-secondary" onClick={() => setExpandedCustomerId(expandedCustomerId === c.id ? null : c.id)}>Hareketleri Listele</button>
-                      <span className={`rounded-full px-3 py-2 text-xs ${balance <= 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{balance <= 0 ? "Ödendi" : "Borç Açık"}</span>
-                    </div>
-                  </div>
-                  {expandedCustomerId === c.id ? (
-                    <div className="mt-4 space-y-4">
-                      <Table
-                        headers={["Tarih", "Ürün", "Parti", "Satıcı", "Adet", "Tutar", "Durum"]}
-                        rows={customerSales.map((sale) => [sale.created_at?.slice(0, 10), productMap.get(sale.product_id)?.name || "-", batchMap.get(sale.batch_id)?.name || "-", sale.seller, sale.qty, money(sale.total), getSaleStatus(sale)])}
-                      />
-                      <Table
-                        headers={["Ödeme Tarihi", "Tutar"]}
-                        rows={customerPayments.map((p) => [p.created_at?.slice(0, 10), money(p.amount)])}
-                      />
-                    </div>
-                  ) : null}
-                </Card>
-              );
-            })}
+                  );
+                }) : (
+                  <p className="text-sm text-slate-500">Kayıt yok.</p>
+                )}
+              </div>
+            </Card>
           </div>
         )}
 
