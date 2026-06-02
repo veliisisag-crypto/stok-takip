@@ -190,6 +190,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
+  const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
   const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", minStock: "0" });
   const [newCustomerName, setNewCustomerName] = useState("");
@@ -901,6 +902,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Lightbox */}
+      {lightboxImg && (
+        <div
+          onClick={() => setLightboxImg(null)}
+          style={{position:"fixed",inset:0,zIndex:999999,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}
+        >
+          <img
+            src={lightboxImg}
+            alt="Tam ekran"
+            style={{maxWidth:"95vw",maxHeight:"92vh",borderRadius:12,objectFit:"contain",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxImg(null)}
+            style={{position:"absolute",top:16,right:16,background:"white",border:"none",borderRadius:"50%",width:36,height:36,fontSize:20,lineHeight:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}
+          >✕</button>
+        </div>
+      )}
       <aside className="fixed left-0 top-0 hidden h-full w-72 border-r bg-white p-5 lg:block">
         <div className="mb-8">
           <h1 className="text-lg font-bold">Ticari Takip</h1>
@@ -1106,7 +1125,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <>
                               <div className="product-info-row">
                                 <div className="product-img-box">
-                                  {p.image_url ? <img src={p.image_url} alt={p.name} className="product-img" /> : (
+                                  {p.image_url ? (
+                                    <img
+                                      src={p.image_url}
+                                      alt={p.name}
+                                      className="product-img"
+                                      style={{cursor:"zoom-in"}}
+                                      onClick={() => setLightboxImg(p.image_url)}
+                                    />
+                                  ) : (
                                     <div className="product-img-placeholder">
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                                       <span>Resim yok</span>
