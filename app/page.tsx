@@ -4,7 +4,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type GenderCategory = "Kadın" | "Erkek" | "Unisex";
-type SaleType = "Normal satış" | "İndirimli satış" | "Kârsız satış" | "Zararına satış" | "Hibe";
+type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
 type Seller = "Aslı" | "Mihrimah";
 
 type Product = {
@@ -186,6 +186,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
@@ -592,7 +593,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const available = Math.max(item.bought - getBatchSoldQty(product.id, item.batch_id), 0);
       const take = Math.min(available, remainingQty);
       if (take <= 0) continue;
-      const unitSalePrice = saleForm.saleType === "Hibe" ? 0 : Number(saleForm.customSalePrice || item.sale_price || 0);
+      const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
+      const unitSalePrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || item.sale_price || 0);
       rows.push({
         customer_id: customer.id,
         product_id: product.id,
@@ -602,8 +604,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         qty: take,
         total: unitSalePrice * take,
         cost: item.buy_price * take,
-        paid: saleForm.paid === "true" || saleForm.saleType === "Hibe",
-        paid_amount: saleForm.paid === "true" || saleForm.saleType === "Hibe" ? unitSalePrice * take : 0,
+        paid: saleForm.paid === "true" || isZeroPrice,
+        paid_amount: saleForm.paid === "true" || isZeroPrice ? unitSalePrice * take : 0,
         cancelled: false,
       });
       remainingQty -= take;
@@ -639,6 +641,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.seller !== undefined) dbPatch.seller = patch.seller;
     if (patch.sale_type !== undefined) dbPatch.sale_type = patch.sale_type;
     if (patch.paid !== undefined) dbPatch.paid = patch.paid;
+    if (patch.qty !== undefined) dbPatch.qty = patch.qty;
+    if (patch.total !== undefined) dbPatch.total = patch.total;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
     const updatedSale = sales.find((sale) => sale.id === saleId);
@@ -651,6 +655,36 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
     loadAll();
+  };
+
+  const startSaleEdit = (sale: Sale) => {
+    setSaleDrafts((prev) => ({
+      ...prev,
+      [sale.id]: { qty: String(sale.qty), total: String(sale.total), seller: sale.seller, sale_type: sale.sale_type },
+    }));
+    setEditingSaleId(sale.id);
+  };
+
+  const saveSaleEdit = async (saleId: string) => {
+    const draft = saleDrafts[saleId];
+    if (!draft) return;
+    await updateSale(saleId, {
+      qty: Number(draft.qty || 0),
+      total: Number(draft.total || 0),
+      seller: draft.seller,
+      sale_type: draft.sale_type,
+    });
+    setEditingSaleId(null);
+    const next = { ...saleDrafts };
+    delete next[saleId];
+    setSaleDrafts(next);
+  };
+
+  const cancelSaleEdit = (saleId: string) => {
+    setEditingSaleId(null);
+    const next = { ...saleDrafts };
+    delete next[saleId];
+    setSaleDrafts(next);
   };
 
   const getSalePaidAmount = (sale: Sale) => {
@@ -1494,10 +1528,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </select>
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
                 <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
-                <select className="input" value={saleForm.saleType} onChange={(e) => setSaleForm({ ...saleForm, saleType: e.target.value as SaleType })}>
-                  <option>Normal satış</option><option>İndirimli satış</option><option>Kârsız satış</option><option>Zararına satış</option><option>Hibe</option>
+                <select className="input" value={saleForm.saleType} onChange={(e) => {
+                  const t = e.target.value as SaleType;
+                  setSaleForm({ ...saleForm, saleType: t, customSalePrice: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : saleForm.customSalePrice });
+                }}>
+                  <option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option>
                 </select>
-                <input className="input" type="number" min="0" placeholder="Özel satış fiyatı (opsiyonel)" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                <input className="input" type="number" min="0" placeholder="satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
                 <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
                 <button type="button" className="btn" onClick={addSaleFromForm}>Satışı Kaydet</button>
               </div>
@@ -1506,23 +1543,40 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <Card title="Satış Listesi">
               <Table
                 headers={["Tarih", "Müşteri", "Ürün", "Parti", "Satıcı", "Tip", "Adet", "Tutar", "Maliyet", "Kâr/Zarar", "Durum", "İşlem"]}
-                rows={activeSales.map((sale) => [
-                  sale.created_at?.slice(0, 10),
-                  customerMap.get(sale.customer_id)?.name || "-",
-                  productMap.get(sale.product_id)?.name || "-",
-                  batchMap.get(sale.batch_id)?.name || "-",
-                  editingSaleId === sale.id ? <select className="input" value={sale.seller} onChange={(e) => updateSale(sale.id, { seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
-                  editingSaleId === sale.id ? <select className="input" value={sale.sale_type} onChange={(e) => updateSale(sale.id, { sale_type: e.target.value as SaleType })}><option>Normal satış</option><option>İndirimli satış</option><option>Kârsız satış</option><option>Zararına satış</option><option>Hibe</option></select> : sale.sale_type,
-                  sale.qty,
-                  money(sale.total),
-                  money(sale.cost),
-                  <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
-                  getSaleStatus(sale),
-                  <div key={sale.id} className="flex gap-2">
-                    <button type="button" className="btn-secondary" onClick={() => setEditingSaleId(editingSaleId === sale.id ? null : sale.id)}>Değiştir</button>
-                    <button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button>
-                  </div>,
-                ])}
+                rows={activeSales.map((sale) => {
+                  const isEditing = editingSaleId === sale.id;
+                  const draft = saleDrafts[sale.id];
+                  return [
+                    sale.created_at?.slice(0, 10),
+                    customerMap.get(sale.customer_id)?.name || "-",
+                    productMap.get(sale.product_id)?.name || "-",
+                    batchMap.get(sale.batch_id)?.name || "-",
+                    isEditing
+                      ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select>
+                      : sale.seller,
+                    isEditing
+                      ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select>
+                      : sale.sale_type,
+                    isEditing
+                      ? <input key="qty" className="input w-20" type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} />
+                      : sale.qty,
+                    isEditing
+                      ? <input key="total" className="input w-28" type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} />
+                      : money(sale.total),
+                    money(sale.cost),
+                    <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                    getSaleStatus(sale),
+                    isEditing
+                      ? <div key="actions" className="flex gap-2">
+                          <button type="button" className="btn" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button>
+                          <button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button>
+                        </div>
+                      : <div key="actions" className="flex gap-2">
+                          <button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button>
+                          <button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button>
+                        </div>,
+                  ];
+                })}
               />
             </Card>
           </div>
