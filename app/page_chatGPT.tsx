@@ -1004,36 +1004,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "products" && (
-          <div className="space-y-0">
-            {/* Mobile-first product page */}
-            <div className="product-page">
-              <div className="product-page-header">
-                <h2 className="product-page-title">Ürün Listesi ve Stok Özeti</h2>
+          <div className="space-y-4">
+            <Card title="Ürün Listesi ve Stok Özeti">
+              <div className="mb-4 flex items-center gap-3 rounded-2xl border bg-white px-4 py-3">
+                <span className="text-xl text-slate-400">⌕</span>
+                <input
+                  className="w-full bg-transparent text-base outline-none"
+                  placeholder="Ürün ara"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
               </div>
-              <div className="product-add-wrap product-add-wrap--top">
-                <details className="w-full">
-                  <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    Yeni Ürün Ekle
-                  </summary>
-                  <div className="product-add-form-panel">
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
-                      <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select>
-                      <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
-                      <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
-                    </div>
-                    {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
-                  </div>
-                </details>
-              </div>
-              <div className="product-search-wrap">
-                <div className="product-search-inner">
-                  <svg className="product-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                  <input className="product-search-input" placeholder="Ürün ara" value={search} onChange={(e) => setSearch(e.target.value)} />
-                </div>
-              </div>
-              <div className="product-list">
+
+              <div className="space-y-3">
                 {filteredProducts.length ? filteredProducts.map((p) => {
                   const isOpen = expandedProductId === p.id;
                   const isEditing = editingProductId === p.id;
@@ -1041,122 +1024,193 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const totalBought = getProductTotalBought(p.id);
                   const totalSold = getProductSoldQty(p.id);
                   const stock = getProductStock(p.id);
-                  const isLowStock = stock <= p.min_stock;
+
                   return (
-                    <div key={p.id} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
-                      <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
-                        <div className="product-row-left">
-                          <div className="product-name">{p.name}</div>
-                          <div className="product-meta">{p.code} • {p.gender_category}</div>
-                        </div>
-                        <div className="product-row-stats">
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Alınan</span>
-                            <b className="product-stat-val">{totalBought}</b>
+                    <div key={p.id} className="rounded-2xl border bg-white shadow-sm">
+                      <button
+                        type="button"
+                        className="w-full p-4 text-left hover:bg-slate-50"
+                        onClick={() => openProductDetail(p)}
+                      >
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_18px] items-center gap-2 sm:gap-4">
+                          <div className="min-w-0">
+                            <div className="truncate text-lg font-bold leading-tight">{p.name}</div>
+                            <div className="mt-1 truncate text-sm text-slate-500">{p.code} • {p.gender_category}</div>
                           </div>
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Satılan</span>
-                            <b className="product-stat-val">{totalSold}</b>
-                          </div>
-                          <div className={`product-stat-chip ${isLowStock ? "product-stat-chip--low" : ""}`}>
-                            <span className={`product-stat-label ${isLowStock ? "product-stat-label--stock" : ""}`}>Stok</span>
-                            <b className={`product-stat-val ${isLowStock ? "product-stat-val--stock" : ""}`}>{stock}</b>
-                          </div>
-                        </div>
-                        <span className="product-chevron">
-                          {isOpen
-                            ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18"><path d="m18 15-6-6-6 6"/></svg>
-                            : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18"><path d="m9 18 6-6-6-6"/></svg>}
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div className="product-detail">
-                          {isEditing ? (
-                            <div className="product-edit-form">
-                              <div className="product-edit-image-row">
-                                <div className="product-img-box">
-                                  {draft.image_url ? <img src={String(draft.image_url)} alt={p.name} className="product-img" /> : (
-                                    <div className="product-img-placeholder">
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                                      <span>Resim yok</span>
-                                    </div>
-                                  )}
-                                </div>
-                                <label className="product-img-change-btn">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                                  Resim Değiştir
-                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), image_url: String(reader.result || "") } }); reader.readAsDataURL(file); }} />
-                                </label>
-                              </div>
-                              <div className="product-edit-fields">
-                                <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
-                                <label className="field-label"><span>Kategori</span><select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select></label>
-                                <label className="field-label"><span>Min stok</span><input className="input" type="number" value={String(draft.min_stock ?? p.min_stock)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), min_stock: Number(e.target.value || 0) } })} /></label>
-                              </div>
-                              <div className="product-action-row">
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => cancelProductEdit(p.id)}>Vazgeç</button>
-                              </div>
+
+                          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                            <div className="rounded-xl bg-slate-100 px-2 py-2 text-left shadow-sm sm:min-w-20 sm:px-4">
+                              <div className="text-[11px] text-slate-500 sm:text-sm">Alınan</div><div className="text-base font-bold leading-tight">{totalBought}</div>
                             </div>
-                          ) : (
-                            <>
-                              <div className="product-info-row">
-                                <div className="product-img-box">
-                                  {p.image_url ? <img src={p.image_url} alt={p.name} className="product-img" /> : (
-                                    <div className="product-img-placeholder">
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                                      <span>Resim yok</span>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="product-info-chips product-info-chips--sm">
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kod</div><div className="product-info-chip-val">{p.code}</div></div>
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kategori</div><div className="product-info-chip-val">{p.gender_category}</div></div>
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Durum</div><div className={`product-info-chip-val ${p.passive ? "product-info-chip-val--passive" : "product-info-chip-val--active"}`}>{p.passive ? "Pasif" : "Aktif"}</div></div>
-                                </div>
+                            <div className="rounded-xl bg-slate-100 px-2 py-2 text-left shadow-sm sm:min-w-20 sm:px-4">
+                              <div className="text-[11px] text-slate-500 sm:text-sm">Satılan</div><div className="text-base font-bold leading-tight">{totalSold}</div>
+                            </div>
+                            <div className={`rounded-xl px-2 py-2 text-left shadow-sm sm:min-w-20 sm:px-4 ${stock <= p.min_stock ? "bg-red-50 text-red-700" : "bg-slate-100"}`}>
+                              <div className="text-[11px] sm:text-sm">Stok</div><div className="text-base font-bold leading-tight">{stock}</div>
+                            </div>
+                          </div>
+
+                          <span className="text-2xl leading-none text-slate-600">{isOpen ? "⌃" : "›"}</span>
+                        </div>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="border-t bg-slate-50/50 p-4">
+                          <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 sm:grid-cols-[160px_minmax(0,1fr)] sm:gap-5">
+                            <div>
+                              <div className="flex h-32 items-center justify-center overflow-hidden rounded-2xl bg-slate-200 sm:h-44">
+                                {(isEditing ? draft.image_url : p.image_url) ? (
+                                  <img src={String(isEditing ? draft.image_url : p.image_url)} alt={p.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="text-center text-sm text-slate-400"><div className="mb-1 text-2xl">▧</div>Resim yok</div>
+                                )}
                               </div>
-                              <div className="product-batch-section">
-                                <h4 className="product-batch-title">Parti Detayları</h4>
-                                <div className="product-batch-table">
-                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
+                              {isEditing ? (
+                                <label className="btn-secondary mt-2 block cursor-pointer text-center text-xs">
+                                  Resim Değiştir
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => setProductDrafts({
+                                      ...productDrafts,
+                                      [p.id]: { ...(productDrafts[p.id] || {}), image_url: String(reader.result || "") },
+                                    });
+                                    reader.readAsDataURL(file);
+                                  }} />
+                                </label>
+                              ) : null}
+                            </div>
+
+                            <div className="min-w-0 space-y-4">
+                              {isEditing ? (
+                                <div className="grid gap-2 md:grid-cols-3">
+                                  <label className="field-label">
+                                    <span>Ürün adı</span>
+                                    <input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} />
+                                  </label>
+                                  <label className="field-label">
+                                    <span>Kategori</span>
+                                    <select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}>
+                                      <option>Kadın</option><option>Erkek</option><option>Unisex</option>
+                                    </select>
+                                  </label>
+                                  <label className="field-label">
+                                    <span>Min stok</span>
+                                    <input className="input" type="number" value={String(draft.min_stock ?? p.min_stock)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), min_stock: Number(e.target.value || 0) } })} />
+                                  </label>
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
+                                  <div className="rounded-xl border bg-white p-2 text-center shadow-sm sm:p-4">
+                                    <div className="text-slate-500">Kod</div>
+                                    <b className="block truncate">{p.code}</b>
+                                  </div>
+                                  <div className="rounded-xl border bg-white p-2 text-center shadow-sm sm:p-4">
+                                    <div className="text-slate-500">Kategori</div>
+                                    <b className="block truncate">{p.gender_category}</b>
+                                  </div>
+                                  <div className="rounded-xl border bg-white p-2 text-center shadow-sm sm:p-4">
+                                    <div className="text-slate-500">Min</div>
+                                    <b>{p.min_stock}</b>
+                                  </div>
+                                  <div className="rounded-xl border bg-white p-2 text-center shadow-sm sm:p-4">
+                                    <div className="text-slate-500">Durum</div>
+                                    <b className={p.passive ? "text-red-600" : "text-emerald-600"}>{p.passive ? "Pasif" : "Aktif"}</b>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div>
+                                <h4 className="mb-3 font-semibold">Parti Detayları</h4>
+                                <div className="overflow-hidden rounded-xl border">
+                                  <div className="grid grid-cols-6 bg-slate-100 px-2 py-2 text-[10px] font-semibold sm:px-4 sm:text-sm">
+                                    <div>Parti</div>
+                                    <div className="text-center">Alındı</div>
+                                    <div className="text-center">Satıldı</div>
+                                    <div className="text-center">Kalan</div>
+                                    <div className="text-center">Alış</div>
+                                    <div className="text-center">Satış</div>
+                                  </div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
                                     const sold = getBatchSoldQty(p.id, item.batch_id);
+                                    const remaining = item.bought - sold;
                                     return (
-                                      <div key={item.id} className="product-batch-row">
-                                        <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
-                                        <div className="product-batch-cell">{item.bought}</div>
-                                        <div className="product-batch-cell">{sold}</div>
-                                        <div className="product-batch-cell">{item.bought - sold}</div>
-                                        <div className="product-batch-cell">{money(item.buy_price)}</div>
-                                        <div className="product-batch-cell">{money(item.sale_price)}</div>
+                                      <div key={item.id} className="grid grid-cols-6 border-t px-2 py-3 text-[10px] sm:px-4 sm:text-sm">
+                                        <div className="truncate">{batchMap.get(item.batch_id)?.name || "-"}</div>
+                                        <div className="text-center">{item.bought}</div>
+                                        <div className="text-center">{sold}</div>
+                                        <div className="text-center">{remaining}</div>
+                                        <div className="text-center">{money(item.buy_price)}</div>
+                                        <div className="text-center">{money(item.sale_price)}</div>
                                       </div>
                                     );
-                                  }) : <div className="product-batch-empty">Kayıt yok.</div>}
+                                  }) : (
+                                    <div className="border-t p-2 text-xs text-slate-500">Kayıt yok.</div>
+                                  )}
                                 </div>
                               </div>
-                              <div className="product-action-row">
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => startProductEdit(p)}>
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                  Düzenle
-                                </button>
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => startProductEdit(p)}>
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                                  Resim Değiştir
-                                </button>
-                                <button type="button" className="product-btn product-btn--danger" onClick={() => deleteProduct(p.id)}>
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                  Pasife Al
-                                </button>
+
+                              <div className="mt-4 grid grid-cols-3 gap-2 border-t pt-4">
+                                {isEditing ? (
+                                  <>
+                                    <button type="button" className="btn-secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
+                                    <button type="button" className="btn-secondary" onClick={() => cancelProductEdit(p.id)}>Vazgeç</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button type="button" className="btn-secondary" onClick={() => startProductEdit(p)}>Düzenle</button>
+                                    <label className="btn-secondary cursor-pointer text-center">
+                                      Resim Değiştir
+                                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        const reader = new FileReader();
+                                        reader.onload = async () => {
+                                          await updateProduct(p.id, { image_url: String(reader.result || "") });
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }} />
+                                    </label>
+                                  </>
+                                )}
+                                <button type="button" className="btn-danger" onClick={() => deleteProduct(p.id)}>Pasife Al</button>
                               </div>
-                            </>
-                          )}
+                            </div>
+                          </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
-                }) : <p className="px-4 py-8 text-center text-sm text-slate-500">Kayıt yok.</p>}
+                }) : (
+                  <p className="text-sm text-slate-500">Kayıt yok.</p>
+                )}
               </div>
-            </div>
+
+              <details className="mt-5 rounded-2xl border bg-white p-4">
+                <summary className="cursor-pointer rounded-xl bg-slate-900 px-4 py-3 text-center font-semibold text-white">
+                  + Yeni Ürün Ekle
+                </summary>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
+                  <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}>
+                    <option>Kadın</option><option>Erkek</option><option>Unisex</option>
+                  </select>
+                  <label className="input cursor-pointer text-center">
+                    Resim Seç
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") }));
+                      reader.readAsDataURL(file);
+                    }} />
+                  </label>
+                  <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
+                </div>
+                {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
+              </details>
+            </Card>
           </div>
         )}
 
@@ -1233,38 +1287,42 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "customers" && (
-          <div className="space-y-0">
-            <div className="product-page">
-              <div className="product-page-header">
-                <h2 className="product-page-title">Cari Listesi</h2>
+          <div className="space-y-4">
+            <Card title="Cari Ekle">
+              <div className="flex flex-wrap gap-3">
+                <input className="input max-w-md" maxLength={50} placeholder="Cari adı (max 50 karakter)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} />
+                <button type="button" className="btn" onClick={addCustomer}>Cari Ekle</button>
               </div>
+            </Card>
 
-              {/* Add Customer */}
-              <div className="product-add-wrap product-add-wrap--top">
-                <details className="w-full">
-                  <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    Yeni Cari Ekle
-                  </summary>
-                  <div className="product-add-form-panel">
-                    <div className="flex flex-wrap gap-3">
-                      <input className="input max-w-md" maxLength={50} placeholder="Cari adı (max 50 karakter)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} />
-                      <button type="button" className="btn" onClick={addCustomer}>Cari Ekle</button>
-                    </div>
-                  </div>
-                </details>
-              </div>
+            <Card title="Cari Listesi">
+              <input
+                className="input mb-4"
+                placeholder="Cari adı yazın; yazdıkça liste filtrelenir"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+              />
 
-              {/* Search */}
-              <div className="product-search-wrap">
-                <div className="product-search-inner">
-                  <svg className="product-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                  <input className="product-search-input" placeholder="Cari adı yazın; yazdıkça liste filtrelenir" value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} />
+              {customerSearch.trim() ? (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {filteredCustomers.slice(0, 10).map((customer) => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setExpandedCustomerId(customer.id);
+                        setCustomerSearch(customer.name);
+                      }}
+                    >
+                      {customer.name}
+                    </button>
+                  ))}
+                  {!filteredCustomers.length ? <span className="text-sm text-slate-500">Eşleşen cari yok.</span> : null}
                 </div>
-              </div>
+              ) : null}
 
-              {/* Customer List */}
-              <div className="product-list">
+              <div className="space-y-3">
                 {filteredCustomers.length ? filteredCustomers.map((c) => {
                   const isOpen = expandedCustomerId === c.id;
                   const isEditing = editingCustomerId === c.id;
@@ -1274,144 +1332,118 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const customerPayments = activePayments.filter((p) => p.customer_id === c.id);
                   const totalSales = getCustomerSalesTotal(c.id);
                   const collected = getCustomerCollectedTotal(c.id);
-                  const status = c.passive ? "Pasif" : balance <= 0 ? "Ödendi" : "Borç Açık";
-                  const statusColor = c.passive ? "#64748b" : balance <= 0 ? "#16a34a" : "#dc2626";
+                  const paidSales = getCustomerPaidSalesTotal(c.id);
 
                   return (
-                    <div key={c.id} id={`cari-card-${c.id}`} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
-                      {/* Row */}
+                    <div key={c.id} className="rounded-2xl border bg-white shadow-sm">
                       <button
                         type="button"
-                        className="product-row"
-                        onClick={() => {
-                          const nextId = expandedCustomerId === c.id ? null : c.id;
-                          setExpandedCustomerId(nextId);
-                          setEditingCustomerId(null);
-                          if (nextId) {
-                            setTimeout(() => {
-                              const el = document.getElementById(`cari-card-${nextId}`);
-                              if (el) {
-                                const y = el.getBoundingClientRect().top + window.scrollY - 16;
-                                window.scrollTo({ top: y, behavior: "smooth" });
-                              }
-                            }, 80);
-                          }
-                        }}
+                        className="w-full p-4 text-left hover:bg-slate-50"
+                        onClick={() => openCustomerDetail(c)}
                       >
-                        <div className="product-row-left">
-                          <div className="product-name">{c.name}</div>
-                          <div className="product-meta" style={{color: statusColor, fontWeight: 600}}>{status}</div>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="font-semibold">{c.name}</div>
+                            <div className="mt-1 text-xs text-slate-500">Cari kart</div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center text-sm md:min-w-[420px]">
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Cari Satış</div>
+                              <b>{money(totalSales)}</b>
+                            </div>
+                            <div className="rounded-xl bg-slate-100 p-2">
+                              <div className="text-xs text-slate-500">Ödeme</div>
+                              <b>{money(collected)}</b>
+                            </div>
+                            <div className={`rounded-xl p-2 ${balance > 0 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                              <div className="text-xs">Kalan</div>
+                              <b>{money(balance)}</b>
+                            </div>
+                          </div>
                         </div>
-                        <div className="product-row-stats">
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Satış</span>
-                            <b className="product-stat-val" style={{fontSize:"0.7rem"}}>{money(totalSales)}</b>
-                          </div>
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Ödeme</span>
-                            <b className="product-stat-val" style={{fontSize:"0.7rem"}}>{money(collected)}</b>
-                          </div>
-                          <div className={`product-stat-chip ${balance > 0 ? "product-stat-chip--low" : ""}`}>
-                            <span className={`product-stat-label ${balance > 0 ? "product-stat-label--stock" : ""}`}>Kalan</span>
-                            <b className={`product-stat-val ${balance > 0 ? "product-stat-val--stock" : ""}`} style={{fontSize:"0.7rem"}}>{money(balance)}</b>
-                          </div>
-                        </div>
-                        <span className="product-chevron">
-                          {isOpen
-                            ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18"><path d="m18 15-6-6-6 6"/></svg>
-                            : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18"><path d="m9 18 6-6-6-6"/></svg>}
-                        </span>
                       </button>
 
-                      {/* Expanded */}
-                      {isOpen && (
-                        <div className="product-detail">
-                          {isEditing ? (
-                            <div className="product-edit-fields" style={{marginBottom: 14}}>
-                              <label className="field-label">
-                                <span>Cari adı</span>
-                                <input className="input" maxLength={50} value={String(draft.name ?? c.name)} onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), name: e.target.value } })} />
-                              </label>
-                              <label className="field-label">
-                                <span>Durum</span>
-                                <select className="input" value={String(draft.passive ?? c.passive)} onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), passive: e.target.value === "true" } })}>
-                                  <option value="false">Aktif</option>
-                                  <option value="true">Pasif</option>
-                                </select>
-                              </label>
-                              <div className="product-action-row">
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => saveCustomerEdit(c.id)}>Kaydet</button>
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => cancelCustomerEdit(c.id)}>Vazgeç</button>
+                      {isOpen ? (
+                        <div className="border-t p-4">
+                          <div className="space-y-4">
+                            {isEditing ? (
+                              <div className="grid gap-3 md:grid-cols-3">
+                                <label className="field-label">
+                                  <span>Cari adı</span>
+                                  <input
+                                    className="input"
+                                    maxLength={50}
+                                    value={String(draft.name ?? c.name)}
+                                    onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), name: e.target.value } })}
+                                  />
+                                </label>
+                                <label className="field-label">
+                                  <span>Durum</span>
+                                  <select
+                                    className="input"
+                                    value={String(draft.passive ?? c.passive)}
+                                    onChange={(e) => setCustomerDrafts({ ...customerDrafts, [c.id]: { ...(customerDrafts[c.id] || {}), passive: e.target.value === "true" } })}
+                                  >
+                                    <option value="false">Aktif</option>
+                                    <option value="true">Pasif</option>
+                                  </select>
+                                </label>
+                                <div className="flex items-end gap-2">
+                                  <button type="button" className="btn-secondary" onClick={() => saveCustomerEdit(c.id)}>Kaydet</button>
+                                  <button type="button" className="btn-secondary" onClick={() => cancelCustomerEdit(c.id)}>Vazgeç</button>
+                                </div>
                               </div>
-                            </div>
-                          ) : (
-                            <div className="product-action-row" style={{marginBottom: 14}}>
-                              <div className="cari-payment-row">
-                                <input className="input" style={{maxWidth: 160}} type="number" min="0" placeholder="Ödeme tutarı" value={paymentInputs[c.id] || ""} onChange={(e) => setPaymentInputs({ ...paymentInputs, [c.id]: e.target.value })} />
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => addCustomerPayment(c.id)}>Ödeme Ekle</button>
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => markPayment(c.id)}>Tamamı Ödendi</button>
+                            ) : (
+                              <div className="grid gap-3 text-sm md:grid-cols-5">
+                                <div className="rounded-xl bg-slate-100 p-3">Toplam Satış<br /><b>{money(totalSales)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Peşin Satış<br /><b>{money(paidSales)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Toplam Ödeme<br /><b>{money(collected)}</b></div>
+                                <div className={`rounded-xl p-3 ${balance > 0 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>Kalan Borç<br /><b>{money(balance)}</b></div>
+                                <div className="rounded-xl bg-slate-100 p-3">Durum<br /><b>{c.passive ? "Pasif" : balance <= 0 ? "Ödendi" : "Borç Açık"}</b></div>
                               </div>
-                              <button type="button" className="product-btn product-btn--secondary" onClick={() => startCustomerEdit(c)}>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                Düzenle
-                              </button>
-                              <button type="button" className="product-btn product-btn--danger" onClick={() => deleteCustomer(c.id)}>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                Sil / Pasife Al
-                              </button>
-                            </div>
-                          )}
+                            )}
 
-                          {/* Sales movements */}
-                          <div className="product-batch-section">
-                            <h4 className="product-batch-title">Satış Hareketleri</h4>
-                            <div className="product-batch-table">
-                              <div className="cari-sales-thead">
-                                <div>Tarih</div><div>Ürün</div><div>Parti</div><div>Ad</div><div>Tutar</div><div>Durum</div>
-                              </div>
-                              {customerSales.length ? customerSales.map((sale) => {
-                                const d = sale.created_at?.slice(0, 10) || "";
-                                const fmtDate = d ? `${d.slice(8,10)}.${d.slice(5,7)}.${d.slice(0,4)}` : "-";
-                                return (
-                                  <div key={sale.id} className="cari-sales-row">
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{fmtDate}</div>
-                                    <div className="product-batch-cell product-batch-cell--name" style={{fontSize:"0.68rem"}}>{productMap.get(sale.product_id)?.name || "-"}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{batchMap.get(sale.batch_id)?.name || "-"}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{sale.qty}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{money(sale.total)}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{getSaleStatus(sale)}</div>
-                                  </div>
-                                );
-                              }) : <div className="product-batch-empty">Satış yok.</div>}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input className="input w-48" type="number" min="0" placeholder="Ödeme tutarı" value={paymentInputs[c.id] || ""} onChange={(e) => setPaymentInputs({ ...paymentInputs, [c.id]: e.target.value })} />
+                              <button type="button" className="btn-secondary" onClick={() => addCustomerPayment(c.id)}>Ödeme Ekle</button>
+                              <button type="button" className="btn-secondary" onClick={() => markPayment(c.id)}>Tamamı Ödendi</button>
+                              {!isEditing ? <button type="button" className="btn-secondary" onClick={() => startCustomerEdit(c)}>Cari Bilgilerini Değiştir</button> : null}
+                              <button type="button" className="btn-danger" onClick={() => deleteCustomer(c.id)}>Sil / Pasife Al</button>
                             </div>
-                          </div>
 
-                          {/* Payment movements */}
-                          <div className="product-batch-section">
-                            <h4 className="product-batch-title">Ödeme Hareketleri</h4>
-                            <div className="product-batch-table">
-                              <div className="cari-pay-thead">
-                                <div>Tarih</div><div>Tutar</div>
-                              </div>
-                              {customerPayments.length ? customerPayments.map((pay) => {
-                                const d = pay.created_at?.slice(0, 10) || "";
-                                const fmtDate = d ? `${d.slice(8,10)}.${d.slice(5,7)}.${d.slice(0,4)}` : "-";
-                                return (
-                                  <div key={pay.id} className="cari-pay-row">
-                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{fmtDate}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{money(pay.amount)}</div>
-                                  </div>
-                                );
-                              }) : <div className="product-batch-empty">Ödeme yok.</div>}
+                            <div>
+                              <h4 className="mb-2 font-semibold">Satış Hareketleri</h4>
+                              <Table
+                                headers={["Tarih", "Ürün", "Parti", "Satıcı", "Adet", "Tutar", "Durum"]}
+                                rows={customerSales.map((sale) => [
+                                  sale.created_at?.slice(0, 10),
+                                  productMap.get(sale.product_id)?.name || "-",
+                                  batchMap.get(sale.batch_id)?.name || "-",
+                                  sale.seller,
+                                  sale.qty,
+                                  money(sale.total),
+                                  getSaleStatus(sale),
+                                ])}
+                              />
+                            </div>
+
+                            <div>
+                              <h4 className="mb-2 font-semibold">Ödeme Hareketleri</h4>
+                              <Table
+                                headers={["Ödeme Tarihi", "Tutar"]}
+                                rows={customerPayments.map((p) => [p.created_at?.slice(0, 10), money(p.amount)])}
+                              />
                             </div>
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
-                }) : <p className="px-4 py-8 text-center text-sm text-slate-500">Kayıt yok.</p>}
+                }) : (
+                  <p className="text-sm text-slate-500">Kayıt yok.</p>
+                )}
               </div>
-            </div>
+            </Card>
           </div>
         )}
 
@@ -1545,93 +1577,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .btn { border-radius: 0.75rem; background: #0f172a; color: white; padding: 0.625rem 1rem; font-size: 0.875rem; }
         .btn-secondary { border: 1px solid #cbd5e1; border-radius: 0.75rem; background: white; padding: 0.5rem 0.75rem; font-size: 0.875rem; }
         .btn-danger { border-radius: 0.75rem; background: #ef4444; color: white; padding: 0.5rem 0.75rem; font-size: 0.875rem; }
-
-        /* ── Product Page Mobile Design ── */
-        .product-page { display: flex; flex-direction: column; min-height: 100%; background: #f8fafc; }
-        .product-page-header { padding: 20px 16px 4px; }
-        .product-page-title { font-size: 1.5rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; }
-        .product-search-wrap { padding: 12px 16px 4px; }
-        .product-search-inner { display: flex; align-items: center; gap: 10px; background: white; border: 1.5px solid #e2e8f0; border-radius: 14px; padding: 10px 14px; }
-        .product-search-icon { width: 18px; height: 18px; color: #94a3b8; flex-shrink: 0; }
-        .product-search-input { border: none; outline: none; background: transparent; font-size: 0.9375rem; color: #0f172a; width: 100%; }
-        .product-search-input::placeholder { color: #94a3b8; }
-
-        .product-list { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 4px; }
-        .product-card { background: white; border: 1.5px solid #e2e8f0; border-radius: 18px; overflow: hidden; transition: box-shadow 0.15s; }
-        .product-card--open { box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-color: #cbd5e1; }
-
-        .product-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 14px 14px 16px; text-align: left; background: transparent; border: none; cursor: pointer; }
-        .product-row:active { background: #f8fafc; }
-        .product-row-left { flex: 1; min-width: 0; }
-        .product-name { font-size: 0.9375rem; font-weight: 700; color: #0f172a; line-height: 1.3; }
-        .product-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
-
-        .product-row-stats { display: flex; gap: 6px; flex-shrink: 0; }
-        .product-stat-chip { background: #f1f5f9; border-radius: 10px; padding: 5px 8px; text-align: center; min-width: 48px; }
-        .product-stat-chip--low { background: #fff1f2; }
-        .product-stat-label { display: block; font-size: 0.625rem; color: #64748b; font-weight: 500; line-height: 1; margin-bottom: 2px; }
-        .product-stat-label--stock { color: #dc2626; }
-        .product-stat-val { display: block; font-size: 0.875rem; font-weight: 700; color: #0f172a; }
-        .product-stat-val--stock { color: #dc2626; }
-
-        .product-chevron { color: #94a3b8; flex-shrink: 0; display: flex; align-items: center; }
-
-        /* Expanded Detail Panel */
-        .product-detail { border-top: 1.5px solid #f1f5f9; padding: 16px; background: #fafafa; }
-        .product-info-row { display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-start; }
-        .product-img-box { width: 120px; height: 120px; flex-shrink: 0; border-radius: 14px; overflow: hidden; background: #f1f5f9; }
-        .product-img { width: 100%; height: 100%; object-fit: cover; }
-        .product-img-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #94a3b8; font-size: 0.7rem; }
-
-        .product-info-chips { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .product-info-chips--sm { grid-template-columns: 1fr 1fr; gap: 6px; }
-        .product-info-chip { background: white; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; }
-        .product-info-chip--sm { padding: 7px 10px; border-radius: 10px; }
-        .product-info-chip-label { font-size: 0.65rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
-        .product-info-chip--sm .product-info-chip-label { font-size: 0.6rem; margin-bottom: 2px; }
-        .product-info-chip-val { font-size: 0.875rem; font-weight: 700; color: #0f172a; }
-        .product-info-chip--sm .product-info-chip-val { font-size: 0.8125rem; }
-        .product-info-chip-val--active { color: #16a34a; }
-        .product-info-chip-val--passive { color: #dc2626; }
-
-        /* Batch Table */
-        .product-batch-section { margin-bottom: 16px; }
-        .product-batch-title { font-size: 0.875rem; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
-        .product-batch-table { background: white; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
-        .product-batch-thead { display: grid; grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr 1fr 1fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
-        .product-batch-thead > div:not(:first-child) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
-        .product-batch-row { display: grid; grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr 1fr 1fr; padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
-        .product-batch-row:last-child { border-bottom: none; }
-        .product-batch-cell { color: #334155; }
-        .product-batch-cell--name { font-weight: 600; color: #0f172a; }
-        .product-batch-empty { padding: 12px; font-size: 0.8125rem; color: #94a3b8; text-align: center; }
-
-        /* Action Buttons */
-        .product-action-row { display: flex; gap: 8px; flex-wrap: wrap; }
-        .product-btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; padding: 10px 14px; font-size: 0.8125rem; font-weight: 600; cursor: pointer; border: none; }
-        .product-btn--secondary { background: white; color: #334155; border: 1.5px solid #e2e8f0; }
-        .product-btn--danger { background: white; color: #dc2626; border: 1.5px solid #fecaca; }
-
-        /* Edit Form */
-        .product-edit-form { display: flex; flex-direction: column; gap: 14px; }
-        .product-edit-image-row { display: flex; align-items: center; gap: 12px; }
-        .product-img-change-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; font-size: 0.8125rem; font-weight: 600; color: #334155; cursor: pointer; background: white; }
-        .product-edit-fields { display: grid; gap: 10px; }
-
-        /* Add Button */
-        .product-add-wrap { padding: 12px 16px 24px; }
-        .product-add-wrap--top { padding: 8px 16px 4px; }
-        .product-add-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; background: #0f172a; color: white; border: none; border-radius: 16px; padding: 16px; font-size: 1rem; font-weight: 700; cursor: pointer; letter-spacing: -0.01em; }
-        .product-add-form-panel { padding: 16px; border-top: 1.5px solid #f1f5f9; background: #fafafa; }
-
-        /* Cari tables */
-        .cari-payment-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-        .cari-sales-thead { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
-        .cari-sales-row { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
-        .cari-sales-row:last-child { border-bottom: none; }
-        .cari-pay-thead { display: grid; grid-template-columns: 1fr 1fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
-        .cari-pay-row { display: grid; grid-template-columns: 1fr 1fr; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
-        .cari-pay-row:last-child { border-bottom: none; }
       `}</style>
     </main>
   );
