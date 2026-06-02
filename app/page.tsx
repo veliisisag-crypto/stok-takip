@@ -380,21 +380,45 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .slice(0, 20);
   }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
 
+  const uploadImageToStorage = async (base64: string, fileName: string): Promise<string | null> => {
+    try {
+      const res = await fetch(base64);
+      const blob = await res.blob();
+      const ext = blob.type.split("/")[1] || "jpg";
+      const path = `${fileName}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("product-images").upload(path, blob, { upsert: true, contentType: blob.type });
+      if (error) { showError(error); return null; }
+      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+      return data.publicUrl;
+    } catch (err) {
+      showError(err);
+      return null;
+    }
+  };
+
   const addProductDefinition = async () => {
     const name = newProduct.name.trim();
     if (!name || name.length > 50) return setMessage("Ürün adı zorunlu ve en fazla 50 karakter olmalı.");
     if (products.some((p) => p.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu kaynak ürün zaten kayıtlı.");
 
     const idTail = Date.now().toString().slice(-6);
+    const code = `URN-${idTail}`;
+
+    let imageUrl: string | null = null;
+    if (newProduct.image) {
+      setMessage("Resim yükleniyor...");
+      imageUrl = await uploadImageToStorage(newProduct.image, code);
+    }
+
     const { error } = await supabase.from("products").insert({
       name,
-      code: `URN-${idTail}`,
+      code,
       gender_category: newProduct.genderCategory,
-      image_url: newProduct.image || null,
+      image_url: imageUrl,
       min_stock: Number(newProduct.minStock || 0),
     });
     if (error) return showError(error);
-    await logAction("Ürün eklendi", "products", name, { code: `URN-${idTail}` });
+    await logAction("Ürün eklendi", "products", name, { code });
     setNewProduct({ name: "", genderCategory: "Kadın", image: "", minStock: "0" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
@@ -832,11 +856,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const saveProductEdit = async (productId: string) => {
     const draft = productDrafts[productId] || {};
+    let imageUrl = draft.image_url ?? null;
+
+    // If it's a new base64 image (not already a URL), upload to Storage
+    if (imageUrl && imageUrl.startsWith("data:")) {
+      setMessage("Resim yükleniyor...");
+      const product = products.find((p) => p.id === productId);
+      imageUrl = await uploadImageToStorage(imageUrl, product?.code || productId);
+    }
+
     await updateProduct(productId, {
       name: String(draft.name || "").trim(),
       gender_category: draft.gender_category as GenderCategory,
       min_stock: Number(draft.min_stock || 0),
-      image_url: draft.image_url ?? null,
+      image_url: imageUrl,
     });
     cancelProductEdit(productId);
   };
