@@ -802,7 +802,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const menu = [
-    ["dashboard", "Dashboard"],
+    ["dashboard", "Özet Tablo"],
     ["products", "Ürünler"],
     ["batchEntry", "Parti/Ürün Girişi"],
     ["customers", "Müşteriler / Cari"],
@@ -870,7 +870,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
               <StatCard title="Kasadaki Nakit" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
-              <StatCard title="Düşük Stok" value={totals.lowStock} note="Minimum seviyenin altında" />
+              <StatCard title="Mevcut Stok" value={totals.lowStock} note="." />
             </div>
             <Card title="Son Hareketler">
               <Table
