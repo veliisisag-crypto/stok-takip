@@ -389,6 +389,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   }, [sortedCustomers, customerSearch]);
 
   const recentMovements = useMemo(() => {
+    const shortUser = (email?: string, seller?: string) => {
+      if (seller === "Aslı" || seller === "Mihrimah") return seller === "Mihrimah" ? "Mihri" : "Aslı";
+      if (!email) return "-";
+      if (email.includes("asli")) return "Aslı";
+      if (email.includes("mihrimah")) return "Mihri";
+      if (email.includes("veli")) return "Veli";
+      return email.split("@")[0];
+    };
+
     const saleRows = activeSales.map((sale) => ({
       id: `sale-${sale.id}`,
       date: sale.created_at,
@@ -396,6 +405,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       customer: customerMap.get(sale.customer_id)?.name || "-",
       detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet`,
       amount: toNum(sale.total),
+      user: shortUser(undefined, sale.seller),
     }));
 
     const paymentRows = activePayments.map((payment) => ({
@@ -405,6 +415,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       customer: customerMap.get(payment.customer_id)?.name || "-",
       detail: "Cari ödeme",
       amount: toNum(payment.amount),
+      user: "-",
     }));
 
     const auditRows = auditLogs.map((log) => ({
@@ -414,6 +425,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       customer: log.entity_type,
       detail: log.entity_name || "-",
       amount: 0,
+      user: shortUser(log.user_email),
     }));
 
     return [...saleRows, ...paymentRows, ...auditRows]
@@ -1084,13 +1096,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </div>
             <Card title="Son Hareketler">
               <Table
-                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
+                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar", "Kim"]}
                 rows={recentMovements.map((movement) => [
                   toTR(movement.date, true),
                   movement.type,
                   movement.customer,
                   movement.detail,
                   money(movement.amount),
+                  movement.user,
                 ])}
               />
             </Card>
@@ -1102,13 +1115,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div className="space-y-4">
             <Card title="Son Hareketler">
               <Table
-                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
+                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar", "Kim"]}
                 rows={recentMovements.map((movement) => [
                   toTR(movement.date, true),
                   movement.type,
                   movement.customer,
                   movement.detail,
                   money(movement.amount),
+                  movement.user,
                 ])}
               />
             </Card>
