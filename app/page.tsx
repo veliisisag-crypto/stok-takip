@@ -925,12 +925,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const saveProductEdit = async (productId: string) => {
     const draft = productDrafts[productId] || {};
-    let imageUrl = draft.image_url ?? null;
+    const product = products.find((p) => p.id === productId);
 
-    // If it's a new base64 image (not already a URL), upload to Storage
+    // Use draft image if set, otherwise keep existing product image
+    let imageUrl = "image_url" in draft ? (draft.image_url ?? null) : (product?.image_url ?? null);
+
+    // If it's a new base64 image, upload to Storage
     if (imageUrl && imageUrl.startsWith("data:")) {
       setMessage("Resim yükleniyor...");
-      const product = products.find((p) => p.id === productId);
       imageUrl = await uploadImageToStorage(imageUrl, product?.code || productId);
     }
 
@@ -1257,10 +1259,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                   Düzenle
                                 </button>
-                                <button type="button" className="product-btn product-btn--secondary" onClick={() => startProductEdit(p)}>
+                                <label className="product-btn product-btn--secondary" style={{cursor:"pointer"}}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                                   Resim Değiştir
-                                </button>
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || { name: p.name, gender_category: p.gender_category }), image_url: String(reader.result || "") } });
+                                      setEditingProductId(p.id);
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }} />
+                                </label>
                                 <button type="button" className="product-btn product-btn--danger" onClick={() => deleteProduct(p.id)}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                                   Pasife Al
