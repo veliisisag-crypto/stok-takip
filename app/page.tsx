@@ -1361,33 +1361,32 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </Card>
 
             <Card title="Parti Bazlı Ürün / Stok Raporu">
-              <div className="mb-5 flex items-center gap-2 flex-wrap">
+              <div className="mb-5 flex items-center gap-3">
                 <select className="input" style={{maxWidth:160}} value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
                   <option value="Tümü">Tüm Partiler</option>
                   {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                 </select>
 
-              {/* Summary chips */}
               {(() => {
                 const filtered = batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter);
                 const totalAlinan = filtered.reduce((s, item) => s + item.bought, 0);
                 const totalSatilan = filtered.reduce((s, item) => s + getBatchSoldQty(item.product_id, item.batch_id), 0);
                 const totalKalan = totalAlinan - totalSatilan;
                 return (
-                  <>
-                    <div className="rounded-xl bg-slate-100 px-3 py-2 text-center" style={{minWidth:64}}>
-                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1" style={{whiteSpace:"nowrap"}}>Alınan</div>
+                  <div className="rounded-xl bg-slate-100 flex divide-x divide-slate-300">
+                    <div className="px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Alınan</div>
                       <div className="text-xl font-bold text-slate-900">{totalAlinan}</div>
                     </div>
-                    <div className="rounded-xl bg-slate-100 px-3 py-2 text-center" style={{minWidth:64}}>
-                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1" style={{whiteSpace:"nowrap"}}>Satılan</div>
+                    <div className="px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Satılan</div>
                       <div className="text-xl font-bold text-slate-900">{totalSatilan}</div>
                     </div>
-                    <div className="rounded-xl bg-slate-100 px-3 py-2 text-center" style={{minWidth:64}}>
-                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1" style={{whiteSpace:"nowrap"}}>Kalan</div>
+                    <div className="px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Kalan</div>
                       <div className="text-xl font-bold text-slate-900">{totalKalan}</div>
                     </div>
-                  </>
+                  </div>
                 );
               })()}
               </div>
