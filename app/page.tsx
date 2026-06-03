@@ -87,6 +87,7 @@ type Payment = {
   amount: number;
   cancelled?: boolean;
   created_at: string;
+  user_email?: string | null;
 };
 
 type PartnerRow = {
@@ -415,7 +416,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       customer: customerMap.get(payment.customer_id)?.name || "-",
       detail: "Cari ödeme",
       amount: toNum(payment.amount),
-      user: "-",
+      user: shortUser(payment.user_email ?? undefined),
     }));
 
     const auditRows = auditLogs.map((log) => ({
@@ -794,7 +795,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const addCustomerPayment = async (customerId: string) => {
     const amount = Number(paymentInputs[customerId] || 0);
     if (!amount || amount <= 0) return;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount });
+    const { data: userData } = await supabase.auth.getUser();
+    const userEmail = userData.user?.email || null;
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
@@ -809,7 +812,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const markPayment = async (customerId: string) => {
     const balance = getCustomerBalance(customerId);
     if (balance <= 0) return;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance });
+    const { data: userData } = await supabase.auth.getUser();
+    const userEmail = userData.user?.email || null;
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance, user_email: userEmail });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
