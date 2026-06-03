@@ -402,7 +402,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const saleRows = activeSales.map((sale) => ({
       id: `sale-${sale.id}`,
       date: sale.created_at,
-      type: sale.paid ? "Peşin satış" : "Cari satış",
+      type: sale.sale_type === "Fire/Bozuk" ? "Fire/Bozuk" : sale.paid ? "Peşin satış" : "Cari satış",
       customer: customerMap.get(sale.customer_id)?.name || "-",
       detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet`,
       amount: toNum(sale.total),
@@ -646,7 +646,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const take = Math.min(available, remainingQty);
       if (take <= 0) continue;
       const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
-      const unitSalePrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || item.sale_price || 0);
+      const totalPrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || 0);
       rows.push({
         customer_id: customer.id,
         product_id: product.id,
@@ -654,10 +654,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         seller: saleForm.seller,
         sale_type: saleForm.saleType,
         qty: take,
-        total: unitSalePrice * take,
+        total: totalPrice,
         cost: item.buy_price * take,
         paid: saleForm.paid === "true" || isZeroPrice,
-        paid_amount: saleForm.paid === "true" || isZeroPrice ? unitSalePrice * take : 0,
+        paid_amount: saleForm.paid === "true" || isZeroPrice ? totalPrice : 0,
         cancelled: false,
       });
       remainingQty -= take;
