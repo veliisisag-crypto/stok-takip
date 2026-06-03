@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
@@ -231,6 +231,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
+  const pendingImageRef = useRef<Record<string, string>>({});
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
@@ -472,7 +473,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
-    await logAction("Ürün değiştirildi", "products", products.find((p) => p.id === productId)?.name || productId, dbPatch);
+    // Exclude image_url from log to avoid storing large base64/URL data
+    const { image_url: _img, ...logPatch } = dbPatch as Record<string, unknown> & { image_url?: unknown };
+    await logAction("Ürün değiştirildi", "products", products.find((p) => p.id === productId)?.name || productId, logPatch);
     loadAll();
   };
 
@@ -927,18 +930,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const draft = productDrafts[productId] || {};
     const product = products.find((p) => p.id === productId);
 
-    // Use draft image if set, otherwise keep existing product image
-    let imageUrl = "image_url" in draft ? (draft.image_url ?? null) : (product?.image_url ?? null);
+    // Read image from ref (most reliable) or fall back to draft/existing
+    let imageUrl: string | null = pendingImageRef.current[productId] || (draft.image_url as string | undefined) || product?.image_url || null;
 
-    // If it's a new base64 image, upload to Storage
     if (imageUrl && imageUrl.startsWith("data:")) {
       setMessage("Resim yükleniyor...");
       imageUrl = await uploadImageToStorage(imageUrl, product?.code || productId);
+      delete pendingImageRef.current[productId];
     }
 
     await updateProduct(productId, {
-      name: String(draft.name || "").trim(),
-      gender_category: draft.gender_category as GenderCategory,
+      name: String(draft.name || product?.name || "").trim(),
+      gender_category: (draft.gender_category || product?.gender_category) as GenderCategory,
       image_url: imageUrl,
     });
     cancelProductEdit(productId);
@@ -1198,7 +1201,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <label className="product-img-change-btn">
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                                   Resim Değiştir
-                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), image_url: String(reader.result || "") } }); reader.readAsDataURL(file); }} />
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      const b64 = String(reader.result || "");
+                                      pendingImageRef.current[p.id] = b64;
+                                      setProductDrafts((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), image_url: b64 } }));
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }} />
                                 </label>
                               </div>
                               <div className="product-edit-fields">
@@ -1267,7 +1280,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     if (!file) return;
                                     const reader = new FileReader();
                                     reader.onload = () => {
-                                      setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || { name: p.name, gender_category: p.gender_category }), image_url: String(reader.result || "") } });
+                                      const b64 = String(reader.result || "");
+                                      pendingImageRef.current[p.id] = b64;
+                                      setProductDrafts((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || { name: p.name, gender_category: p.gender_category }), image_url: b64 } }));
                                       setEditingProductId(p.id);
                                     };
                                     reader.readAsDataURL(file);
