@@ -3,6 +3,34 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100)
+      .then(({ data }) => { setLogs((data || []) as AuditLog[]); setLoading(false); });
+  }, []);
+  return (
+    <div className="space-y-4">
+      <Card title="İşlem Geçmişi">
+        {loading ? <p className="text-sm text-slate-500">Yükleniyor...</p> : (
+          <Table
+            headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı"]}
+            rows={logs.map((log) => [
+              log.created_at?.slice(0, 16).replace("T", " ") || "-",
+              log.action,
+              log.entity_type,
+              log.entity_name || "-",
+              log.user_email || "-",
+            ])}
+          />
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
 type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
 type Seller = "Aslı" | "Mihrimah";
@@ -237,7 +265,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const loadAll = async () => {
     setLoadingData(true);
     try {
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -246,10 +274,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500),
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
-        supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(50),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, auditLogsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -261,7 +288,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPayments((paymentsRes.data || []) as Payment[]);
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
-      setAuditLogs((auditLogsRes.data || []) as AuditLog[]);
     } catch (err) {
       showError(err);
     } finally {
@@ -1072,20 +1098,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "audit" && (
-          <div className="space-y-4">
-            <Card title="İşlem Geçmişi">
-              <Table
-                headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı"]}
-                rows={auditLogs.map((log) => [
-                  log.created_at?.slice(0, 16).replace("T", " ") || "-",
-                  log.action,
-                  log.entity_type,
-                  log.entity_name || "-",
-                  log.user_email || "-",
-                ])}
-              />
-            </Card>
-          </div>
+          <AuditSection supabase={supabase} />
         )}
 
         {active === "products" && (
