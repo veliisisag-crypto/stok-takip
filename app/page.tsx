@@ -1846,8 +1846,8 @@ export default function Home() {
           <h1 className="mb-2 text-2xl font-bold">Giriş Yap</h1>
           <p className="mb-6 text-slate-500">Satış / stok paneli</p>
           <div className="space-y-3">
-            <input className="w-full rounded-xl border p-3" placeholder="E-posta" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <input className="w-full rounded-xl border p-3" placeholder="Şifre" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input className="w-full rounded-xl border p-3 text-slate-900" placeholder="E-posta" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input className="w-full rounded-xl border p-3 text-slate-900" placeholder="Şifre" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             <button type="button" onClick={login} className="w-full rounded-xl bg-black p-3 font-semibold text-white">Giriş Yap</button>
           </div>
         </div>
