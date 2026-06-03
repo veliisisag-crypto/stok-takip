@@ -17,7 +17,7 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
           <Table
             headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı"]}
             rows={logs.map((log) => [
-              log.created_at?.slice(0, 16).replace("T", " ") || "-",
+              toTR(log.created_at, true),
               log.action,
               log.entity_type,
               log.entity_name || "-",
@@ -133,6 +133,19 @@ const money = (n: number) =>
   }).format(Number(n || 0));
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const toTR = (isoStr?: string | null, withTime = false) => {
+  if (!isoStr) return "-";
+  const d = new Date(isoStr);
+  d.setHours(d.getHours() + 3);
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
+  if (!withTime) return `${dd}.${mm}.${yyyy}`;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+};
 const toNum = (v: unknown) => Number(v || 0);
 
 function Card({ title, children }: { title?: string; children: ReactNode }) {
@@ -1068,7 +1081,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <Table
                 headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
                 rows={recentMovements.map((movement) => [
-                  movement.date?.slice(0, 16).replace("T", " ") || "-",
+                  toTR(movement.date, true),
                   movement.type,
                   movement.customer,
                   movement.detail,
@@ -1086,7 +1099,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <Table
                 headers={["Tarih", "Tür", "Cari", "Detay", "Tutar"]}
                 rows={recentMovements.map((movement) => [
-                  movement.date?.slice(0, 16).replace("T", " ") || "-",
+                  toTR(movement.date, true),
                   movement.type,
                   movement.customer,
                   movement.detail,
@@ -1474,11 +1487,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <div>Tarih</div><div>Ürün</div><div>Parti</div><div>Ad</div><div>Tutar</div><div>Durum</div>
                               </div>
                               {customerSales.length ? customerSales.map((sale) => {
-                                const d = sale.created_at?.slice(0, 10) || "";
-                                const fmtDate = d ? `${d.slice(8,10)}.${d.slice(5,7)}.${d.slice(0,4)}` : "-";
                                 return (
                                   <div key={sale.id} className="cari-sales-row">
-                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{fmtDate}</div>
+                                    <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{toTR(sale.created_at)}</div>
                                     <div className="product-batch-cell product-batch-cell--name" style={{fontSize:"0.68rem"}}>{productMap.get(sale.product_id)?.name || "-"}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{batchMap.get(sale.batch_id)?.name || "-"}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{sale.qty}</div>
@@ -1498,11 +1509,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <div>Tarih</div><div>Tutar</div>
                               </div>
                               {customerPayments.length ? customerPayments.map((pay) => {
-                                const d = pay.created_at?.slice(0, 10) || "";
-                                const fmtDate = d ? `${d.slice(8,10)}.${d.slice(5,7)}.${d.slice(0,4)}` : "-";
                                 return (
                                   <div key={pay.id} className="cari-pay-row">
-                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{fmtDate}</div>
+                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{toTR(pay.created_at)}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{money(pay.amount)}</div>
                                   </div>
                                 );
@@ -1553,7 +1562,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const isEditing = editingSaleId === sale.id;
                   const draft = saleDrafts[sale.id];
                   return [
-                    sale.created_at?.slice(0, 10),
+                    toTR(sale.created_at),
                     customerMap.get(sale.customer_id)?.name || "-",
                     productMap.get(sale.product_id)?.name || "-",
                     batchMap.get(sale.batch_id)?.name || "-",
