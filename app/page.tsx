@@ -425,7 +425,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       customer: log.entity_type,
       detail: log.entity_name || "-",
       amount: 0,
-      user: shortUser(log.user_email),
+      user: shortUser(log.user_email ?? undefined),
     }));
 
     return [...saleRows, ...paymentRows, ...auditRows]
