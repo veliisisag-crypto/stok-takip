@@ -1361,10 +1361,37 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </Card>
 
             <Card title="Parti Bazlı Ürün / Stok Raporu">
-              <select className="input mb-4 max-w-xs" value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
-                <option value="Tümü">Tüm Partiler</option>
-                {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-              </select>
+              <div className="mb-5 flex flex-wrap items-center gap-3">
+                <select className="input max-w-[160px]" value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
+                  <option value="Tümü">Tüm Partiler</option>
+                  {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                </select>
+
+              {/* Summary chips */}
+              {(() => {
+                const filtered = batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter);
+                const totalAlinan = filtered.reduce((s, item) => s + item.bought, 0);
+                const totalSatilan = filtered.reduce((s, item) => s + getBatchSoldQty(item.product_id, item.batch_id), 0);
+                const totalKalan = totalAlinan - totalSatilan;
+                return (
+                  <>
+                    <div className="rounded-xl bg-slate-100 px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Alınan</div>
+                      <div className="text-xl font-bold text-slate-900">{totalAlinan}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-100 px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Satılan</div>
+                      <div className="text-xl font-bold text-slate-900">{totalSatilan}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-100 px-4 py-2 text-center">
+                      <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Kalan</div>
+                      <div className="text-xl font-bold text-slate-900">{totalKalan}</div>
+                    </div>
+                  </>
+                );
+              })()}
+              </div>
+
               <Table
                 headers={["Parti", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
                 rows={batchItems
