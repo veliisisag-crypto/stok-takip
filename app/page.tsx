@@ -370,8 +370,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
 
   const totals = useMemo(() => {
-    const revenue = activeSales.reduce((sum, item) => sum + item.total, 0);
-    const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQty(item.product_id, item.batch_id), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
@@ -380,6 +378,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
+    const revenue = cash + customerDebt + distributedCash;
+    const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
     return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash };
   }, [products, customers, batchItems, activeSales, activePayments, periods]);
 
