@@ -63,6 +63,7 @@ type BatchItem = {
   bought: number;
   buy_price: number;
   sale_price: number;
+  depo?: string;
 };
 
 type Sale = {
@@ -209,6 +210,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [active, setActive] = useState("dashboard");
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState("");
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -241,8 +243,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
-  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "" });
+  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Aslı-depo" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Aslı-depo" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -281,6 +283,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const loadAll = async () => {
     setLoadingData(true);
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const email = userData.user?.email || "";
+      setCurrentUserEmail(email);
+      const defaultDepo = email.includes("mihrimah") ? "Mihri-depo" : "Aslı-depo";
+      const defaultSeller: Seller = email.includes("mihrimah") ? "Mihrimah" : "Aslı";
+      setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
+      setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
+
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
@@ -602,10 +612,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       bought,
       buy_price: buyPrice,
       sale_price: salePrice,
+      depo: batchForm.depo || "Belirsiz",
     });
     if (error) return showError(error);
-    await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice });
-    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "" });
+    await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
+    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Aslı-depo" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
   };
@@ -616,6 +627,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.bought !== undefined) dbPatch.bought = patch.bought;
     if (patch.buy_price !== undefined) dbPatch.buy_price = patch.buy_price;
     if (patch.sale_price !== undefined) dbPatch.sale_price = patch.sale_price;
+    if (patch.depo !== undefined) dbPatch.depo = patch.depo;
     const { error } = await supabase.from("batch_items").update(dbPatch).eq("id", itemId);
     if (error) return showError(error);
     await logAction("Parti ürün satırı değiştirildi", "batch_items", itemId, dbPatch);
@@ -641,7 +653,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
 
-    for (const item of batchItemsForProduct(product.id)) {
+    // Filter by depo and batch if selected
+    const availableItems = batchItemsForProduct(product.id).filter((item) => {
+      const matchDepo = !saleForm.depo || item.depo === saleForm.depo || !item.depo || item.depo === "Belirsiz";
+      const matchBatch = !saleForm.batchId || item.batch_id === saleForm.batchId;
+      return matchDepo && matchBatch;
+    });
+
+    for (const item of availableItems) {
       if (remainingQty <= 0) break;
       const available = Math.max(item.bought - getBatchSoldQty(product.id, item.batch_id), 0);
       const take = Math.min(available, remainingQty);
@@ -668,7 +687,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
-    setSaleForm({ customerId: "", productId: "", qty: "1", seller: "Aslı", saleType: "Normal satış", paid: "false", customSalePrice: "" });
+    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo }));
     setMessage("Satış kaydedildi.");
     loadAll();
   };
@@ -1091,6 +1110,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-8">
           <h1 className="text-lg font-bold">Ticari Takip</h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
+          {currentUserEmail && (
+            <div className="mt-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
+              👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
+            </div>
+          )}
         </div>
         <nav className="space-y-2">
           {menu.map(([key, label]) => (
@@ -1285,6 +1309,39 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
                                 <label className="field-label"><span>Kategori</span><select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select></label>
                               </div>
+                              {/* Parti satırları düzenleme */}
+                              {batchItemsForProduct(p.id).length > 0 && (
+                                <div>
+                                  <div className="product-batch-title" style={{marginBottom:8}}>Parti / Stok Düzenleme</div>
+                                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                                    {batchItemsForProduct(p.id).map((item) => (
+                                      <div key={item.id} style={{background:"#f8fafc",borderRadius:12,padding:"10px 12px",display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                                        <span style={{fontWeight:600,fontSize:"0.8rem",color:"#0f172a",minWidth:60}}>{batchMap.get(item.batch_id)?.name || "-"}</span>
+                                        <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:"0.7rem",color:"#64748b"}}>
+                                          Adet
+                                          <input className="input" style={{width:70}} type="number" min="0" defaultValue={item.bought} onBlur={(e) => { const v = Number(e.target.value); if (v !== item.bought) updateBatchItem(item.id, { bought: v }); }} />
+                                        </label>
+                                        <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:"0.7rem",color:"#64748b"}}>
+                                          Alış
+                                          <input className="input" style={{width:80}} type="number" min="0" defaultValue={item.buy_price} onBlur={(e) => { const v = Number(e.target.value); if (v !== item.buy_price) updateBatchItem(item.id, { buy_price: v }); }} />
+                                        </label>
+                                        <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:"0.7rem",color:"#64748b"}}>
+                                          Satış
+                                          <input className="input" style={{width:80}} type="number" min="0" defaultValue={item.sale_price} onBlur={(e) => { const v = Number(e.target.value); if (v !== item.sale_price) updateBatchItem(item.id, { sale_price: v }); }} />
+                                        </label>
+                                        <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:"0.7rem",color:"#64748b"}}>
+                                          Depo
+                                          <select className="input" style={{width:110}} value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
+                                            <option value="Aslı-depo">Aslı-depo</option>
+                                            <option value="Mihri-depo">Mihri-depo</option>
+                                            <option value="Belirsiz">Belirsiz</option>
+                                          </select>
+                                        </label>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                               <div className="product-action-row">
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => saveProductEdit(p.id)}>Kaydet</button>
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => cancelProductEdit(p.id)}>Vazgeç</button>
@@ -1318,12 +1375,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-batch-section">
                                 <h4 className="product-batch-title">Parti Detayları</h4>
                                 <div className="product-batch-table">
-                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
+                                  <div className="product-batch-thead"><div>Parti</div><div>Depo</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
                                     const sold = getBatchSoldQty(p.id, item.batch_id);
                                     return (
                                       <div key={item.id} className="product-batch-row">
                                         <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
+                                        <div className="product-batch-cell" style={{fontSize:"0.72rem",color:"#64748b"}}>{item.depo || "Belirsiz"}</div>
                                         <div className="product-batch-cell">{item.bought}</div>
                                         <div className="product-batch-cell">{sold}</div>
                                         <div className="product-batch-cell">{item.bought - sold}</div>
@@ -1392,6 +1450,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
+                <select className="input" value={batchForm.depo} onChange={(e) => setBatchForm({ ...batchForm, depo: e.target.value })}>
+                  <option value="Aslı-depo">Aslı-depo</option>
+                  <option value="Mihri-depo">Mihri-depo</option>
+                </select>
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
               </div>
             </Card>
@@ -1428,7 +1490,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
 
               <Table
-                headers={["Parti", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
+                headers={["Parti", "Depo", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
                 rows={batchItems
                   .filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter)
                   .map((item) => {
@@ -1440,6 +1502,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                         </select>
                       ) : batchMap.get(item.batch_id)?.name || "-",
+                      editingBatchItemId === key ? (
+                        <select className="input" value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
+                          <option value="Aslı-depo">Aslı-depo</option>
+                          <option value="Mihri-depo">Mihri-depo</option>
+                          <option value="Belirsiz">Belirsiz</option>
+                        </select>
+                      ) : item.depo || "Belirsiz",
                       p?.name || "-",
                       editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
                       getBatchSoldQty(item.product_id, item.batch_id),
@@ -1645,10 +1714,34 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <option value="">Cari seçin</option>
                   {sortedActiveCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value })}>
+                <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value, batchId: "" })}>
                   <option value="">Ürün seçin</option>
                   {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name} - Stok: {getProductStock(p.id)}</option>)}
                 </select>
+                {/* Depo: her zaman göster, kullanıcıya göre default */}
+                <select className="input" value={saleForm.depo} onChange={(e) => setSaleForm({ ...saleForm, depo: e.target.value, batchId: "" })}>
+                  <option value="Aslı-depo">Aslı-depo</option>
+                  <option value="Mihri-depo">Mihri-depo</option>
+                </select>
+                {/* Parti: seçili depoda birden fazla stoklu parti varsa göster */}
+                {saleForm.productId && (() => {
+                  const partiler = batchItemsForProduct(saleForm.productId).filter((i) => {
+                    const kalan = i.bought - getBatchSoldQty(i.product_id, i.batch_id);
+                    return kalan > 0 && i.depo === saleForm.depo;
+                  });
+                  const uniqueBatches = [...new Map(partiler.map((i) => [i.batch_id, i])).values()];
+                  if (uniqueBatches.length <= 1) return null;
+                  return (
+                    <select className="input" value={saleForm.batchId} onChange={(e) => setSaleForm({ ...saleForm, batchId: e.target.value })}>
+                      <option value="">Tüm partiler</option>
+                      {uniqueBatches.map((item) => (
+                        <option key={item.batch_id} value={item.batch_id}>
+                          {batchMap.get(item.batch_id)?.name || "-"}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
                 <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
                 <select className="input" value={saleForm.saleType} onChange={(e) => {
@@ -1840,9 +1933,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-batch-section { margin-bottom: 16px; }
         .product-batch-title { font-size: 0.875rem; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
         .product-batch-table { background: white; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
-        .product-batch-thead { display: grid; grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr 1fr 1fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
-        .product-batch-thead > div:not(:first-child) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
-        .product-batch-row { display: grid; grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr 1fr 1fr; padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
+        .product-batch-thead { display: grid; grid-template-columns: 1.2fr 0.9fr 0.6fr 0.6fr 0.6fr 0.9fr 0.9fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
+        .product-batch-thead > div:not(:first-child):not(:nth-child(2)) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
+        .product-batch-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.6fr 0.6fr 0.6fr 0.9fr 0.9fr; padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
         .product-batch-row:last-child { border-bottom: none; }
         .product-batch-cell { color: #334155; }
         .product-batch-cell--name { font-weight: 600; color: #0f172a; }
