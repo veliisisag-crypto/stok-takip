@@ -1153,6 +1153,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         </div>
 
         <div className="mb-6 grid grid-cols-2 gap-2 lg:hidden">
+          {currentUserEmail && (
+            <div className="col-span-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 text-center">
+              👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
+            </div>
+          )}
           {menu.map(([key, label]) => (
             <button key={key} type="button" onClick={() => setActive(key)} className={`rounded-xl px-3 py-2 ${active === key ? "bg-slate-900 text-white" : "bg-white"}`}>
               {label}
