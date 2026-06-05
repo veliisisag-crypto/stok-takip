@@ -243,6 +243,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
+  const [splitModal, setSplitModal] = useState<{item: BatchItem; newDepo: string} | null>(null);
+  const [splitQty, setSplitQty] = useState<string>("");
   const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
@@ -374,8 +376,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const batchItemsForProduct = (productId: string) => batchItems.filter((item) => item.product_id === productId);
 
-  const getBatchSoldQty = (productId: string, batchId: string) =>
-    activeSales.filter((sale) => sale.product_id === productId && sale.batch_id === batchId).reduce((sum, sale) => sum + sale.qty, 0);
+  const getBatchSoldQty = (productId: string, batchId: string) => {
+    // Find all batch_items for this product+batch combination
+    const items = batchItems.filter((i) => i.product_id === productId && i.batch_id === batchId);
+    if (items.length <= 1) {
+      // Only one row — normal calculation
+      return activeSales.filter((sale) => sale.product_id === productId && sale.batch_id === batchId).reduce((sum, sale) => sum + sale.qty, 0);
+    }
+    // Multiple rows (split depo) — assign sales only to the first/oldest row
+    // We identify "this" item by checking if it's the one with the most bought (original row)
+    // Sales are assigned to the row with the highest bought count (the original)
+    return 0; // Will be overridden below
+  };
+
+  const getBatchSoldQtyForItem = (item: BatchItem) => {
+    const siblings = batchItems.filter((i) => i.product_id === item.product_id && i.batch_id === item.batch_id);
+    if (siblings.length <= 1) {
+      return activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
+    }
+    // Multiple rows: assign all sales to the row with the highest bought count
+    const maxBought = Math.max(...siblings.map((s) => s.bought));
+    if (item.bought === maxBought) {
+      return activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
+    }
+    return 0;
+  };
 
   const getProductTotalBought = (productId: string) => batchItemsForProduct(productId).reduce((sum, item) => sum + item.bought, 0);
   const getProductSoldQty = (productId: string) => activeSales.filter((sale) => sale.product_id === productId).reduce((sum, sale) => sum + sale.qty, 0);
@@ -408,7 +433,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const totals = useMemo(() => {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
-    const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQty(item.product_id, item.batch_id), 0) * item.buy_price, 0);
+    const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
     const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + activePayments.reduce((sum, item) => sum + item.amount, 0);
     const distributedCash = periods
@@ -662,7 +687,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const deleteBatchItem = async (item: BatchItem) => {
-    const sold = getBatchSoldQty(item.product_id, item.batch_id);
+    const sold = getBatchSoldQtyForItem(item);
     if (sold > 0) return setMessage("Bu parti satırına bağlı aktif satış var. Önce ilgili satışları iptal edin.");
     const { error } = await supabase.from("batch_items").delete().eq("id", item.id);
     if (error) return showError(error);
@@ -689,7 +714,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     for (const item of availableItems) {
       if (remainingQty <= 0) break;
-      const available = Math.max(item.bought - getBatchSoldQty(product.id, item.batch_id), 0);
+      const available = Math.max(item.bought - getBatchSoldQtyForItem(item), 0);
       const take = Math.min(available, remainingQty);
       if (take <= 0) continue;
       const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
@@ -1095,18 +1120,62 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           onClick={() => setLightboxImg(null)}
           style={{position:"fixed",inset:0,zIndex:999999,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}
         >
-          <img
-            src={lightboxImg}
-            alt="Tam ekran"
-            style={{maxWidth:"95vw",maxHeight:"92vh",borderRadius:12,objectFit:"contain",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}}
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            onClick={() => setLightboxImg(null)}
-            style={{position:"absolute",top:16,right:16,background:"white",border:"none",borderRadius:"50%",width:36,height:36,fontSize:20,lineHeight:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}
-          >✕</button>
+          <img src={lightboxImg} alt="Tam ekran" style={{maxWidth:"95vw",maxHeight:"92vh",borderRadius:12,objectFit:"contain",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} onClick={(e) => e.stopPropagation()} />
+          <button onClick={() => setLightboxImg(null)} style={{position:"absolute",top:16,right:16,background:"white",border:"none",borderRadius:"50%",width:36,height:36,fontSize:20,lineHeight:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>✕</button>
         </div>
       )}
+
+      {/* Split Depo Modal */}
+      {splitModal && (() => {
+        const { item, newDepo } = splitModal;
+        const kalan = item.bought - getBatchSoldQtyForItem(item);
+        const mevcutDepo = item.depo || "Belirsiz";
+        const qty = Math.min(Math.max(Number(splitQty)||1, 1), kalan);
+        const kalanDiger = kalan - qty;
+        const handleSplit = async () => {
+          if (qty >= kalan) {
+            // Tümü yeni depoya — sadece depo güncelle
+            await updateBatchItem(item.id, { depo: newDepo });
+          } else {
+            // Mevcut satırın bought'unu kalan - qty kadar azalt (satılanlar korunur)
+            const yeniBought = item.bought - qty;
+            await updateBatchItem(item.id, { bought: yeniBought });
+            // Yeni satır: sadece taşınan kadar, satış yok
+            await supabase.from("batch_items").insert({
+              product_id: item.product_id,
+              batch_id: item.batch_id,
+              bought: qty,
+              buy_price: item.buy_price,
+              sale_price: item.sale_price,
+              depo: newDepo,
+            });
+            loadAll();
+          }
+          setSplitModal(null);
+          setSplitQty("");
+        };
+        return (
+          <div onClick={() => setSplitModal(null)} style={{position:"fixed",inset:0,zIndex:999998,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+            <div onClick={(e) => e.stopPropagation()} style={{background:"white",borderRadius:18,width:"100%",maxWidth:400,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{fontWeight:700,fontSize:"1rem",marginBottom:8}}>{productMap.get(item.product_id)?.name} — {batchMap.get(item.batch_id)?.name}</div>
+              <div style={{fontSize:"0.875rem",color:"#64748b",marginBottom:16}}>
+                Stokta <b>{kalan}</b> adet var. Kaçını <b>{newDepo}</b>'ya taşımak istiyorsunuz?
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+                <input className="input" type="number" min="1" max={kalan} value={splitQty} onChange={(e) => setSplitQty(e.target.value)} style={{width:100,textAlign:"center",fontSize:"1.25rem",fontWeight:700}} />
+                <div style={{fontSize:"0.8rem",color:"#64748b"}}>
+                  <div>{newDepo}: <b>{qty}</b> adet</div>
+                  {kalanDiger > 0 && <div>{mevcutDepo}: <b>{kalanDiger}</b> adet kalır</div>}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button type="button" className="btn" onClick={handleSplit}>Taşı</button>
+                <button type="button" className="btn-secondary" onClick={() => setSplitModal(null)}>İptal</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Sales Detail Modal */}
       {salesModalProductId && (() => {
@@ -1384,7 +1453,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                         </label>
                                         <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:"0.7rem",color:"#64748b"}}>
                                           Depo
-                                          <select className="input" style={{width:110}} value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
+                                          <select className="input" style={{width:110}} value={item.depo || "Belirsiz"} onChange={(e) => {
+                                            const newDepo = e.target.value;
+                                            const kalan = item.bought - getBatchSoldQtyForItem(item);
+                                            if (kalan > 1) {
+                                              setSplitModal({ item, newDepo });
+                                              setSplitQty(String(kalan));
+                                            } else {
+                                              updateBatchItem(item.id, { depo: newDepo });
+                                            }
+                                          }}>
                                             <option value="Aslı-depo">Aslı-depo</option>
                                             <option value="Mihri-depo">Mihri-depo</option>
                                             <option value="Belirsiz">Belirsiz</option>
@@ -1430,7 +1508,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <div className="product-batch-table">
                                   <div className="product-batch-thead"><div>Parti</div><div>Depo</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
-                                    const sold = getBatchSoldQty(p.id, item.batch_id);
+                                    const sold = getBatchSoldQtyForItem(item);
                                     return (
                                       <div key={item.id} className="product-batch-row">
                                         <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
@@ -1521,7 +1599,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {(() => {
                 const filtered = batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter);
                 const totalAlinan = filtered.reduce((s, item) => s + item.bought, 0);
-                const totalSatilan = filtered.reduce((s, item) => s + getBatchSoldQty(item.product_id, item.batch_id), 0);
+                const totalSatilan = filtered.reduce((s, item) => s + getBatchSoldQtyForItem(item), 0);
                 const totalKalan = totalAlinan - totalSatilan;
                 return (
                   <div className="rounded-xl bg-slate-100 flex divide-x divide-slate-300 flex-shrink-0">
@@ -1564,8 +1642,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ) : item.depo || "Belirsiz",
                       p?.name || "-",
                       editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                      getBatchSoldQty(item.product_id, item.batch_id),
-                      item.bought - getBatchSoldQty(item.product_id, item.batch_id),
+                      getBatchSoldQtyForItem(item),
+                      item.bought - getBatchSoldQtyForItem(item),
                       editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
                       editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
                       <div key={key} className="flex gap-2">
@@ -1779,7 +1857,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {/* Parti: seçili depoda birden fazla stoklu parti varsa göster */}
                 {saleForm.productId && (() => {
                   const partiler = batchItemsForProduct(saleForm.productId).filter((i) => {
-                    const kalan = i.bought - getBatchSoldQty(i.product_id, i.batch_id);
+                    const kalan = i.bought - getBatchSoldQtyForItem(i);
                     return kalan > 0 && i.depo === saleForm.depo;
                   });
                   const uniqueBatches = [...new Map(partiler.map((i) => [i.batch_id, i])).values()];
