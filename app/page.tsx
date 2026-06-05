@@ -179,7 +179,7 @@ function StatCard({ title, value, note }: { title: string; value: ReactNode; not
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
+function Table({ headers, rows }: { headers: ReactNode[]; rows: ReactNode[][] }) {
   return (
     <div className="overflow-x-auto rounded-xl border">
       <table className="w-full text-sm">
@@ -329,7 +329,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
       setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
-      // Initialize costInputs from loaded data
+      // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
         inputs[c.batch_id] = {
@@ -340,7 +340,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           kargo: String(c.kargo || 0),
         };
       }
-      setCostInputs(inputs);
+      setCostInputs((prev) => ({ ...inputs, ...prev }));
     } catch (err) {
       showError(err);
     } finally {
@@ -1863,13 +1863,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       const saveCost = async () => {
                         const existing = batchCosts.find((c) => c.batch_id === batch.id);
                         const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0 };
+                        let saveError = null;
                         if (existing) {
-                          await supabase.from("batch_costs").update(data).eq("id", existing.id);
-                          setBatchCosts((prev) => prev.map((c) => c.batch_id === batch.id ? { ...c, ...data } : c));
+                          const { error } = await supabase.from("batch_costs").update(data).eq("id", existing.id);
+                          saveError = error;
+                          if (!error) setBatchCosts((prev) => prev.map((c) => c.batch_id === batch.id ? { ...c, ...data, id: existing.id } : c));
                         } else {
-                          const { data: inserted } = await supabase.from("batch_costs").insert(data).select().single();
-                          if (inserted) setBatchCosts((prev) => [...prev, inserted as BatchCost]);
+                          const { data: inserted, error } = await supabase.from("batch_costs").insert(data).select();
+                          saveError = error;
+                          if (!error && inserted && inserted[0]) setBatchCosts((prev) => [...prev, inserted[0] as BatchCost]);
                         }
+                        if (saveError) { showError(saveError); return; }
                         setMessage(`${batch.name} maliyeti kaydedildi.`);
                       };
                       return (
