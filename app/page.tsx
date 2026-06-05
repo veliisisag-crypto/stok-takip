@@ -258,6 +258,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
+  const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Aslı-depo" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Aslı-depo" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
@@ -1620,39 +1621,60 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               })()}
               </div>
 
-              <Table
-                headers={["Parti", "Depo", "Ürün", "Alınan", "Satılan", "Kalan", "Alış", "Satış", "İşlem"]}
-                rows={batchItems
-                  .filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter)
-                  .map((item) => {
-                    const key = item.id;
-                    const p = productMap.get(item.product_id);
-                    return [
-                      editingBatchItemId === key ? (
-                        <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
-                          {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-                        </select>
-                      ) : batchMap.get(item.batch_id)?.name || "-",
-                      editingBatchItemId === key ? (
-                        <select className="input" value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
-                          <option value="Aslı-depo">Aslı-depo</option>
-                          <option value="Mihri-depo">Mihri-depo</option>
-                          <option value="Belirsiz">Belirsiz</option>
-                        </select>
-                      ) : item.depo || "Belirsiz",
-                      p?.name || "-",
-                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                      getBatchSoldQtyForItem(item),
-                      item.bought - getBatchSoldQtyForItem(item),
-                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
-                      editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
-                      <div key={key} className="flex gap-2">
-                        <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
-                        <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
-                      </div>,
-                    ];
-                  })}
-              />
+              {(() => {
+                const handleBRSort = (col: string) => setBatchReportSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
+                const brArr = (col: string) => batchReportSort.col === col ? (batchReportSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
+                const brTh = (col: string, label: string) => (
+                  <button type="button" onClick={() => handleBRSort(col)} style={{fontWeight:700,background:"none",border:"none",cursor:"pointer",padding:0,whiteSpace:"nowrap"}}>{label}{brArr(col)}</button>
+                );
+                const filteredItems = batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter);
+                const sortedItems = [...filteredItems].sort((a, b) => {
+                  let av: string|number = "", bv: string|number = "";
+                  if (batchReportSort.col === "batch") { av = batchMap.get(a.batch_id)?.name||""; bv = batchMap.get(b.batch_id)?.name||""; }
+                  else if (batchReportSort.col === "depo") { av = a.depo||""; bv = b.depo||""; }
+                  else if (batchReportSort.col === "product") { av = productMap.get(a.product_id)?.name||""; bv = productMap.get(b.product_id)?.name||""; }
+                  else if (batchReportSort.col === "bought") { av = a.bought; bv = b.bought; }
+                  else if (batchReportSort.col === "sold") { av = getBatchSoldQtyForItem(a); bv = getBatchSoldQtyForItem(b); }
+                  else if (batchReportSort.col === "kalan") { av = a.bought - getBatchSoldQtyForItem(a); bv = b.bought - getBatchSoldQtyForItem(b); }
+                  else if (batchReportSort.col === "buy_price") { av = a.buy_price; bv = b.buy_price; }
+                  else if (batchReportSort.col === "sale_price") { av = a.sale_price; bv = b.sale_price; }
+                  const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr");
+                  return batchReportSort.dir === "asc" ? cmp : -cmp;
+                });
+                return (
+                  <Table
+                    headers={[brTh("batch","Parti"), brTh("depo","Depo"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
+                    rows={sortedItems.map((item) => {
+                      const key = item.id;
+                      const p = productMap.get(item.product_id);
+                      return [
+                        editingBatchItemId === key ? (
+                          <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
+                            {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                          </select>
+                        ) : batchMap.get(item.batch_id)?.name || "-",
+                        editingBatchItemId === key ? (
+                          <select className="input" value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
+                            <option value="Aslı-depo">Aslı-depo</option>
+                            <option value="Mihri-depo">Mihri-depo</option>
+                            <option value="Belirsiz">Belirsiz</option>
+                          </select>
+                        ) : item.depo || "Belirsiz",
+                        p?.name || "-",
+                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
+                        getBatchSoldQtyForItem(item),
+                        item.bought - getBatchSoldQtyForItem(item),
+                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
+                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
+                        <div key={key} className="flex gap-2">
+                          <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
+                          <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
+                        </div>,
+                      ];
+                    })}
+                  />
+                );
+              })()}
             </Card>
           </div>
         )}
