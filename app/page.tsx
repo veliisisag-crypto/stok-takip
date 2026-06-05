@@ -175,8 +175,8 @@ function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
       <table className="w-full text-sm">
         <thead className="bg-slate-100">
           <tr>
-            {headers.map((h) => (
-              <th key={h} className="whitespace-nowrap p-3 text-left font-semibold">
+            {headers.map((h, i) => (
+              <th key={i} className="whitespace-nowrap p-3 text-left font-semibold">
                 {h}
               </th>
             ))}
@@ -230,6 +230,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
@@ -1039,6 +1040,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
 
+  const handleSalesSort = (col: string) => setSalesSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
+  const salesSortArr = (col: string) => salesSort.col === col ? (salesSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
+  const sortedSales = [...activeSales].sort((a, b) => {
+    let av: string|number = "", bv: string|number = "";
+    if (salesSort.col === "created_at") { av = a.created_at||""; bv = b.created_at||""; }
+    else if (salesSort.col === "customer") { av = customerMap.get(a.customer_id)?.name||""; bv = customerMap.get(b.customer_id)?.name||""; }
+    else if (salesSort.col === "product") { av = productMap.get(a.product_id)?.name||""; bv = productMap.get(b.product_id)?.name||""; }
+    else if (salesSort.col === "batch") { av = batchMap.get(a.batch_id)?.name||""; bv = batchMap.get(b.batch_id)?.name||""; }
+    else if (salesSort.col === "seller") { av = a.seller||""; bv = b.seller||""; }
+    else if (salesSort.col === "sale_type") { av = a.sale_type||""; bv = b.sale_type||""; }
+    else if (salesSort.col === "qty") { av = a.qty; bv = b.qty; }
+    else if (salesSort.col === "total") { av = a.total; bv = b.total; }
+    else if (salesSort.col === "cost") { av = a.cost; bv = b.cost; }
+    else if (salesSort.col === "profit") { av = a.total-a.cost; bv = b.total-b.cost; }
+    const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr");
+    return salesSort.dir === "asc" ? cmp : -cmp;
+  });
+  const salesTh = (col: string, label: string) => (
+    <button type="button" onClick={() => handleSalesSort(col)} style={{fontWeight:700,background:"none",border:"none",cursor:"pointer",padding:0,whiteSpace:"nowrap"}}>{label}{salesSortArr(col)}</button>
+  );
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       {/* Lightbox */}
@@ -1763,8 +1785,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             <Card title="Satış Listesi">
               <Table
-                headers={["Tarih", "Müşteri", "Ürün", "Parti", "Satıcı", "Tip", "Adet", "Tutar", "Maliyet", "Kâr/Zarar", "Durum", "İşlem"]}
-                rows={activeSales.map((sale) => {
+                headers={[salesTh("created_at","Tarih"), salesTh("customer","Müşteri"), salesTh("product","Ürün"), salesTh("batch","Parti"), salesTh("seller","Satıcı"), salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"), salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar"), "Durum", "İşlem"]}
+                rows={sortedSales.map((sale) => {
                   const isEditing = editingSaleId === sale.id;
                   const draft = saleDrafts[sale.id];
                   return [
@@ -1772,30 +1794,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     customerMap.get(sale.customer_id)?.name || "-",
                     productMap.get(sale.product_id)?.name || "-",
                     batchMap.get(sale.batch_id)?.name || "-",
-                    isEditing
-                      ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select>
-                      : sale.seller,
-                    isEditing
-                      ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select>
-                      : sale.sale_type,
-                    isEditing
-                      ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} />
-                      : sale.qty,
-                    isEditing
-                      ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} />
-                      : money(sale.total),
+                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
+                    isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
+                    isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
+                    isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
                     money(sale.cost),
                     <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
                     getSaleStatus(sale),
                     isEditing
-                      ? <div key="actions" className="flex gap-2">
-                          <button type="button" className="btn" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button>
-                          <button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button>
-                        </div>
-                      : <div key="actions" className="flex gap-2">
-                          <button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button>
-                          <button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button>
-                        </div>,
+                      ? <div key="actions" className="flex gap-2"><button type="button" className="btn" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
+                      : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button></div>,
                   ];
                 })}
               />
