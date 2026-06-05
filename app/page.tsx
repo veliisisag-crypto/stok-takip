@@ -101,6 +101,16 @@ type PartnerRow = {
   profit_share: number;
 };
 
+type BatchCost = {
+  id: string;
+  batch_id: string;
+  veli: number;
+  asli: number;
+  mihrimah: number;
+  kasa: number;
+  kargo: number;
+};
+
 type Period = {
   id: string;
   name: string;
@@ -219,6 +229,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
+  const [batchCosts, setBatchCosts] = useState<BatchCost[]>([]);
+  const [costInputs, setCostInputs] = useState<Record<string, Record<string, string>>>({});
   const [periods, setPeriods] = useState<Period[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
@@ -292,7 +304,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -301,9 +313,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500),
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
+        supabase.from("batch_costs").select("*"),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -315,6 +328,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPayments((paymentsRes.data || []) as Payment[]);
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
+      setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
+      // Initialize costInputs from loaded data
+      const inputs: Record<string, Record<string, string>> = {};
+      for (const c of (batchCostsRes.data || []) as BatchCost[]) {
+        inputs[c.batch_id] = {
+          veli: String(c.veli || 0),
+          asli: String(c.asli || 0),
+          mihrimah: String(c.mihrimah || 0),
+          kasa: String(c.kasa || 0),
+          kargo: String(c.kargo || 0),
+        };
+      }
+      setCostInputs(inputs);
     } catch (err) {
       showError(err);
     } finally {
@@ -1033,7 +1059,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["batchEntry", "Parti/Ürün Girişi"],
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
-    ["partners", "Ortaklık Muhasebesi"],
+    ["partners", "Parti Maliyet Kaydı"],
     ["period", "Dönem Açılış/Kapanış"],
     ["audit", "İşlem Geçmişi"],
   ];
@@ -1812,26 +1838,81 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "partners" && (
-          <div className="grid gap-4 md:grid-cols-3">
-            {partners.map((row) => (
-              <Card key={row.id}>
-                <h3 className="text-xl font-bold">{row.partner_name}</h3>
-                <p className="mb-4 text-sm text-slate-500">{row.role}</p>
-                <div className="space-y-2 text-sm">
-                  {(["contribution", "receivable", "debt", "profit_share"] as const).map((field) => (
-                    <div className="flex items-center justify-between gap-3" key={field}>
-                      <span>{field === "contribution" ? "Katılım" : field === "receivable" ? "Alacak" : field === "debt" ? "Borç" : "Kâr Payı/Mahsup"}</span>
-                      {editingPartnerId === row.id ? (
-                        <input className="input w-32" type="number" value={row[field]} onChange={(e) => updatePartner(row.id, field, Number(e.target.value || 0))} />
-                      ) : (
-                        <b className={field === "debt" && row.debt > 0 ? "text-red-600" : ""}>{money(Number(row[field] || 0))}</b>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button type="button" className="btn-secondary mt-4" onClick={() => setEditingPartnerId(editingPartnerId === row.id ? null : row.id)}>Değiştir</button>
-              </Card>
-            ))}
+          <div className="space-y-4">
+            <Card title="Parti Maliyet Kaydı">
+              <p className="mb-4 text-sm text-slate-500">Her parti satırındaki değerleri doldurun ve "Kaydet" butonuna basın. Yeni parti eklendiğinde otomatik alt satıra eklenir.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100">
+                      <th className="p-3 text-left font-semibold border border-slate-200">Parti</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Kasa</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Kargo</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toplam Maliyet</th>
+                      <th className="p-3 border border-slate-200"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedBatches.map((batch) => {
+                      const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0" };
+                      const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0" }), [field]: val } }));
+                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.kargo)||0);
+                      const saveCost = async () => {
+                        const existing = batchCosts.find((c) => c.batch_id === batch.id);
+                        const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0 };
+                        if (existing) {
+                          await supabase.from("batch_costs").update(data).eq("id", existing.id);
+                          setBatchCosts((prev) => prev.map((c) => c.batch_id === batch.id ? { ...c, ...data } : c));
+                        } else {
+                          const { data: inserted } = await supabase.from("batch_costs").insert(data).select().single();
+                          if (inserted) setBatchCosts((prev) => [...prev, inserted as BatchCost]);
+                        }
+                        setMessage(`${batch.name} maliyeti kaydedildi.`);
+                      };
+                      return (
+                        <tr key={batch.id} className="hover:bg-slate-50">
+                          <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
+                          {(["veli","asli","mihrimah","kasa","kargo"] as const).map((f) => (
+                            <td key={f} className="p-1 border border-slate-200">
+                              <input
+                                className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
+                                type="number"
+                                min="0"
+                                value={row[f] === "0" ? "" : row[f]}
+                                placeholder="0"
+                                onChange={(e) => setRow(f, e.target.value || "0")}
+                              />
+                            </td>
+                          ))}
+                          <td className="p-3 text-right font-bold border border-slate-200 bg-slate-50">{total > 0 ? total.toLocaleString("tr-TR") : "-"}</td>
+                          <td className="p-2 border border-slate-200">
+                            <button type="button" className="btn-secondary text-xs px-3 py-1" onClick={saveCost}>Kaydet</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {/* Totals row */}
+                    {sortedBatches.length > 0 && (
+                      <tr className="bg-slate-200 font-bold">
+                        <td className="p-3 border border-slate-300">Toplam</td>
+                        {(["veli","asli","mihrimah","kasa","kargo"] as const).map((f) => (
+                          <td key={f} className="p-3 text-right border border-slate-300">
+                            {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
+                          </td>
+                        ))}
+                        <td className="p-3 text-right border border-slate-300">
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0), 0).toLocaleString("tr-TR")}
+                        </td>
+                        <td className="border border-slate-300"></td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </div>
         )}
 
