@@ -71,6 +71,7 @@ type Sale = {
   customer_id: string;
   product_id: string;
   batch_id: string;
+  batch_item_id?: string | null;
   seller: Seller;
   sale_type: SaleType;
   qty: number;
@@ -391,21 +392,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const getBatchSoldQtyForItem = (item: BatchItem) => {
+    // First try exact match by batch_item_id (new sales)
+    const byItemId = activeSales.filter((s) => s.batch_item_id === item.id).reduce((sum, s) => sum + s.qty, 0);
+    // Also count sales without batch_item_id (old sales) using old batch_id method
+    const oldSales = activeSales.filter((s) => !s.batch_item_id && s.product_id === item.product_id && s.batch_id === item.batch_id);
+    if (oldSales.length === 0) return byItemId;
+    // For old sales, distribute among siblings proportionally (greedy by bought desc)
     const siblings = batchItems.filter((i) => i.product_id === item.product_id && i.batch_id === item.batch_id);
-    const totalSold = activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
-    if (siblings.length <= 1) return totalSold;
-    // Multiple rows: assign sales proportionally based on bought count
-    const totalBought = siblings.reduce((s, i) => s + i.bought, 0);
-    if (totalBought === 0) return 0;
-    // Sort siblings by bought desc to assign sales greedily to largest first
+    const oldTotal = oldSales.reduce((sum, s) => sum + s.qty, 0);
+    if (siblings.length <= 1) return byItemId + oldTotal;
     const sorted = [...siblings].sort((a, b) => b.bought - a.bought);
-    let remaining = totalSold;
+    let remaining = oldTotal;
     for (const sib of sorted) {
       const assign = Math.min(sib.bought, remaining);
-      if (sib.id === item.id) return assign;
+      if (sib.id === item.id) return byItemId + assign;
       remaining -= assign;
     }
-    return 0;
+    return byItemId;
   };
 
   const getProductTotalBought = (productId: string) => batchItemsForProduct(productId).reduce((sum, item) => sum + item.bought, 0);
@@ -729,6 +732,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         customer_id: customer.id,
         product_id: product.id,
         batch_id: item.batch_id,
+        batch_item_id: item.id,
         seller: saleForm.seller,
         sale_type: saleForm.saleType,
         qty: take,
