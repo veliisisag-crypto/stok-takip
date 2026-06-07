@@ -392,13 +392,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const getBatchSoldQtyForItem = (item: BatchItem) => {
     const siblings = batchItems.filter((i) => i.product_id === item.product_id && i.batch_id === item.batch_id);
-    if (siblings.length <= 1) {
-      return activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
-    }
-    // Multiple rows: assign all sales to the row with the highest bought count
-    const maxBought = Math.max(...siblings.map((s) => s.bought));
-    if (item.bought === maxBought) {
-      return activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
+    const totalSold = activeSales.filter((s) => s.product_id === item.product_id && s.batch_id === item.batch_id).reduce((sum, s) => sum + s.qty, 0);
+    if (siblings.length <= 1) return totalSold;
+    // Multiple rows: assign sales proportionally based on bought count
+    const totalBought = siblings.reduce((s, i) => s + i.bought, 0);
+    if (totalBought === 0) return 0;
+    // Sort siblings by bought desc to assign sales greedily to largest first
+    const sorted = [...siblings].sort((a, b) => b.bought - a.bought);
+    let remaining = totalSold;
+    for (const sib of sorted) {
+      const assign = Math.min(sib.bought, remaining);
+      if (sib.id === item.id) return assign;
+      remaining -= assign;
     }
     return 0;
   };
@@ -706,9 +711,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
 
-    // Filter by depo and batch if selected
+    // Filter by depo and batch if selected - strictly match depo
     const availableItems = batchItemsForProduct(product.id).filter((item) => {
-      const matchDepo = !saleForm.depo || item.depo === saleForm.depo || !item.depo || item.depo === "Belirsiz";
+      const matchDepo = saleForm.depo ? item.depo === saleForm.depo : true;
       const matchBatch = !saleForm.batchId || item.batch_id === saleForm.batchId;
       return matchDepo && matchBatch;
     });
