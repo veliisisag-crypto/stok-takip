@@ -35,6 +35,23 @@ type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
 type Seller = "Aslı" | "Mihrimah";
 
+type PreorderItem = {
+  id: string;
+  preorder_id: string;
+  product_id: string;
+  qty: number;
+};
+
+type Preorder = {
+  id: string;
+  customer_id: string;
+  created_by: string;
+  created_at: string;
+  note: string;
+  status: string;
+  items?: PreorderItem[];
+};
+
 type Product = {
   id: string;
   name: string;
@@ -236,6 +253,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [costInputs, setCostInputs] = useState<Record<string, Record<string, string>>>({});
   const [periods, setPeriods] = useState<Period[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [preorders, setPreorders] = useState<Preorder[]>([]);
+  const [preorderItems, setPreorderItems] = useState<PreorderItem[]>([]);
+  const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
+  const [editingPreorderId, setEditingPreorderId] = useState<string | null>(null);
+  const [convertModal, setConvertModal] = useState<{ preorder: Preorder; item: PreorderItem } | null>(null);
+  const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
+  const [convertPaid, setConvertPaid] = useState<string>("false");
 
   const [search, setSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -312,7 +336,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -322,6 +346,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
         supabase.from("batch_costs").select("*"),
+        supabase.from("preorders").select("*").order("created_at", { ascending: false }),
+        supabase.from("preorder_items").select("*"),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes]) {
@@ -337,6 +363,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
       setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
+      setPreorders((preordersRes.data || []) as Preorder[]);
+      setPreorderItems((preorderItemsRes.data || []) as PreorderItem[]);
       // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
@@ -928,6 +956,85 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
+  const savePreorder = async () => {
+    if (!preorderForm.customerId) return setMessage("Cari seçin.");
+    const validItems = preorderForm.items.filter((i) => i.productId && Number(i.qty) > 0);
+    if (!validItems.length) return setMessage("En az bir ürün ekleyin.");
+    const customer = customers.find((c) => c.id === preorderForm.customerId);
+    if (editingPreorderId) {
+      const { error } = await supabase.from("preorders").update({ customer_id: preorderForm.customerId, note: preorderForm.note }).eq("id", editingPreorderId);
+      if (error) return showError(error);
+      await supabase.from("preorder_items").delete().eq("preorder_id", editingPreorderId);
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty) })));
+      if (itemErr) return showError(itemErr);
+      await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", { items: validItems.length });
+      setEditingPreorderId(null);
+    } else {
+      const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor" }).select().single();
+      if (error || !newPO) return showError(error);
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty) })));
+      if (itemErr) return showError(itemErr);
+      await logAction("Ön sipariş oluşturuldu", "preorders", customer?.name || "", { items: validItems.length, oluşturan: currentUserEmail });
+    }
+    setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
+    loadAll();
+  };
+
+  const deletePreorder = async (id: string) => {
+    const po = preorders.find((p) => p.id === id);
+    if (!confirm("Bu ön sipariş silinecek. Emin misiniz?")) return;
+    await supabase.from("preorder_items").delete().eq("preorder_id", id);
+    const { error } = await supabase.from("preorders").delete().eq("id", id);
+    if (error) return showError(error);
+    await logAction("Ön sipariş silindi", "preorders", customerMap.get(po?.customer_id || "")?.name || "");
+    loadAll();
+  };
+
+  const startEditPreorder = (po: Preorder) => {
+    const items = preorderItems.filter((i) => i.preorder_id === po.id);
+    setPreorderForm({ customerId: po.customer_id, note: po.note || "", items: items.map((i) => ({ productId: i.product_id, qty: String(i.qty) })) });
+    setEditingPreorderId(po.id);
+    setActive("preorders");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openConvertModal = (po: Preorder, item: PreorderItem) => {
+    setConvertPrices({ [item.id]: "" });
+    setConvertPaid("false");
+    setConvertModal({ preorder: po, item });
+  };
+
+  const convertToSales = async () => {
+    if (!convertModal) return;
+    const { preorder: po, item } = convertModal;
+    const price = Number(convertPrices[item.id] || 0);
+    if (!price) return setMessage("Fiyat girin.");
+    const product = productMap.get(item.product_id);
+    if (!product) return;
+    const userDepo = currentUserEmail.includes("mihrimah") ? "Mihri-depo" : "Aslı-depo";
+    const otherDepo = userDepo === "Aslı-depo" ? "Mihri-depo" : "Aslı-depo";
+    const userDepoStock = batchItemsForProduct(product.id).filter((bi) => bi.depo === userDepo).reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
+    const depo = userDepoStock >= item.qty ? userDepo : otherDepo;
+    const seller: Seller = depo === "Aslı-depo" ? "Aslı" : "Mihrimah";
+    const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => bi.depo === depo && Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
+    if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok (${depo}).`);
+    const batchItem = depoBatchItems[0];
+    const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: convertPaid === "true", paid_amount: convertPaid === "true" ? price * item.qty : 0, depo, user_email: currentUserEmail });
+    if (error) return showError(error);
+    // Bu item'ı sil
+    await supabase.from("preorder_items").delete().eq("id", item.id);
+    // Kalan item var mı kontrol et, yoksa ön siparişi tamamlandı yap
+    const remaining = preorderItems.filter((i) => i.preorder_id === po.id && i.id !== item.id);
+    if (remaining.length === 0) {
+      await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
+    }
+    await allocatePaymentsForCustomer(po.customer_id);
+    await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty });
+    setConvertModal(null);
+    setMessage("");
+    loadAll();
+  };
+
   const markPayment = async (customerId: string) => {
     const balance = getCustomerBalance(customerId);
     if (balance <= 0) return;
@@ -1127,6 +1234,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const menu = [
     ["dashboard", "Özet Tablo"],
+    ["preorders", "Ön Siparişler"],
     ["products", "Ürünler"],
     ["batchEntry", "Parti/Ürün Girişi"],
     ["customers", "Müşteriler / Cari"],
@@ -1916,6 +2024,140 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
         )}
+
+        {active === "preorders" && (
+          <div className="space-y-6">
+            {/* Form */}
+            <Card title={editingPreorderId ? "Ön Sipariş Düzenle" : "Yeni Ön Sipariş"}>
+              <div className="space-y-3">
+                <div>
+                  <label className="label">Cari</label>
+                  <select className="input" value={preorderForm.customerId} onChange={(e) => setPreorderForm({ ...preorderForm, customerId: e.target.value })}>
+                    <option value="">Cari seçin</option>
+                    {sortedActiveCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Not (opsiyonel)</label>
+                  <input className="input" value={preorderForm.note} onChange={(e) => setPreorderForm({ ...preorderForm, note: e.target.value })} placeholder="Sipariş notu..." />
+                </div>
+                <div>
+                  <label className="label">Ürünler</label>
+                  <div className="space-y-2">
+                    {preorderForm.items.map((item, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <select className="input flex-1" value={item.productId} onChange={(e) => { const items = [...preorderForm.items]; items[idx].productId = e.target.value; setPreorderForm({ ...preorderForm, items }); }}>
+                          <option value="">Ürün seçin</option>
+                          {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <input className="input w-20" type="number" min="1" value={item.qty} onChange={(e) => { const items = [...preorderForm.items]; items[idx].qty = e.target.value; setPreorderForm({ ...preorderForm, items }); }} placeholder="Adet" />
+                        {preorderForm.items.length > 1 && (
+                          <button type="button" className="btn-danger" style={{padding:"6px 10px"}} onClick={() => { const items = preorderForm.items.filter((_, i) => i !== idx); setPreorderForm({ ...preorderForm, items }); }}>✕</button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" className="btn-secondary text-sm" onClick={() => setPreorderForm({ ...preorderForm, items: [...preorderForm.items, { productId: "", qty: "1" }] })}>+ Ürün Ekle</button>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="btn" onClick={savePreorder}>{editingPreorderId ? "Güncelle" : "Kaydet"}</button>
+                  {editingPreorderId && <button type="button" className="btn-secondary" onClick={() => { setEditingPreorderId(null); setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] }); }}>Vazgeç</button>}
+                </div>
+                {message && <p className="text-sm text-red-600">{message}</p>}
+              </div>
+            </Card>
+
+            {/* Bekleyen Ön Siparişler */}
+            <Card title="Bekleyen Ön Siparişler">
+              {preorders.filter((po) => po.status === "bekliyor").length === 0
+                ? <p className="text-sm text-slate-500">Bekleyen ön sipariş yok.</p>
+                : preorders.filter((po) => po.status === "bekliyor").map((po) => {
+                  const items = preorderItems.filter((i) => i.preorder_id === po.id);
+                  const customer = customerMap.get(po.customer_id);
+                  return (
+                    <div key={po.id} className="border rounded-xl p-4 mb-3 bg-white">
+                      <div className="flex justify-between items-start flex-wrap gap-2">
+                        <div>
+                          <div className="font-semibold text-slate-800">{customer?.name || "—"}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{toTR(po.created_at, true)} · {po.created_by} {po.note ? `· ${po.note}` : ""}</div>
+                          <ul className="mt-2 space-y-1">
+                            {items.map((item) => (
+                              <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
+                                <span>• {productMap.get(item.product_id)?.name || "—"} — {item.qty} adet</span>
+                                <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => openConvertModal(po, item)}>Satışa Dönüştür</button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => startEditPreorder(po)}>Düzenle</button>
+                          <button type="button" className="btn-danger" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => deletePreorder(po.id)}>Sil</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </Card>
+
+            {/* Tamamlanan Ön Siparişler */}
+            <Card title="Tamamlanan Ön Siparişler">
+              {preorders.filter((po) => po.status === "tamamlandı").length === 0
+                ? <p className="text-sm text-slate-500">Tamamlanan ön sipariş yok.</p>
+                : preorders.filter((po) => po.status === "tamamlandı").map((po) => {
+                  const items = preorderItems.filter((i) => i.preorder_id === po.id);
+                  const customer = customerMap.get(po.customer_id);
+                  return (
+                    <div key={po.id} className="border rounded-xl p-4 mb-3 bg-slate-50">
+                      <div className="flex justify-between items-start flex-wrap gap-2">
+                        <div>
+                          <div className="font-semibold text-slate-500">{customer?.name || "—"} <span className="text-xs text-green-600 font-semibold ml-1">✓ Tamamlandı</span></div>
+                          <div className="text-xs text-slate-400 mt-0.5">{toTR(po.created_at, true)} · {po.created_by}</div>
+                          <ul className="mt-1 space-y-0.5">
+                            {items.map((item) => (
+                              <li key={item.id} className="text-xs text-slate-500">• {productMap.get(item.product_id)?.name || "—"} — {item.qty} adet</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <button type="button" className="btn-danger" style={{fontSize:"0.75rem", padding:"4px 10px"}} onClick={() => deletePreorder(po.id)}>Sil</button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </Card>
+          </div>
+        )}
+
+        {convertModal && (() => {
+          const { preorder: po, item } = convertModal;
+          const customer = customerMap.get(po.customer_id);
+          const product = productMap.get(item.product_id);
+          return (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+              <div style={{background:"white",borderRadius:"16px",padding:"24px",width:"100%",maxWidth:"400px"}}>
+                <h2 className="text-lg font-bold mb-1">Satışa Dönüştür</h2>
+                <p className="text-sm text-slate-500 mb-4">{customer?.name} · {product?.name} × {item.qty}</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">Birim Fiyat</label>
+                    <input className="input" type="number" min="0" placeholder="Birim fiyat" value={convertPrices[item.id] || ""} onChange={(e) => setConvertPrices({ [item.id]: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Ödeme Türü</label>
+                    <select className="input" value={convertPaid} onChange={(e) => setConvertPaid(e.target.value)}>
+                      <option value="false">Cari borç</option>
+                      <option value="true">Peşin / Ödendi</option>
+                    </select>
+                  </div>
+                </div>
+                {message && <p className="text-sm text-red-600 mt-2">{message}</p>}
+                <div className="flex gap-2 mt-4">
+                  <button type="button" className="btn" onClick={convertToSales}>Satışa Dönüştür</button>
+                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); }}>Vazgeç</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {active === "sales" && (
           <div className="space-y-4">
