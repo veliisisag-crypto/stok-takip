@@ -110,6 +110,8 @@ type BatchCost = {
   mihrimah: number;
   kasa: number;
   kargo: number;
+  diger: number;
+  aciklama: string;
 };
 
 type Period = {
@@ -243,10 +245,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [splitModal, setSplitModal] = useState<{item: BatchItem; newDepo: string} | null>(null);
   const [splitQty, setSplitQty] = useState<string>("");
-  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType }>>({});
+  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType; paid: boolean }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
@@ -342,6 +346,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           mihrimah: String(c.mihrimah || 0),
           kasa: String(c.kasa || 0),
           kargo: String(c.kargo || 0),
+          diger: String(c.diger || 0),
+          aciklama: c.aciklama || "",
         };
       }
       setCostInputs((prev) => ({ ...inputs, ...prev }));
@@ -503,7 +509,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     return [...saleRows, ...paymentRows, ...auditRows]
       .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())
-      .slice(0, 20);
+      .slice(0, 50);
   }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
 
   const uploadImageToStorage = async (base64: string, fileName: string): Promise<string | null> => {
@@ -709,7 +715,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const product = products.find((p) => p.id === saleForm.productId);
     const qty = Number(saleForm.qty || 0);
     if (!customer || !product || qty <= 0) return setMessage("Cari, ürün ve adet zorunlu.");
-    if (getProductStock(product.id) < qty) return setMessage("Yetersiz stok.");
+    // Depo bazlı stok kontrolü
+    const depoStock = batchItemsForProduct(product.id)
+      .filter((i) => i.depo === saleForm.depo)
+      .reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+    if (depoStock < qty) return setMessage(`Yetersiz stok. ${saleForm.depo} deposunda bu üründen sadece ${depoStock} adet var.`);
 
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
@@ -774,7 +784,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const dbPatch: Record<string, unknown> = {};
     if (patch.seller !== undefined) dbPatch.seller = patch.seller;
     if (patch.sale_type !== undefined) dbPatch.sale_type = patch.sale_type;
-    if (patch.paid !== undefined) dbPatch.paid = patch.paid;
+    if (patch.paid !== undefined) {
+      dbPatch.paid = patch.paid;
+      // paid=false yapılınca paid_amount sıfırla, paid=true yapılınca total'e eşitle
+      const sale = sales.find((s) => s.id === saleId);
+      const total = patch.total !== undefined ? Number(patch.total) : (sale?.total ?? 0);
+      dbPatch.paid_amount = patch.paid ? total : 0;
+    }
     if (patch.qty !== undefined) dbPatch.qty = patch.qty;
     if (patch.total !== undefined) dbPatch.total = patch.total;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
@@ -794,7 +810,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const startSaleEdit = (sale: Sale) => {
     setSaleDrafts((prev) => ({
       ...prev,
-      [sale.id]: { qty: String(sale.qty), total: String(sale.total), seller: sale.seller, sale_type: sale.sale_type },
+      [sale.id]: { qty: String(sale.qty), total: String(sale.total), seller: sale.seller, sale_type: sale.sale_type, paid: sale.paid },
     }));
     setEditingSaleId(sale.id);
   };
@@ -807,6 +823,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       total: Number(draft.total || 0),
       seller: draft.seller,
       sale_type: draft.sale_type,
+      paid: draft.paid,
     });
     setEditingSaleId(null);
     const next = { ...saleDrafts };
@@ -888,6 +905,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
+    loadAll();
+  };
+
+  const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
+    if (!newAmount || newAmount <= 0) return setMessage("Tutar 0'dan büyük olmalı.");
+    const { error } = await supabase.from("payments").update({ amount: newAmount }).eq("id", paymentId);
+    if (error) return showError(error);
+    try { await allocatePaymentsForCustomer(customerId); } catch (err) { return showError(err); }
+    await logAction("Ödeme güncellendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: newAmount });
+    setEditingPaymentId(null);
+    setEditingPaymentAmount("");
+    loadAll();
+  };
+
+  const deletePayment = async (paymentId: string, customerId: string, amount: number) => {
+    if (!confirm(`${money(amount)} tutarındaki ödeme silinecek. Emin misiniz?`)) return;
+    const { error } = await supabase.from("payments").delete().eq("id", paymentId);
+    if (error) return showError(error);
+    try { await allocatePaymentsForCustomer(customerId); } catch (err) { return showError(err); }
+    await logAction("Ödeme silindi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
     loadAll();
   };
 
@@ -1844,13 +1881,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <h4 className="product-batch-title">Ödeme Hareketleri</h4>
                             <div className="product-batch-table">
                               <div className="cari-pay-thead">
-                                <div>Tarih</div><div>Tutar</div>
+                                <div>Tarih</div><div>Tutar</div><div></div>
                               </div>
                               {customerPayments.length ? customerPayments.map((pay) => {
+                                const isEditingPay = editingPaymentId === pay.id;
                                 return (
                                   <div key={pay.id} className="cari-pay-row">
                                     <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{toTR(pay.created_at)}</div>
-                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>{money(pay.amount)}</div>
+                                    <div className="product-batch-cell" style={{fontSize:"0.8rem"}}>
+                                      {isEditingPay
+                                        ? <input className="input" style={{width:90, padding:"2px 6px", fontSize:"0.8rem"}} type="number" min="1" value={editingPaymentAmount} onChange={(e) => setEditingPaymentAmount(e.target.value)} />
+                                        : money(pay.amount)}
+                                    </div>
+                                    <div className="product-batch-cell" style={{display:"flex", gap:4}}>
+                                      {isEditingPay ? (<>
+                                        <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => updatePayment(pay.id, Number(editingPaymentAmount), c.id)}>Kaydet</button>
+                                        <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => { setEditingPaymentId(null); setEditingPaymentAmount(""); }}>Vazgeç</button>
+                                      </>) : (<>
+                                        <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => { setEditingPaymentId(pay.id); setEditingPaymentAmount(String(pay.amount)); }}>Düzenle</button>
+                                        <button type="button" className="btn-danger" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => deletePayment(pay.id, c.id, pay.amount)}>Sil</button>
+                                      </>)}
+                                    </div>
                                   </div>
                                 );
                               }) : <div className="product-batch-empty">Ödeme yok.</div>}
@@ -1877,10 +1928,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </select>
                 <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value, batchId: "" })}>
                   <option value="">Ürün seçin</option>
-                  {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name} - Stok: {getProductStock(p.id)}</option>)}
+                  {sortedActiveProducts
+                    .filter((p) => {
+                      const asliStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Aslı-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const mihriStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Mihri-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      return asliStock > 0 || mihriStock > 0;
+                    })
+                    .map((p) => {
+                      const asliStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Aslı-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const mihriStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Mihri-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      return <option key={p.id} value={p.id}>{p.name}  A: {asliStock}  M: {mihriStock}</option>;
+                    })}
                 </select>
                 {/* Depo: her zaman göster, kullanıcıya göre default */}
-                <select className="input" value={saleForm.depo} onChange={(e) => setSaleForm({ ...saleForm, depo: e.target.value, batchId: "" })}>
+                <select className="input" value={saleForm.depo} onChange={(e) => setSaleForm({ ...saleForm, depo: e.target.value, productId: "", batchId: "" })}>
                   <option value="Aslı-depo">Aslı-depo</option>
                   <option value="Mihri-depo">Mihri-depo</option>
                 </select>
@@ -1930,11 +1991,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     batchMap.get(sale.batch_id)?.name || "-",
                     isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
+                    isEditing ? <select key="paid" className="input" value={draft.paid ? "true" : "false"} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], paid: e.target.value === "true" } }))}><option value="false">Cari borç</option><option value="true">Ödendi</option></select> : getSaleStatus(sale),
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
                     money(sale.cost),
                     <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
-                    getSaleStatus(sale),
                     isEditing
                       ? <div key="actions" className="flex gap-2"><button type="button" className="btn" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
                       : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button></div>,
@@ -1959,18 +2020,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kasa</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kargo</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Diğer</th>
+                      <th className="p-3 text-left font-semibold border border-slate-200">Açıklama</th>
                       <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toplam Maliyet</th>
                       <th className="p-3 border border-slate-200"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedBatches.map((batch) => {
-                      const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0" };
-                      const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0" }), [field]: val } }));
-                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.kargo)||0);
+                      const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
+                      const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
+                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.kargo)||0) + (Number(row.diger)||0);
                       const saveCost = async () => {
                         const existing = batchCosts.find((c) => c.batch_id === batch.id);
-                        const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0 };
+                        const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "" };
                         let saveError = null;
                         if (existing) {
                           const { error } = await supabase.from("batch_costs").update(data).eq("id", existing.id);
@@ -1987,7 +2050,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       return (
                         <tr key={batch.id} className="hover:bg-slate-50">
                           <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
-                          {(["veli","asli","mihrimah","kasa","kargo"] as const).map((f) => (
+                          {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
                                 className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
@@ -1999,6 +2062,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               />
                             </td>
                           ))}
+                          <td className="p-1 border border-slate-200">
+                            <input
+                              className="w-full p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded text-sm"
+                              type="text"
+                              value={row.aciklama || ""}
+                              placeholder="—"
+                              onChange={(e) => setRow("aciklama", e.target.value)}
+                            />
+                          </td>
                           <td className="p-3 text-right font-bold border border-slate-200 bg-slate-50">{total > 0 ? total.toLocaleString("tr-TR") : "-"}</td>
                           <td className="p-2 border border-slate-200">
                             <button type="button" className="btn-secondary text-xs px-3 py-1" onClick={saveCost}>Kaydet</button>
@@ -2010,13 +2082,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.length > 0 && (
                       <tr className="bg-slate-200 font-bold">
                         <td className="p-3 border border-slate-300">Toplam</td>
-                        {(["veli","asli","mihrimah","kasa","kargo"] as const).map((f) => (
+                        {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
                             {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
                           </td>
                         ))}
+                        <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
                         </td>
                         <td className="border border-slate-300"></td>
                       </tr>
@@ -2170,8 +2243,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .cari-sales-thead { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
         .cari-sales-row { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
         .cari-sales-row:last-child { border-bottom: none; }
-        .cari-pay-thead { display: grid; grid-template-columns: 1fr 1fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
-        .cari-pay-row { display: grid; grid-template-columns: 1fr 1fr; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
+        .cari-pay-thead { display: grid; grid-template-columns: 1fr 1fr auto; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
+        .cari-pay-row { display: grid; grid-template-columns: 1fr 1fr auto; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; align-items: center; }
         .cari-pay-row:last-child { border-bottom: none; }
       `}</style>
     </main>
