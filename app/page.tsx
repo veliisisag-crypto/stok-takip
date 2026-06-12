@@ -1444,7 +1444,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
-              <StatCard title="Kasadaki Nakit" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
+              <StatCard title="Tahsilatlar" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
               <StatCard title="Mevcut Stok" value={totals.totalStock} />
             </div>
