@@ -2272,7 +2272,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.map((batch) => {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
-                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.kargo)||0) + (Number(row.diger)||0);
+                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.diger)||0);
                       const saveCost = async () => {
                         const existing = batchCosts.find((c) => c.batch_id === batch.id);
                         const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "" };
@@ -2331,7 +2331,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         ))}
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
                         </td>
                         <td className="border border-slate-300"></td>
                       </tr>
