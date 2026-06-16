@@ -51,7 +51,24 @@ export default function GaleriPage() {
         const group = visibleProducts.filter((p) => p.gender_category === gender);
         if (!group.length) return null;
         return (
-          <div key={gender} style={{ marginBottom: 8 }}>
+          <div key={gender} style={{ marginBottom: 16 }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 8,
+            }}>
+              <div style={{
+                color: "#ffffff",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                opacity: 0.5,
+                whiteSpace: "nowrap",
+              }}>{gender}</div>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.1)" }} />
+            </div>
             <div style={{
               display: "grid",
               gridTemplateColumns: "repeat(3, 1fr)",
