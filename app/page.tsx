@@ -1246,7 +1246,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
     ["partners", "Parti Maliyet Kaydı"],
-    ["period", "Dönem Açılış/Kapanış"],
+    ["period", "Dönem Kapanışı"],
     ["audit", "İşlem Geçmişi"],
   ];
 
@@ -2395,21 +2395,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "period" && (
           <div className="space-y-4">
-            <Card title="Yeni Dönem Açılışı">
-              <p className="mb-4 text-sm text-slate-500">Yeni parti alımında sponsor ve ortak katkılarını girin. Ürün maliyeti ve kargo Aslı/Mihrimah arasında %50/%50 sorumluluk olarak hesaplanır.</p>
-              <div className="grid gap-3 md:grid-cols-5">
-                <label className="field-label"><span>Dönem adı</span><input className="input" value={periodForm.name} onChange={(e) => setPeriodForm({ ...periodForm, name: e.target.value })} /></label>
-                <label className="field-label"><span>Veli sponsor katkısı</span><input className="input" type="number" value={periodForm.sponsor} onChange={(e) => setPeriodForm({ ...periodForm, sponsor: e.target.value })} /></label>
-                <label className="field-label"><span>Aslı katkısı</span><input className="input" type="number" value={periodForm.asli} onChange={(e) => setPeriodForm({ ...periodForm, asli: e.target.value })} /></label>
-                <label className="field-label"><span>Mihrimah katkısı</span><input className="input" type="number" value={periodForm.mihrimah} onChange={(e) => setPeriodForm({ ...periodForm, mihrimah: e.target.value })} /></label>
-                <label className="field-label"><span>Ürün toplam maliyeti</span><input className="input" type="number" value={periodForm.productCost} onChange={(e) => setPeriodForm({ ...periodForm, productCost: e.target.value })} /></label>
-                <label className="field-label"><span>Kargo gideri</span><input className="input" type="number" value={periodForm.shippingCost} onChange={(e) => setPeriodForm({ ...periodForm, shippingCost: e.target.value })} /></label>
-                <button type="button" className="btn" onClick={applyPeriodOpening}>Dönem Açılışını İşle</button>
-              </div>
-            </Card>
-
-            <Card title="Dönem Kapatma Simülasyonu">
-              <p className="mb-5 text-slate-500">Yeni parti alımından önce kasa eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
+            <Card title="Dönem Kapanışı">
+              <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
                 <div className="rounded-xl bg-slate-100 p-4">Toplam tahsilat<br /><b>{money(totals.grossCash)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Önceki dağıtımlar<br /><b>{money(totals.distributedCash)}</b></div>
