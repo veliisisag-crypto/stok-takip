@@ -1236,7 +1236,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["dashboard", "Özet Tablo"],
     ["preorders", "Ön Siparişler"],
     ["products", "Ürünler"],
-    ["gallery", "Toplu Ürün Resimleri"],
     ["batchEntry", "Parti/Ürün Girişi"],
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
@@ -1494,10 +1493,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <div className="product-page">
               <div className="product-page-header">
                 <h2 className="product-page-title">Ürün Listesi ve Stok Özeti</h2>
-                <div style={{display:"flex", gap:8}}>
-                  <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
-                  <a href="/galeri" target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px", textDecoration:"none"}}>🔗 Paylaşım Linki</a>
-                </div>
               </div>
               <div className="product-add-wrap product-add-wrap--top">
                 <details className="w-full">
@@ -1708,46 +1703,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
         )}
-
-        {active === "gallery" && (() => {
-          const groups: { label: string; gender: GenderCategory }[] = [
-            { label: "Erkek", gender: "Erkek" },
-            { label: "Kadın", gender: "Kadın" },
-            { label: "Unisex", gender: "Unisex" },
-          ];
-          return (
-            <div>
-              <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:20}}>
-                <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("products")}>← Ürünlere Dön</button>
-                <h2 style={{fontSize:"1.1rem", fontWeight:600}}>Toplu Ürün Resimleri</h2>
-              </div>
-              {groups.map((g) => {
-                const groupProducts = sortedProducts.filter((p) => !p.passive && p.gender_category === g.gender && p.image_url);
-                if (!groupProducts.length) return null;
-                return (
-                  <div key={g.gender} style={{marginBottom: 32}}>
-                    <div style={{fontSize:"0.75rem", fontWeight:700, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, paddingBottom:6, borderBottom:"1.5px solid var(--color-border-tertiary)"}}>
-                      {g.label} — {groupProducts.length} ürün
-                    </div>
-                    <div style={{display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8}}>
-                      {groupProducts.map((p) => (
-                        <div key={p.id} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
-                          <div style={{width:"100%", aspectRatio:"1/1", borderRadius:10, overflow:"hidden", background:"#f8fafc", border:"1px solid #e2e8f0", cursor:"pointer"}}
-                            onClick={() => setLightboxImg(p.image_url)}>
-                            <img src={p.image_url!} alt={p.name} style={{width:"100%", height:"100%", objectFit:"cover"}} />
-                          </div>
-                          <div style={{fontSize:"0.65rem", textAlign:"center", color:"var(--color-text-secondary)", lineHeight:1.2, wordBreak:"break-word", maxWidth:"100%"}}>
-                            {p.name}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
 
         {active === "batchEntry" && (
           <div className="space-y-4">
