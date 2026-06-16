@@ -4,5 +4,10 @@ Sultan İçlek tonoğlun'dan 1.6.2026'da 1500 TL geldi, kim olduğu bilinmiyor.
 
 git status
 git add .
-git commit -m "etiket düzeltmesi"
+git commit -m "galeri eklendi 2"
 git push
+
+
+Rq6*dM1^sG5@kCpJ  mihrimah
+Tz4!bN8&jF3%hYeW  aslı
+Kx9#mP2$vL7@nQwR  veli

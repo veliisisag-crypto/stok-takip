@@ -2570,7 +2570,7 @@ export default function Home() {
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow">
           <h1 className="mb-2 text-2xl font-bold">Giriş Yap</h1>
-          <p className="mb-6 text-slate-500">Satış / stok paneli</p>
+          
           <div className="space-y-3">
             <input className="w-full rounded-xl border p-3 text-slate-900" placeholder="E-posta" value={email} onChange={(e) => setEmail(e.target.value)} />
             <input className="w-full rounded-xl border p-3 text-slate-900" placeholder="Şifre" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
