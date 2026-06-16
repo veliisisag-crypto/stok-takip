@@ -145,6 +145,10 @@ type Period = {
   closing_cash?: number | null;
   asli_distribution?: number | null;
   mihrimah_distribution?: number | null;
+  urun_maliyeti?: number | null;
+  diger_maliyetler?: number | null;
+  toplam_tahsilat?: number | null;
+  donem_kari?: number | null;
   closed: boolean;
   created_at: string;
   closed_at: string | null;
@@ -277,9 +281,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
+  const [saleStatusFilter, setSaleStatusFilter] = useState<string>("Tümü");
   const [splitModal, setSplitModal] = useState<{item: BatchItem; newDepo: string} | null>(null);
   const [splitQty, setSplitQty] = useState<string>("");
-  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; seller: Seller; sale_type: SaleType; paid: boolean }>>({});
+  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; cost: string; seller: Seller; sale_type: SaleType; paid: boolean }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
@@ -826,6 +831,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     if (patch.qty !== undefined) dbPatch.qty = patch.qty;
     if (patch.total !== undefined) dbPatch.total = patch.total;
+    if (patch.cost !== undefined) dbPatch.cost = patch.cost;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
     const updatedSale = sales.find((sale) => sale.id === saleId);
@@ -843,7 +849,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const startSaleEdit = (sale: Sale) => {
     setSaleDrafts((prev) => ({
       ...prev,
-      [sale.id]: { qty: String(sale.qty), total: String(sale.total), seller: sale.seller, sale_type: sale.sale_type, paid: sale.paid },
+      [sale.id]: { qty: String(sale.qty), total: String(sale.total), cost: String(sale.cost), seller: sale.seller, sale_type: sale.sale_type, paid: sale.paid },
     }));
     setEditingSaleId(sale.id);
   };
@@ -854,6 +860,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await updateSale(saleId, {
       qty: Number(draft.qty || 0),
       total: Number(draft.total || 0),
+      cost: Number(draft.cost || 0),
       seller: draft.seller,
       sale_type: draft.sale_type,
       paid: draft.paid,
@@ -1254,7 +1261,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const handleSalesSort = (col: string) => setSalesSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
   const salesSortArr = (col: string) => salesSort.col === col ? (salesSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
-  const sortedSales = [...activeSales].sort((a, b) => {
+  const sortedSales = [...activeSales].filter((sale) => {
+    if (saleStatusFilter === "Tümü") return true;
+    const status = getSaleStatus(sale);
+    if (typeof status === "string") return status === saleStatusFilter;
+    return false;
+  }).sort((a, b) => {
     let av: string|number = "", bv: string|number = "";
     if (salesSort.col === "created_at") { av = a.created_at||""; bv = b.created_at||""; }
     else if (salesSort.col === "customer") { av = customerMap.get(a.customer_id)?.name||""; bv = customerMap.get(b.customer_id)?.name||""; }
@@ -1266,6 +1278,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     else if (salesSort.col === "total") { av = a.total; bv = b.total; }
     else if (salesSort.col === "cost") { av = a.cost; bv = b.cost; }
     else if (salesSort.col === "profit") { av = a.total-a.cost; bv = b.total-b.cost; }
+    else if (salesSort.col === "status") { av = getSaleStatus(a) as string||""; bv = getSaleStatus(b) as string||""; }
     const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr");
     return salesSort.dir === "asc" ? cmp : -cmp;
   });
@@ -2271,8 +2284,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </Card>
 
             <Card title="Satış Listesi">
+              <div style={{marginBottom:12, display:"flex", alignItems:"center", gap:8}}>
+                <label style={{fontSize:"0.8rem", color:"var(--color-text-secondary)"}}>Durum:</label>
+                <select className="input" style={{width:"auto", fontSize:"0.8rem", padding:"4px 10px"}} value={saleStatusFilter} onChange={(e) => setSaleStatusFilter(e.target.value)}>
+                  <option>Tümü</option>
+                  <option>Peşin</option>
+                  <option>Ödendi</option>
+                  <option>Cari borç</option>
+                  <option>Kısmi</option>
+                </select>
+                {saleStatusFilter !== "Tümü" && <span style={{fontSize:"0.75rem", color:"var(--color-text-secondary)"}}>{sortedSales.length} kayıt</span>}
+              </div>
               <Table
-                headers={[salesTh("created_at","Tarih"), salesTh("customer","Müşteri"), salesTh("product","Ürün"), salesTh("batch","Parti"), salesTh("seller","Satıcı"), salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"), salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar"), "Durum", "İşlem"]}
+                headers={[salesTh("created_at","Tarih"), salesTh("customer","Müşteri"), salesTh("product","Ürün"), salesTh("batch","Parti"), salesTh("seller","Satıcı"), salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"), salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar"), salesTh("status","Durum"), "İşlem"]}
                 rows={sortedSales.map((sale) => {
                   const isEditing = editingSaleId === sale.id;
                   const draft = saleDrafts[sale.id];
@@ -2283,11 +2307,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     batchMap.get(sale.batch_id)?.name || "-",
                     isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
-                    isEditing ? <select key="paid" className="input" value={draft.paid ? "true" : "false"} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], paid: e.target.value === "true" } }))}><option value="false">Cari borç</option><option value="true">Ödendi</option></select> : getSaleStatus(sale),
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
-                    money(sale.cost),
-                    <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                    isEditing ? <input key="cost" className="input" style={{width:100}} type="number" min="0" value={draft.cost} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], cost: e.target.value } }))} /> : money(sale.cost),
+                    isEditing
+                      ? <span key="profit" className={(Number(draft.total||0) - Number(draft.cost||0)) < 0 ? "text-red-600" : ""}>{money(Number(draft.total||0) - Number(draft.cost||0))}</span>
+                      : <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                    isEditing ? <select key="paid" className="input" value={draft.paid ? "true" : "false"} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], paid: e.target.value === "true" } }))}><option value="false">Cari borç</option><option value="true">Ödendi</option></select> : getSaleStatus(sale),
                     isEditing
                       ? <div key="actions" className="flex gap-2"><button type="button" className="btn" onClick={() => saveSaleEdit(sale.id)}>Kaydet</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
                       : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" onClick={() => deleteSale(sale.id)}>Sil</button></div>,
@@ -2395,6 +2421,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "period" && (
           <div className="space-y-4">
+            <div style={{background:"#fefce8", border:"1px solid #fde047", borderRadius:12, padding:"14px 16px", fontSize:"0.82rem", color:"#713f12", lineHeight:1.6}}>
+              <div style={{fontWeight:700, marginBottom:4}}>📌 Maliyet Hesaplama Notu</div>
+              1–2–3–4–5–6. partilerinin tüm extra maliyetleri toplandı, tüm alınan ürün adedine bölündü. <strong>Ürün başına 38,4 TL ek maliyet</strong> geldi. Dönem kapanışında tahsilatlara konu satışların maliyeti hesaplanacak, bu ek maliyetler üstüne eklenecek ve dönem karı bulunacak.<br />
+              <strong>Dönem Karı = Dönem Tahsilatları − Dönem Maliyetleri</strong>
+            </div>
             <Card title="Dönem Kapanışı">
               <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
@@ -2414,9 +2445,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <thead>
                         <tr style={{background:"#f8fafc", borderBottom:"1.5px solid #e2e8f0"}}>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Dönem</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Dağıtılan Kasa</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Dağıtım</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihrimah Dağıtım</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Ürün Maliyeti</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Diğer Maliyetler</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Dönem Karı</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Toplam Tahsilat</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Net Ödeme</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihri Net Ödeme</th>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Durum</th>
@@ -2427,9 +2459,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         {periods.map((p) => (
                           <tr key={p.id} style={{borderBottom:"1px solid #f1f5f9"}}>
                             <td style={{padding:"10px 12px"}}>{p.name}</td>
-                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.closing_cash || 0))}</td>
-                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.asli_distribution || 0))}</td>
-                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.mihrimah_distribution || 0))}</td>
+                            {(["urun_maliyeti","diger_maliyetler","donem_kari"] as const).map((field) => (
+                              <td key={field} style={{padding:"10px 12px", textAlign:"right"}}>
+                                {editingNetOdemeId === `${p.id}-${field}` ? (
+                                  <div style={{display:"flex", gap:4, justifyContent:"flex-end", alignItems:"center"}}>
+                                    <input type="number" className="input" style={{width:90, padding:"3px 8px", fontSize:"0.8rem"}} value={editingNetOdemeVal} onChange={(e) => setEditingNetOdemeVal(e.target.value)} />
+                                    <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"3px 10px"}} onClick={async () => {
+                                      await supabase.from("periods").update({ [field]: Number(editingNetOdemeVal) || 0 }).eq("id", p.id);
+                                      setEditingNetOdemeId(null);
+                                      loadAll();
+                                    }}>Kaydet</button>
+                                    <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"3px 8px"}} onClick={() => setEditingNetOdemeId(null)}>✕</button>
+                                  </div>
+                                ) : (
+                                  <div style={{display:"flex", gap:6, justifyContent:"flex-end", alignItems:"center"}}>
+                                    <span>{p[field] ? money(Number(p[field])) : "—"}</span>
+                                    <button type="button" className="btn-secondary" style={{fontSize:"0.65rem", padding:"2px 7px"}} onClick={() => { setEditingNetOdemeId(`${p.id}-${field}`); setEditingNetOdemeVal(String(p[field] || "")); }}>Düzenle</button>
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+                            <td style={{padding:"10px 12px", textAlign:"right", fontWeight:500}}>{money(Number(p.closing_cash || 0))}</td>
                             {(["asli_net_odeme", "mihri_net_odeme"] as const).map((field) => (
                               <td key={field} style={{padding:"10px 12px", textAlign:"right"}}>
                                 {editingNetOdemeId === `${p.id}-${field}` ? (
