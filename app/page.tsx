@@ -137,6 +137,9 @@ type Period = {
   sponsor_contribution: number;
   asli_contribution: number;
   mihrimah_contribution: number;
+  net_odeme?: number;
+  asli_net_odeme?: number;
+  mihri_net_odeme?: number;
   product_cost: number;
   shipping_cost: number;
   closing_cash?: number | null;
@@ -271,6 +274,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
+  const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
+  const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [splitModal, setSplitModal] = useState<{item: BatchItem; newDepo: string} | null>(null);
   const [splitQty, setSplitQty] = useState<string>("");
@@ -2417,23 +2422,55 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </Card>
 
             <Card title="Dönem Geçmişi">
-              <Table
-                headers={["Dönem", "Sponsor", "Aslı Katkı", "Mihrimah Katkı", "Ürün Maliyeti", "Kargo", "Dağıtılan Kasa", "Aslı Dağıtım", "Mihrimah Dağıtım", "Durum", "Kapanış"]}
-                rows={periods.map((p) => [
-                  p.name,
-                  money(p.sponsor_contribution),
-                  money(p.asli_contribution),
-                  money(p.mihrimah_contribution),
-                  money(p.product_cost),
-                  money(p.shipping_cost),
-                  money(Number(p.closing_cash || 0)),
-                  money(Number(p.asli_distribution || 0)),
-                  money(Number(p.mihrimah_distribution || 0)),
-                  p.closed ? "Kapalı" : "Açık",
-                  p.closed_at ? new Date(p.closed_at).toLocaleDateString("tr-TR") : "-",
-                ])}
-              />
-            </Card>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%", borderCollapse:"collapse", fontSize:"0.85rem"}}>
+                      <thead>
+                        <tr style={{background:"#f8fafc", borderBottom:"1.5px solid #e2e8f0"}}>
+                          <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Dönem</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Dağıtılan Kasa</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Dağıtım</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihrimah Dağıtım</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Net Ödeme</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihri Net Ödeme</th>
+                          <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Durum</th>
+                          <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Kapanış</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periods.map((p) => (
+                          <tr key={p.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                            <td style={{padding:"10px 12px"}}>{p.name}</td>
+                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.closing_cash || 0))}</td>
+                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.asli_distribution || 0))}</td>
+                            <td style={{padding:"10px 12px", textAlign:"right"}}>{money(Number(p.mihrimah_distribution || 0))}</td>
+                            {(["asli_net_odeme", "mihri_net_odeme"] as const).map((field) => (
+                              <td key={field} style={{padding:"10px 12px", textAlign:"right"}}>
+                                {editingNetOdemeId === `${p.id}-${field}` ? (
+                                  <div style={{display:"flex", gap:4, justifyContent:"flex-end", alignItems:"center"}}>
+                                    <input type="number" className="input" style={{width:90, padding:"3px 8px", fontSize:"0.8rem"}} value={editingNetOdemeVal} onChange={(e) => setEditingNetOdemeVal(e.target.value)} />
+                                    <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"3px 10px"}} onClick={async () => {
+                                      await supabase.from("periods").update({ [field]: Number(editingNetOdemeVal) || 0 }).eq("id", p.id);
+                                      setEditingNetOdemeId(null);
+                                      loadAll();
+                                    }}>Kaydet</button>
+                                    <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"3px 8px"}} onClick={() => setEditingNetOdemeId(null)}>✕</button>
+                                  </div>
+                                ) : (
+                                  <div style={{display:"flex", gap:6, justifyContent:"flex-end", alignItems:"center"}}>
+                                    <span>{p[field] ? money(p[field]!) : "—"}</span>
+                                    <button type="button" className="btn-secondary" style={{fontSize:"0.65rem", padding:"2px 7px"}} onClick={() => { setEditingNetOdemeId(`${p.id}-${field}`); setEditingNetOdemeVal(String(p[field] || "")); }}>Düzenle</button>
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+                            <td style={{padding:"10px 12px"}}>{p.closed ? "Kapalı" : "Açık"}</td>
+                            <td style={{padding:"10px 12px"}}>{p.closed_at ? new Date(p.closed_at).toLocaleDateString("tr-TR") : "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
           </div>
         )}
       </section>
