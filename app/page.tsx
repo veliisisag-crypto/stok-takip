@@ -1579,7 +1579,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "dashboard" && (
           <div className="space-y-4">
-            <div style={{display:"grid", gridTemplateColumns:"repeat(5, 1fr)", gap:8}}>
+            <div className="stat-grid">
               <StatCard title="Toplam Satış" value={money(activeSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Aktif satış toplamı" />
               <StatCard title="Dönem Tahsilatları" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
@@ -2766,7 +2766,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-add-form-panel { padding: 16px; border-top: 1.5px solid #f1f5f9; background: #fafafa; }
 
         /* Cari tables */
-        .cari-payment-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+        @media (max-width: 768px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
         .cari-sales-thead { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1.5px solid #e2e8f0; }
         .cari-sales-row { display: grid; grid-template-columns: 1.1fr 1.5fr 0.8fr 0.4fr 1fr 0.9fr; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
         .cari-sales-row:last-child { border-bottom: none; }
