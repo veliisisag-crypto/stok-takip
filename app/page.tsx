@@ -280,6 +280,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
   const [showKarDetay, setShowKarDetay] = useState(false);
+  const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [saleStatusFilter, setSaleStatusFilter] = useState<string>("Tümü");
@@ -1002,7 +1003,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         paidAmount = Math.max(0, Math.min(total, remainingManualPayments));
         remainingManualPayments -= paidAmount;
       }
-      return { id: sale.id, total, paidAmount };
+      return { id: sale.id, total, paidAmount, paid: !!sale.paid };
     });
 
     // payment_allocations: önce bu müşterinin mevcut allocation'larını sil
@@ -1022,21 +1023,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       let payRemaining = toNum(pay.amount);
       for (const sale of saleQueue) {
         if (payRemaining <= 0) break;
-        const canAllocate = Math.min(payRemaining, sale.paidAmount);
-        if (canAllocate > 0 && !sale.paid) {
-          // Kısmi veya tam dağıtım
-          const alreadyAllocated = allocations
-            .filter((a) => a.sale_id === sale.id)
-            .reduce((s, a) => s + a.amount, 0);
-          const remaining = sale.paidAmount - alreadyAllocated;
-          const thisAlloc = Math.min(payRemaining, remaining);
-          if (thisAlloc > 0) {
-            allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at });
-            payRemaining -= thisAlloc;
-          }
-        } else if (sale.paid) {
-          // Peşin satış — ödemeyle ilişkilendir ama paid=true olduğundan farklı kaynak
-          break;
+        const alreadyAllocated = allocations
+          .filter((a) => a.sale_id === sale.id)
+          .reduce((s, a) => s + a.amount, 0);
+        const remaining = sale.paidAmount - alreadyAllocated;
+        const thisAlloc = Math.min(payRemaining, Math.max(remaining, 0));
+        if (thisAlloc > 0) {
+          allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at });
+          payRemaining -= thisAlloc;
         }
       }
     }
