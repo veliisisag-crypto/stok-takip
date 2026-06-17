@@ -198,11 +198,11 @@ function Card({ title, children }: { title?: string; children: ReactNode }) {
 
 function StatCard({ title, value, note }: { title: string; value: ReactNode; note?: string }) {
   return (
-    <Card>
-      <p className="text-sm text-slate-500">{title}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
-      {note ? <p className="mt-1 text-xs text-slate-500">{note}</p> : null}
-    </Card>
+    <section className="rounded-xl border bg-white shadow-sm" style={{padding:"12px 16px"}}>
+      <p className="text-xs text-slate-500">{title}</p>
+      <p className="text-xl font-semibold" style={{marginTop:2}}>{value}</p>
+      {note ? <p className="text-xs text-slate-400" style={{marginTop:2}}>{note}</p> : null}
+    </section>
   );
 }
 
@@ -262,6 +262,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [preorders, setPreorders] = useState<Preorder[]>([]);
   const [preorderItems, setPreorderItems] = useState<PreorderItem[]>([]);
+  const [paymentAllocations, setPaymentAllocations] = useState<{id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]>([]);
   const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
   const [editingPreorderId, setEditingPreorderId] = useState<string | null>(null);
   const [convertModal, setConvertModal] = useState<{ preorder: Preorder; item: PreorderItem } | null>(null);
@@ -278,7 +279,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
-  const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
+  const [showKarDetay, setShowKarDetay] = useState(false);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [saleStatusFilter, setSaleStatusFilter] = useState<string>("Tümü");
@@ -346,7 +347,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -358,6 +359,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("batch_costs").select("*"),
         supabase.from("preorders").select("*").order("created_at", { ascending: false }),
         supabase.from("preorder_items").select("*"),
+        supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes]) {
@@ -375,6 +377,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
       setPreorders((preordersRes.data || []) as Preorder[]);
       setPreorderItems((preorderItemsRes.data || []) as PreorderItem[]);
+      setPaymentAllocations((paymentAllocationsRes.data || []) as {id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]);
       // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
@@ -483,6 +486,82 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const getCustomerBalance = (customerId: string) =>
     Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
+
+  const EK_MALIYET = 38.4;
+  const EK_MALIYET_PARTILER = ["1.parti","2.parti","3.parti","4.parti","5.parti","6.parti"];
+
+  const anlıkKar = useMemo(() => {
+    const lastClosed = periods
+      .filter((p) => p.closed && p.closed_at)
+      .sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
+    const sinceDate = lastClosed ? new Date(lastClosed.closed_at!) : new Date(0);
+
+    // Son kapanıştan sonra gelen allocation'lar
+    const recentAllocs = paymentAllocations.filter((a) => new Date(a.created_at) > sinceDate);
+
+    // Sale map
+    const saleMap = new Map(activeSales.map((s) => [s.id, s]));
+
+    return recentAllocs.reduce((toplam, alloc) => {
+      const sale = saleMap.get(alloc.sale_id);
+      if (!sale) return toplam;
+      if (sale.sale_type === "Fire/Bozuk") return toplam;
+
+      const cost = toNum(sale.cost);
+      const batchName = batchMap.get(sale.batch_id)?.name || "";
+      const normalizedBatch = batchName.toLowerCase().replace(/\s/g, "");
+      const hasEkMaliyet = EK_MALIYET_PARTILER.some(p => normalizedBatch === p);
+      const ekMaliyet = hasEkMaliyet ? EK_MALIYET : 0;
+
+      if (sale.sale_type === "Hibe") {
+        return toplam - (cost + ekMaliyet);
+      }
+
+      const total = toNum(sale.total);
+      if (total <= 0) return toplam;
+      const oran = alloc.amount / total;
+      return toplam + alloc.amount - (cost + ekMaliyet) * oran;
+    }, 0);
+  }, [paymentAllocations, activeSales, batchMap, periods]);
+
+  const karDetay = useMemo(() => {
+    const lastClosed = periods
+      .filter((p) => p.closed && p.closed_at)
+      .sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
+    const sinceDate = lastClosed ? new Date(lastClosed.closed_at!) : new Date(0);
+    const recentAllocs = paymentAllocations.filter((a) => new Date(a.created_at) > sinceDate);
+    const saleMap = new Map(activeSales.map((s) => [s.id, s]));
+
+    return recentAllocs
+      .filter((alloc) => {
+        const sale = saleMap.get(alloc.sale_id);
+        return sale && sale.sale_type !== "Fire/Bozuk";
+      })
+      .map((alloc) => {
+        const sale = saleMap.get(alloc.sale_id)!;
+        const cost = toNum(sale.cost);
+        const total = toNum(sale.total);
+        const batchName = batchMap.get(sale.batch_id)?.name || "";
+        const normalizedBatch = batchName.toLowerCase().replace(/\s/g, "");
+        const hasEkMaliyet = EK_MALIYET_PARTILER.some(p => normalizedBatch === p);
+        const ekMaliyet = hasEkMaliyet ? EK_MALIYET : 0;
+        const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
+        const gercekMaliyet = (cost + ekMaliyet) * oran;
+        const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
+        return {
+          cari: customerMap.get(sale.customer_id)?.name || "-",
+          urun: productMap.get(sale.product_id)?.name || "-",
+          adet: sale.qty,
+          satisFiyati: total,
+          tahsilat: alloc.amount,
+          maliyet: cost,
+          ekMaliyet: hasEkMaliyet ? EK_MALIYET : 0,
+          kar,
+          saleType: sale.sale_type,
+        };
+      })
+      .sort((a, b) => b.kar - a.kar);
+  }, [paymentAllocations, activeSales, batchMap, periods, customerMap, productMap]);
 
   const totals = useMemo(() => {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
@@ -901,33 +980,77 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .order("created_at", { ascending: true }),
       supabase
         .from("payments")
-        .select("amount,cancelled")
-        .eq("customer_id", customerId),
+        .select("id,amount,cancelled,created_at")
+        .eq("customer_id", customerId)
+        .order("created_at", { ascending: true }),
     ]);
 
     if (salesRes.error) throw salesRes.error;
     if (paymentsRes.error) throw paymentsRes.error;
 
-    let remainingManualPayments = (paymentsRes.data || [])
-      .filter((payment) => !payment.cancelled)
-      .reduce((sum, payment) => sum + toNum(payment.amount), 0);
+    const activePays = (paymentsRes.data || []).filter((p) => !p.cancelled);
+    const salesToAlloc = (salesRes.data || []);
 
-    const updates = (salesRes.data || []).map((sale) => {
+    // Her satış için paid_amount hesapla (mevcut mantık)
+    let remainingManualPayments = activePays.reduce((sum, p) => sum + toNum(p.amount), 0);
+    const saleUpdates = salesToAlloc.map((sale) => {
       const total = toNum(sale.total);
       let paidAmount = 0;
-
       if (sale.paid) {
         paidAmount = total;
       } else {
         paidAmount = Math.max(0, Math.min(total, remainingManualPayments));
         remainingManualPayments -= paidAmount;
       }
-
-      return supabase.from("sales").update({ paid_amount: paidAmount }).eq("id", sale.id);
+      return { id: sale.id, total, paidAmount };
     });
 
-    const results = await Promise.all(updates);
-    const firstError = results.find((result) => result.error)?.error;
+    // payment_allocations: önce bu müşterinin mevcut allocation'larını sil
+    await supabase.from("payment_allocations").delete().in(
+      "payment_id",
+      activePays.map((p) => p.id)
+    );
+
+    // Her ödemeyi satışlara dağıt — tarih sırasıyla
+    const allocations: { payment_id: string; sale_id: string; amount: number; created_at: string }[] = [];
+    const saleRemaining: Record<string, number> = {};
+    saleUpdates.forEach((s) => { saleRemaining[s.id] = s.paidAmount; });
+
+    // Satışları sırayla doldur, her ödeme sıradaki satışa gider
+    let saleQueue = [...saleUpdates];
+    for (const pay of activePays) {
+      let payRemaining = toNum(pay.amount);
+      for (const sale of saleQueue) {
+        if (payRemaining <= 0) break;
+        const canAllocate = Math.min(payRemaining, sale.paidAmount);
+        if (canAllocate > 0 && !sale.paid) {
+          // Kısmi veya tam dağıtım
+          const alreadyAllocated = allocations
+            .filter((a) => a.sale_id === sale.id)
+            .reduce((s, a) => s + a.amount, 0);
+          const remaining = sale.paidAmount - alreadyAllocated;
+          const thisAlloc = Math.min(payRemaining, remaining);
+          if (thisAlloc > 0) {
+            allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at });
+            payRemaining -= thisAlloc;
+          }
+        } else if (sale.paid) {
+          // Peşin satış — ödemeyle ilişkilendir ama paid=true olduğundan farklı kaynak
+          break;
+        }
+      }
+    }
+
+    // Toplu insert
+    if (allocations.length > 0) {
+      await supabase.from("payment_allocations").insert(allocations);
+    }
+
+    // sales tablosunu güncelle
+    const results = await Promise.all(
+      saleUpdates.map((s) => supabase.from("sales").update({ paid_amount: s.paidAmount }).eq("id", s.id))
+    );
+    const firstError = results.find((r) => r.error)?.error;
     if (firstError) throw firstError;
   };
 
@@ -1130,6 +1253,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       closing_cash: distributableCash,
       asli_distribution: half,
       mihrimah_distribution: half,
+      donem_kari: Math.round(anlıkKar * 100) / 100,
     };
 
     if (openPeriod) {
@@ -1462,9 +1586,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         {active === "dashboard" && (
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard title="Toplam Satış" value={money(totals.revenue)} note="Aktif satış toplamı" />
+              <StatCard title="Toplam Satış" value={money(activeSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Aktif satış toplamı" />
               <StatCard title="Tahsilatlar" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
+              <div onClick={() => setShowKarDetay(true)} style={{cursor:"pointer"}}>
+                <StatCard title="Net Kar" value={money(anlıkKar)} note="Detay için tıklayın ↗" />
+              </div>
               <StatCard title="Mevcut Stok" value={totals.totalStock} />
             </div>
             <Card title="Son Hareketler">
@@ -2187,6 +2314,51 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })}
             </Card>
+          </div>
+        )}
+
+        {showKarDetay && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowKarDetay(false)}>
+            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:900,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Net Kar Detayı</h2>
+                <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{karDetay.length} satır · Toplam: <strong>{money(anlıkKar)}</strong></span>
+                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowKarDetay(false)}>Kapat</button>
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
+                  <thead>
+                    <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
+                      {["Cari","Ürün","Ad.","Satış","Tahsilat","Maliyet","Ek Maliyet","Kar"].map((h) => (
+                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {karDetay.map((row, i) => (
+                      <tr key={i} style={{borderBottom:"1px solid #f1f5f9",background:row.saleType==="Hibe"?"#fef9c3":"white"}}>
+                        <td style={{padding:"7px 10px",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.cari}</td>
+                        <td style={{padding:"7px 10px",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.urun} {row.saleType==="Hibe"?<span style={{fontSize:"0.7rem",color:"#92400e"}}>(Hibe)</span>:null}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>{row.adet}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.satisFiyati)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.tahsilat)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.maliyet)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>{row.ekMaliyet > 0 ? money(row.ekMaliyet) : "—"}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500,color:row.kar<0?"#dc2626":"#16a34a"}}>{money(row.kar)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
+                      <td colSpan={7} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
