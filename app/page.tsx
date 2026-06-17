@@ -1579,12 +1579,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "dashboard" && (
           <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div style={{display:"grid", gridTemplateColumns:"repeat(5, 1fr)", gap:8}}>
               <StatCard title="Toplam Satış" value={money(activeSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Aktif satış toplamı" />
-              <StatCard title="Tahsilatlar" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
+              <StatCard title="Dönem Tahsilatları" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
               <div onClick={() => setShowKarDetay(true)} style={{cursor:"pointer"}}>
-                <StatCard title="Net Kar" value={money(anlıkKar)} note="Detay için tıklayın ↗" />
+                <StatCard title="Dönem Net Karı" value={money(anlıkKar)} note="Detay için tıklayın ↗" />
               </div>
               <StatCard title="Mevcut Stok" value={totals.totalStock} />
             </div>
