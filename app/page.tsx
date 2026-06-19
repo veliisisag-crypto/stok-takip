@@ -551,6 +551,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const gercekMaliyet = (cost + ekMaliyet) * oran;
         const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
         return {
+          tarih: alloc.created_at,
           cari: customerMap.get(sale.customer_id)?.name || "-",
           urun: productMap.get(sale.product_id)?.name || "-",
           adet: sale.qty,
@@ -2373,15 +2374,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
-                      {["Cari","Ürün","Ad.","Satış","Tahsilat","Maliyet","Ek Maliyet","Kar"].map((h) => (
-                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap"}}>{h}</th>
+                      {["Tarih","Cari","Ürün","Ad.","Satış","Tahsilat","Maliyet","Ek Maliyet","Kar"].map((h) => (
+                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"||h==="Tarih"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap"}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {karDetay.map((row, i) => (
+                    {[...karDetay].sort((a,b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime()).map((row, i) => (
                       <tr key={i} style={{borderBottom:"1px solid #f1f5f9",background:row.saleType==="Hibe"?"#fef9c3":"white"}}>
-                        <td style={{padding:"7px 10px",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.cari}</td>
+                        <td style={{padding:"7px 10px",whiteSpace:"nowrap"}}>{toTR(row.tarih, true)}</td>
+                        <td style={{padding:"7px 10px",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.cari}</td>
                         <td style={{padding:"7px 10px",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.urun} {row.saleType==="Hibe"?<span style={{fontSize:"0.7rem",color:"#92400e"}}>(Hibe)</span>:null}</td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{row.adet}</td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.satisFiyati)}</td>
@@ -2394,14 +2396,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   </tbody>
                   <tfoot>
                     <tr style={{borderTop:"1.5px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={4} style={{padding:"8px 10px",fontWeight:600,color:"#64748b"}}>Toplam Tahsilat</td>
+                      <td colSpan={5} style={{padding:"8px 10px",fontWeight:600,color:"#64748b"}}>Toplam Tahsilat</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}></td>
                     </tr>
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={7} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
+                      <td colSpan={8} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</td>
                     </tr>
                   </tfoot>
