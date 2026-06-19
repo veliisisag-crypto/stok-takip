@@ -280,6 +280,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
   const [showKarDetay, setShowKarDetay] = useState(false);
+  const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
@@ -568,14 +569,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
-    const grossCash = activeSales.filter((item) => item.paid).reduce((sum, item) => sum + item.total, 0) + activePayments.reduce((sum, item) => sum + item.amount, 0);
+    const lastClosedAt = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0]?.closed_at;
+    const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
+    const recentPayments = activePayments.filter((p) => new Date(p.created_at) > sinceDate);
+    const grossCash = recentPayments.reduce((sum, item) => sum + item.amount, 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash };
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments };
   }, [products, customers, batchItems, activeSales, activePayments, periods]);
 
 
@@ -627,7 +631,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     return [...saleRows, ...paymentRows, ...auditRows]
       .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())
-      .slice(0, 50);
+      .slice(0, 100);
   }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
 
   const uploadImageToStorage = async (base64: string, fileName: string): Promise<string | null> => {
@@ -1581,7 +1585,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div className="space-y-4">
             <div className="stat-grid">
               <StatCard title="Toplam Satış" value={money(activeSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Aktif satış toplamı" />
-              <StatCard title="Dönem Tahsilatları" value={money(totals.cash)} note="Tahsilat - dönem dağıtımları" />
+              <div onClick={() => setShowTahsilatDetay(true)} style={{cursor:"pointer"}}>
+                <StatCard title="Dönem Tahsilatları" value={money(totals.grossCash)} note="Detay için tıklayın ↗" />
+              </div>
               <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Cari satış - ödeme" />
               <div onClick={() => setShowKarDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Dönem Net Karı" value={money(anlıkKar)} note="Detay için tıklayın ↗" />
@@ -2230,13 +2236,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <div className="space-y-2">
                     {preorderForm.items.map((item, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
-                        <select className="input flex-1" value={item.productId} onChange={(e) => { const items = [...preorderForm.items]; items[idx].productId = e.target.value; setPreorderForm({ ...preorderForm, items }); }}>
+                        <select className="input" style={{flex:3}} value={item.productId} onChange={(e) => { const items = [...preorderForm.items]; items[idx].productId = e.target.value; setPreorderForm({ ...preorderForm, items }); }}>
                           <option value="">Ürün seçin</option>
                           {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
-                        <input className="input w-20" type="number" min="1" value={item.qty} onChange={(e) => { const items = [...preorderForm.items]; items[idx].qty = e.target.value; setPreorderForm({ ...preorderForm, items }); }} placeholder="Adet" />
+                        <input className="input" style={{flex:1, minWidth:60}} type="number" min="1" value={item.qty} onChange={(e) => { const items = [...preorderForm.items]; items[idx].qty = e.target.value; setPreorderForm({ ...preorderForm, items }); }} placeholder="Adet" />
                         {preorderForm.items.length > 1 && (
-                          <button type="button" className="btn-danger" style={{padding:"6px 10px"}} onClick={() => { const items = preorderForm.items.filter((_, i) => i !== idx); setPreorderForm({ ...preorderForm, items }); }}>✕</button>
+                          <button type="button" className="btn-danger" style={{padding:"6px 10px", flexShrink:0}} onClick={() => { const items = preorderForm.items.filter((_, i) => i !== idx); setPreorderForm({ ...preorderForm, items }); }}>✕</button>
                         )}
                       </div>
                     ))}
@@ -2311,6 +2317,48 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
+        {showTahsilatDetay && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowTahsilatDetay(false)}>
+            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:700,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
+                <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{totals.recentPayments.length} ödeme · Toplam: <strong>{money(totals.grossCash)}</strong></span>
+                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
+                  <thead>
+                    <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Tarih</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Cari</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Ekleyen</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {totals.recentPayments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => (
+                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                        <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
+                        <td style={{padding:"7px 10px"}}>{customerMap.get(pay.customer_id)?.name || "-"}</td>
+                        <td style={{padding:"7px 10px",color:"#64748b"}}>{pay.user_email?.split("@")[0] || "-"}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{money(pay.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
+                      <td colSpan={3} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showKarDetay && (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowKarDetay(false)}>
             <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:900,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
@@ -2345,6 +2393,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     ))}
                   </tbody>
                   <tfoot>
+                    <tr style={{borderTop:"1.5px solid #e2e8f0",background:"#f8fafc"}}>
+                      <td colSpan={4} style={{padding:"8px 10px",fontWeight:600,color:"#64748b"}}>Toplam Tahsilat</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}></td>
+                    </tr>
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
                       <td colSpan={7} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</td>
