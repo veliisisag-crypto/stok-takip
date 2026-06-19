@@ -904,6 +904,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
     if (sale) {
+      // Peşin satışsa ilgili payment_allocations'ı bul, payment'ı sil
+      if (sale.paid && sale.sale_type === "Normal satış") {
+        const { data: allocData } = await supabase.from("payment_allocations").select("payment_id").eq("sale_id", saleId);
+        if (allocData && allocData.length > 0) {
+          const paymentIds = allocData.map((a) => a.payment_id);
+          await supabase.from("payment_allocations").delete().eq("sale_id", saleId);
+          await supabase.from("payments").delete().in("id", paymentIds);
+        }
+      }
       try {
         await allocatePaymentsForCustomer(sale.customer_id);
       } catch (err) {
