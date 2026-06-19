@@ -881,6 +881,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
     const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
+
+    // Peşin satışsa payments tablosuna da ekle ve allocate et
+    if (saleForm.paid === "true" && saleForm.saleType === "Normal satış") {
+      const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      if (totalAmount > 0) {
+        const { error: payErr } = await supabase.from("payments").insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail });
+        if (!payErr) {
+          try { await allocatePaymentsForCustomer(customer.id); } catch (err) { console.warn("Allocate error", err); }
+        }
+      }
+    }
+
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo }));
     setMessage("Satış kaydedildi.");
