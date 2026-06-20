@@ -281,6 +281,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
   const [showKarDetay, setShowKarDetay] = useState(false);
   const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
+  const [saleLoading, setSaleLoading] = useState(false);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
@@ -610,15 +611,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       user: shortUser(undefined, sale.seller),
     }));
 
-    const paymentRows = activePayments.map((payment) => ({
-      id: `payment-${payment.id}`,
-      date: payment.created_at,
-      type: "Tahsilat",
-      customer: customerMap.get(payment.customer_id)?.name || "-",
-      detail: "Cari ödeme",
-      amount: toNum(payment.amount),
-      user: shortUser(payment.user_email ?? undefined),
-    }));
+    // Peşin satışlara otomatik eklenen payment'ları filtrele (aynı müşteri, aynı tutar, aynı dakika)
+    const pesinSaleKeys = new Set(
+      activeSales
+        .filter((s) => s.paid && s.sale_type === "Normal satış")
+        .map((s) => `${s.customer_id}-${s.total}-${s.created_at?.slice(0,16)}`)
+    );
+
+    const paymentRows = activePayments
+      .filter((payment) => {
+        const key = `${payment.customer_id}-${payment.amount}-${payment.created_at?.slice(0,16)}`;
+        return !pesinSaleKeys.has(key);
+      })
+      .map((payment) => ({
+        id: `payment-${payment.id}`,
+        date: payment.created_at,
+        type: "Tahsilat",
+        customer: customerMap.get(payment.customer_id)?.name || "-",
+        detail: "Cari ödeme",
+        amount: toNum(payment.amount),
+        user: shortUser(payment.user_email ?? undefined),
+      }));
 
     const auditRows = auditLogs.map((log) => ({
       id: `audit-${log.id}`,
@@ -834,6 +847,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const addSaleFromForm = async () => {
+    if (saleLoading) return;
+    setSaleLoading(true);
+    try {
     const customer = customers.find((c) => c.id === saleForm.customerId);
     const product = products.find((p) => p.id === saleForm.productId);
     const qty = Number(saleForm.qty || 0);
@@ -881,22 +897,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
     const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
-
-    // Peşin satışsa payments tablosuna da ekle ve allocate et
-    if (saleForm.paid === "true" && saleForm.saleType === "Normal satış") {
-      const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-      if (totalAmount > 0) {
-        const { error: payErr } = await supabase.from("payments").insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail });
-        if (!payErr) {
-          try { await allocatePaymentsForCustomer(customer.id); } catch (err) { console.warn("Allocate error", err); }
-        }
-      }
-    }
-
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo }));
     setMessage("Satış kaydedildi.");
     loadAll();
+    } finally {
+      setSaleLoading(false);
+    }
   };
 
   const deleteSale = async (saleId: string) => {
@@ -904,15 +911,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
     if (sale) {
-      // Peşin satışsa ilgili payment_allocations'ı bul, payment'ı sil
-      if (sale.paid && sale.sale_type === "Normal satış") {
-        const { data: allocData } = await supabase.from("payment_allocations").select("payment_id").eq("sale_id", saleId);
-        if (allocData && allocData.length > 0) {
-          const paymentIds = allocData.map((a) => a.payment_id);
-          await supabase.from("payment_allocations").delete().eq("sale_id", saleId);
-          await supabase.from("payments").delete().in("id", paymentIds);
-        }
-      }
       try {
         await allocatePaymentsForCustomer(sale.customer_id);
       } catch (err) {
@@ -2523,7 +2521,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </select>
                 <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
                 <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
-                <button type="button" className="btn" onClick={addSaleFromForm}>Satışı Kaydet</button>
+                <button type="button" className="btn" onClick={addSaleFromForm} disabled={saleLoading}>{saleLoading ? "Kaydediliyor..." : "Satışı Kaydet"}</button>
               </div>
             </Card>
 
