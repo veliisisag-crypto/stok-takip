@@ -1207,7 +1207,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remaining.length === 0) {
       await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
     }
-    await allocatePaymentsForCustomer(po.customer_id);
+    // Peşin ise payment + allocation ekle
+    if (convertPaid === "true") {
+      const totalAmount = price * item.qty;
+      const { data: payData, error: payErr } = await supabase.from("payments").insert({ customer_id: po.customer_id, amount: totalAmount, user_email: currentUserEmail }).select().single();
+      if (!payErr && payData) {
+        const { data: newSale } = await supabase.from("sales").select("id").eq("customer_id", po.customer_id).eq("cancelled", false).order("created_at", { ascending: false }).limit(1).single();
+        if (newSale) {
+          await supabase.from("payment_allocations").insert({ payment_id: payData.id, sale_id: newSale.id, amount: totalAmount, created_at: payData.created_at });
+        }
+      }
+    } else {
+      try { await allocatePaymentsForCustomer(po.customer_id); } catch (err) { console.warn("allocate error", err); }
+    }
     await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty });
     setConvertModal(null);
     setMessage("");
