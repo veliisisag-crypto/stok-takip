@@ -897,6 +897,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
     const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
+
+    // Peşin satışsa payments + allocation ekle
+    if (saleForm.paid === "true" && saleForm.saleType === "Normal satış") {
+      const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      if (totalAmount > 0) {
+        const { data: payData, error: payErr } = await supabase.from("payments").insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail }).select().single();
+        if (!payErr && payData) {
+          // Satış ID'lerini al ve allocation ekle
+          const { data: newSales } = await supabase.from("sales").select("id,total").eq("customer_id", customer.id).eq("cancelled", false).order("created_at", { ascending: false }).limit(rows.length);
+          if (newSales && newSales.length > 0) {
+            const allocations = newSales.map((s: {id: string; total: number}) => ({ payment_id: payData.id, sale_id: s.id, amount: s.total, created_at: payData.created_at }));
+            await supabase.from("payment_allocations").insert(allocations);
+          }
+        }
+      }
+    }
+
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo }));
     setMessage("Satış kaydedildi.");
@@ -911,6 +928,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
     if (sale) {
+      // Peşin satışsa ilgili payment'ı sil
+      if (sale.paid && sale.sale_type === "Normal satış") {
+        const { data: allocData } = await supabase.from("payment_allocations").select("payment_id").eq("sale_id", saleId);
+        if (allocData && allocData.length > 0) {
+          const paymentIds = allocData.map((a: {payment_id: string}) => a.payment_id);
+          await supabase.from("payment_allocations").delete().eq("sale_id", saleId);
+          await supabase.from("payments").delete().in("id", paymentIds);
+        }
+      }
       try {
         await allocatePaymentsForCustomer(sale.customer_id);
       } catch (err) {
