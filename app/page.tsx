@@ -335,7 +335,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   );
 
   const showError = (error: unknown) => {
-    const msg = error instanceof Error ? error.message : String(error || "Bilinmeyen hata");
+    if (!error) return;
+    const msg = error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+      ? String((error as {message: unknown}).message)
+      : JSON.stringify(error);
     setMessage(msg);
   };
 
