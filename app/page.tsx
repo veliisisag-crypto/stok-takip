@@ -1205,7 +1205,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => bi.depo === depo && Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
     if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok (${depo}).`);
     const batchItem = depoBatchItems[0];
-    const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_id: batchItem.batch_id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: convertPaid === "true", paid_amount: convertPaid === "true" ? price * item.qty : 0, depo, user_email: currentUserEmail });
+    const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_id: batchItem.batch_id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: convertPaid === "true", paid_amount: convertPaid === "true" ? price * item.qty : 0, user_email: currentUserEmail });
     if (error) return showError(error);
     // Bu item'ı sil
     await supabase.from("preorder_items").delete().eq("id", item.id);
