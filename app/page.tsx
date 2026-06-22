@@ -496,7 +496,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
 
   const EK_MALIYET = 38.4;
+  const EK_MALIYET_7 = 67.4;
   const EK_MALIYET_PARTILER = ["1.parti","2.parti","3.parti","4.parti","5.parti","6.parti"];
+  const getEkMaliyet = (batchName: string) => {
+    const n = batchName.toLowerCase().replace(/\s/g, "");
+    if (["7.parti"].includes(n)) return EK_MALIYET_7;
+    if (EK_MALIYET_PARTILER.includes(n)) return EK_MALIYET;
+    return 0;
+  };
 
   const anlıkKar = useMemo(() => {
     const lastClosed = periods
@@ -517,9 +524,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
       const cost = toNum(sale.cost);
       const batchName = batchMap.get(sale.batch_id)?.name || "";
-      const normalizedBatch = batchName.toLowerCase().replace(/\s/g, "");
-      const hasEkMaliyet = EK_MALIYET_PARTILER.some(p => normalizedBatch === p);
-      const ekMaliyet = hasEkMaliyet ? EK_MALIYET : 0;
+      const ekMaliyet = getEkMaliyet(batchName);
 
       if (sale.sale_type === "Hibe") {
         return toplam - (cost + ekMaliyet);
@@ -550,9 +555,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const cost = toNum(sale.cost);
         const total = toNum(sale.total);
         const batchName = batchMap.get(sale.batch_id)?.name || "";
-        const normalizedBatch = batchName.toLowerCase().replace(/\s/g, "");
-        const hasEkMaliyet = EK_MALIYET_PARTILER.some(p => normalizedBatch === p);
-        const ekMaliyet = hasEkMaliyet ? EK_MALIYET : 0;
+        const ekMaliyet = getEkMaliyet(batchName);
         const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
         const gercekMaliyet = (cost + ekMaliyet) * oran;
         const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
@@ -564,7 +567,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           satisFiyati: total,
           tahsilat: alloc.amount,
           maliyet: cost,
-          ekMaliyet: hasEkMaliyet ? EK_MALIYET : 0,
+          ekMaliyet,
           kar,
           saleType: sale.sale_type,
         };
