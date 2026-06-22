@@ -1057,10 +1057,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     });
 
     // payment_allocations: önce bu müşterinin mevcut allocation'larını sil
-    await supabase.from("payment_allocations").delete().in(
-      "payment_id",
-      activePays.map((p) => p.id)
-    );
+    if (activePays.length > 0) {
+      await supabase.from("payment_allocations").delete().in(
+        "payment_id",
+        activePays.map((p) => p.id)
+      );
+    }
 
     // Her ödemeyi satışlara dağıt — tarih sırasıyla
     const allocations: { payment_id: string; sale_id: string; amount: number; created_at: string }[] = [];
