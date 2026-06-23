@@ -2717,6 +2717,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <thead>
                     <tr className="bg-slate-100">
                       <th className="p-3 text-left font-semibold border border-slate-200">Parti</th>
+                      <th className="p-3 text-left font-semibold border border-slate-200">Açılış</th>
+                      <th className="p-3 text-left font-semibold border border-slate-200">İlk Ürün</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
@@ -2752,6 +2754,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       return (
                         <tr key={batch.id} className="hover:bg-slate-50">
                           <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
+                          <td className="p-3 border border-slate-200 text-slate-500" style={{fontSize:"0.8rem",whiteSpace:"nowrap"}}>{toTR(batch.created_at)}</td>
+                          <td className="p-3 border border-slate-200 text-slate-500" style={{fontSize:"0.8rem",whiteSpace:"nowrap"}}>{(() => { const items = batchItems.filter((bi) => bi.batch_id === batch.id); if (!items.length) return "—"; const min = items.reduce((a, b) => a.created_at < b.created_at ? a : b); return toTR(min.created_at); })()}</td>
                           {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
