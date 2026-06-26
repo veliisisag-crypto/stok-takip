@@ -2807,11 +2807,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "period" && (
           <div className="space-y-4">
-            <div style={{background:"#fefce8", border:"1px solid #fde047", borderRadius:12, padding:"14px 16px", fontSize:"0.82rem", color:"#713f12", lineHeight:1.6}}>
-              <div style={{fontWeight:700, marginBottom:4}}>📌 Maliyet Hesaplama Notu</div>
-              1–2–3–4–5–6. partilerinin tüm extra maliyetleri toplandı, tüm alınan ürün adedine bölündü. <strong>Ürün başına 38,4 TL ek maliyet</strong> geldi. Dönem kapanışında tahsilatlara konu satışların maliyeti hesaplanacak, bu ek maliyetler üstüne eklenecek ve dönem karı bulunacak.<br />
-              <strong>Dönem Karı = Dönem Tahsilatları − Dönem Maliyetleri</strong>
-            </div>
             <Card title="Dönem Kapanışı">
               <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
