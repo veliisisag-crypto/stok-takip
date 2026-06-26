@@ -499,11 +499,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
 
   const EK_MALIYET = 38.4;
-  const EK_MALIYET_7 = 67.4;
+  const EK_MALIYET_7 = 30;
+  const EK_MALIYET_8 = 30;
   const EK_MALIYET_PARTILER = ["1.parti","2.parti","3.parti","4.parti","5.parti","6.parti"];
   const getEkMaliyet = (batchName: string) => {
     const n = batchName.toLowerCase().replace(/\s/g, "");
-    if (["7.parti"].includes(n)) return EK_MALIYET_7;
+    if (["7.parti","8.parti"].includes(n)) return EK_MALIYET_7;
     if (EK_MALIYET_PARTILER.includes(n)) return EK_MALIYET;
     return 0;
   };
