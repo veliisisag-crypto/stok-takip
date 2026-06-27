@@ -307,8 +307,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
-  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok" });
+  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Aslı-depo" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Aslı-depo" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -355,7 +355,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { data: userData } = await supabase.auth.getUser();
       const email = userData.user?.email || "";
       setCurrentUserEmail(email);
-      const defaultDepo = email.includes("mihrimah") ? "Stok" : "Stok";
+      const defaultDepo = email.includes("mihrimah") ? "Mihri-depo" : "Aslı-depo";
       const defaultSeller: Seller = email.includes("mihrimah") ? "Mihrimah" : "Aslı";
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
@@ -848,7 +848,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     });
     if (error) return showError(error);
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
-    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
+    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Aslı-depo" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
   };
@@ -1269,11 +1269,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!price) return setMessage("Fiyat girin.");
     const product = productMap.get(item.product_id);
     if (!product) return;
-    const userDepo = currentUserEmail.includes("mihrimah") ? "Stok" : "Stok";
-    const otherDepo = userDepo === "Stok" ? "Stok" : "Stok";
+    const userDepo = currentUserEmail.includes("mihrimah") ? "Mihri-depo" : "Aslı-depo";
+    const otherDepo = userDepo === "Aslı-depo" ? "Mihri-depo" : "Aslı-depo";
     const userDepoStock = batchItemsForProduct(product.id).filter((bi) => bi.depo === userDepo).reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
     const depo = userDepoStock >= item.qty ? userDepo : otherDepo;
-    const seller: Seller = depo === "Stok" ? "Aslı" : "Mihrimah";
+    const seller: Seller = depo === "Aslı-depo" ? "Aslı" : "Mihrimah";
     const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => bi.depo === depo && Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
     if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok (${depo}).`);
     const batchItem = depoBatchItems[0];
@@ -1909,8 +1909,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                               updateBatchItem(item.id, { depo: newDepo });
                                             }
                                           }}>
-                                            <option value="Stok">Stok</option>
-                                            <option value="Stok">Stok</option>
+                                            <option value="Aslı-depo">Aslı-depo</option>
+                                            <option value="Mihri-depo">Mihri-depo</option>
                                             <option value="Belirsiz">Belirsiz</option>
                                           </select>
                                         </label>
@@ -1952,12 +1952,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-batch-section">
                                 <h4 className="product-batch-title">Parti Detayları</h4>
                                 <div className="product-batch-table">
-                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
+                                  <div className="product-batch-thead"><div>Parti</div><div>Depo</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
                                     const sold = getBatchSoldQtyForItem(item);
                                     return (
                                       <div key={item.id} className="product-batch-row">
                                         <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
+                                        <div className="product-batch-cell" style={{fontSize:"0.72rem",color:"#64748b"}}>{item.depo || "Belirsiz"}</div>
                                         <div className="product-batch-cell">{item.bought}</div>
                                         <div className="product-batch-cell">{sold}</div>
                                         <div className="product-batch-cell">{item.bought - sold}</div>
@@ -2066,6 +2067,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
+                <select className="input" value={batchForm.depo} onChange={(e) => setBatchForm({ ...batchForm, depo: e.target.value })}>
+                  <option value="Aslı-depo">Aslı-depo</option>
+                  <option value="Mihri-depo">Mihri-depo</option>
+                </select>
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
               </div>
             </Card>
@@ -2123,7 +2128,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 });
                 return (
                   <Table
-                    headers={[brTh("batch","Parti"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
+                    headers={[brTh("batch","Parti"), brTh("depo","Depo"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
                     rows={sortedItems.map((item) => {
                       const key = item.id;
                       const p = productMap.get(item.product_id);
@@ -2133,6 +2138,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                           </select>
                         ) : batchMap.get(item.batch_id)?.name || "-",
+                        editingBatchItemId === key ? (
+                          <select className="input" value={item.depo || "Belirsiz"} onChange={(e) => updateBatchItem(item.id, { depo: e.target.value })}>
+                            <option value="Aslı-depo">Aslı-depo</option>
+                            <option value="Mihri-depo">Mihri-depo</option>
+                            <option value="Belirsiz">Belirsiz</option>
+                          </select>
+                        ) : item.depo || "Belirsiz",
                         p?.name || "-",
                         editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
                         getBatchSoldQtyForItem(item),
@@ -2555,7 +2567,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {showStokDetay && (() => {
           // Her ürün-parti kombinasyonu için stok hesapla
-          const rows: {urun: string; parti: string; tur: string; toplam: number; alisF: number}[] = [];
+          const rows: {urun: string; parti: string; tur: string; asli: number; mihri: number; toplam: number; alisF: number}[] = [];
           for (const bi of batchItems) {
             const product = productMap.get(bi.product_id);
             const batch = batchMap.get(bi.batch_id);
@@ -2565,9 +2577,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             if (kalan <= 0) continue;
             const existing = rows.find((r) => r.urun === product.name && r.parti === (batch?.name || "") && r.alisF === bi.buy_price);
             if (existing) {
+              if (bi.depo === "Aslı-depo") existing.asli += kalan;
+              else if (bi.depo === "Mihri-depo") existing.mihri += kalan;
+              else existing.asli += kalan;
               existing.toplam += kalan;
             } else {
-              rows.push({ urun: product.name, parti: batch?.name || "-", tur: product.gender_category || "-", toplam: kalan, alisF: bi.buy_price });
+              rows.push({
+                urun: product.name,
+                parti: batch?.name || "-",
+                tur: product.gender_category || "-",
+                asli: bi.depo === "Aslı-depo" ? kalan : 0,
+                mihri: bi.depo === "Mihri-depo" ? kalan : 0,
+                toplam: kalan,
+                alisF: bi.buy_price,
+              });
             }
           }
           const sorted = [...rows].sort((a, b) => {
@@ -2575,6 +2598,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             if (stokSort.col === "urun") return a.urun.localeCompare(b.urun, "tr") * dir;
             if (stokSort.col === "parti") return a.parti.localeCompare(b.parti, "tr") * dir;
             if (stokSort.col === "tur") return a.tur.localeCompare(b.tur, "tr") * dir;
+            if (stokSort.col === "asli") return (a.asli - b.asli) * dir;
+            if (stokSort.col === "mihri") return (a.mihri - b.mihri) * dir;
             if (stokSort.col === "toplam") return (a.toplam - b.toplam) * dir;
             if (stokSort.col === "alis") return (a.alisF - b.alisF) * dir;
             return 0;
@@ -2603,7 +2628,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         {stokTh("urun","Ürün Adı")}
                         {stokTh("parti","Parti")}
                         {stokTh("tur","Tür")}
-                        {stokTh("toplam","Stok")}
+                        {stokTh("asli","Aslı Depo")}
+                        {stokTh("mihri","Mihri Depo")}
+                        {stokTh("toplam","Toplam")}
                         {stokTh("alis","Alış Fiyatı")}
                       </tr>
                     </thead>
@@ -2613,6 +2640,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td style={{padding:"7px 10px",fontWeight:500}}>{r.urun}</td>
                           <td style={{padding:"7px 10px",color:"#64748b"}}>{r.parti}</td>
                           <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{r.asli > 0 ? r.asli : "—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{r.mihri > 0 ? r.mihri : "—"}</td>
                           <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.toplam}</td>
                           <td style={{padding:"7px 10px",textAlign:"right"}}>{money(r.alisF)}</td>
                         </tr>
@@ -2620,7 +2649,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tbody>
                     <tfoot>
                       <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                        <td colSpan={3} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
+                        <td colSpan={5} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                         <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{genelToplam}</td>
                         <td></td>
                       </tr>
@@ -2729,17 +2758,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value, batchId: "" })}>
                   <option value="">Ürün seçin</option>
                   {sortedActiveProducts
-                    .filter((p) => batchItemsForProduct(p.id).some((i) => i.bought - getBatchSoldQtyForItem(i) > 0))
+                    .filter((p) => {
+                      const asliStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Aslı-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const mihriStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Mihri-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      return asliStock > 0 || mihriStock > 0;
+                    })
                     .map((p) => {
-                      const stok = batchItemsForProduct(p.id).reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      return <option key={p.id} value={p.id}>{p.name} — Stok: {stok}</option>;
+                      const asliStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Aslı-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const mihriStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Mihri-depo").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      return <option key={p.id} value={p.id}>{p.name}  A: {asliStock}  M: {mihriStock}</option>;
                     })}
                 </select>
-                {/* Parti: birden fazla stoklu parti varsa göster */}
+                {/* Depo: her zaman göster, kullanıcıya göre default */}
+                <select className="input" value={saleForm.depo} onChange={(e) => setSaleForm({ ...saleForm, depo: e.target.value, productId: "", batchId: "" })}>
+                  <option value="Aslı-depo">Aslı-depo</option>
+                  <option value="Mihri-depo">Mihri-depo</option>
+                </select>
+                {/* Parti: seçili depoda birden fazla stoklu parti varsa göster */}
                 {saleForm.productId && (() => {
                   const partiler = batchItemsForProduct(saleForm.productId).filter((i) => {
                     const kalan = i.bought - getBatchSoldQtyForItem(i);
-                    return kalan > 0;
+                    return kalan > 0 && i.depo === saleForm.depo;
                   });
                   const uniqueBatches = [...new Map(partiler.map((i) => [i.batch_id, i])).values()];
                   if (uniqueBatches.length <= 1) return null;
@@ -2762,12 +2801,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 }}>
                   <option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option>
                 </select>
-                {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
-                  <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
-                )}
-                {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
-                  <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
-                )}
+                <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
                 <button type="button" className="btn" onClick={addSaleFromForm} disabled={saleLoading} style={{opacity: saleLoading ? 0.6 : 1, pointerEvents: saleLoading ? "none" : "auto", cursor: saleLoading ? "not-allowed" : "pointer"}}>{saleLoading ? "Kaydediliyor..." : "Satışı Kaydet"}</button>
               </div>
             </Card>
