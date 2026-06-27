@@ -1269,13 +1269,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!price) return setMessage("Fiyat girin.");
     const product = productMap.get(item.product_id);
     if (!product) return;
-    const userDepo = currentUserEmail.includes("mihrimah") ? "Stok" : "Stok";
-    const otherDepo = userDepo === "Stok" ? "Stok" : "Stok";
-    const userDepoStock = batchItemsForProduct(product.id).filter((bi) => bi.depo === userDepo).reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
-    const depo = userDepoStock >= item.qty ? userDepo : otherDepo;
-    const seller: Seller = depo === "Stok" ? "Aslı" : "Mihrimah";
-    const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => bi.depo === depo && Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
-    if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok (${depo}).`);
+    const seller: Seller = currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı";
+    const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
+    if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok.`);
     const batchItem = depoBatchItems[0];
     const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_id: batchItem.batch_id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: convertPaid === "true", paid_amount: convertPaid === "true" ? price * item.qty : 0 });
     if (error) return showError(error);
