@@ -283,6 +283,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showKarDetay, setShowKarDetay] = useState(false);
   const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
   const [showMusteriDetay, setShowMusteriDetay] = useState(false);
+  const [showStokDetay, setShowStokDetay] = useState(false);
+  const [stokSort, setStokSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "urun", dir: "asc"});
   const [saleLoading, setSaleLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
@@ -1729,7 +1731,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div onClick={() => setShowKarDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Dönem Net Karı" value={money(anlıkKar)} note="Detay için tıklayın ↗" />
               </div>
-              <StatCard title="Mevcut Stok" value={totals.totalStock} />
+              <div onClick={() => setShowStokDetay(true)} style={{cursor:"pointer"}}>
+                <StatCard title="Mevcut Stok" value={totals.totalStock} note="Detay için tıklayın ↗" />
+              </div>
             </div>
             <Card title="Son Hareketler">
               <Table
@@ -2556,6 +2560,102 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+            </div>
+          );
+        })()}
+
+        {showStokDetay && (() => {
+          // Her ürün-parti kombinasyonu için stok hesapla
+          const rows: {urun: string; parti: string; tur: string; asli: number; mihri: number; toplam: number; alisF: number}[] = [];
+          for (const bi of batchItems) {
+            const product = productMap.get(bi.product_id);
+            const batch = batchMap.get(bi.batch_id);
+            if (!product || product.passive) continue;
+            const sold = getBatchSoldQtyForItem(bi);
+            const kalan = Math.max(bi.bought - sold, 0);
+            if (kalan <= 0) continue;
+            const existing = rows.find((r) => r.urun === product.name && r.parti === (batch?.name || "") && r.alisF === bi.buy_price);
+            if (existing) {
+              if (bi.depo === "Aslı-depo") existing.asli += kalan;
+              else if (bi.depo === "Mihri-depo") existing.mihri += kalan;
+              else existing.asli += kalan;
+              existing.toplam += kalan;
+            } else {
+              rows.push({
+                urun: product.name,
+                parti: batch?.name || "-",
+                tur: product.gender_category || "-",
+                asli: bi.depo === "Aslı-depo" ? kalan : 0,
+                mihri: bi.depo === "Mihri-depo" ? kalan : 0,
+                toplam: kalan,
+                alisF: bi.buy_price,
+              });
+            }
+          }
+          const sorted = [...rows].sort((a, b) => {
+            const dir = stokSort.dir === "asc" ? 1 : -1;
+            if (stokSort.col === "urun") return a.urun.localeCompare(b.urun, "tr") * dir;
+            if (stokSort.col === "parti") return a.parti.localeCompare(b.parti, "tr") * dir;
+            if (stokSort.col === "tur") return a.tur.localeCompare(b.tur, "tr") * dir;
+            if (stokSort.col === "asli") return (a.asli - b.asli) * dir;
+            if (stokSort.col === "mihri") return (a.mihri - b.mihri) * dir;
+            if (stokSort.col === "toplam") return (a.toplam - b.toplam) * dir;
+            if (stokSort.col === "alis") return (a.alisF - b.alisF) * dir;
+            return 0;
+          });
+          const stokTh = (col: string, label: string) => (
+            <th key={col} onClick={() => setStokSort((p) => ({col, dir: p.col === col && p.dir === "asc" ? "desc" : "asc"}))}
+              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none"}}>
+              {label}{stokSort.col === col ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}
+            </th>
+          );
+          const genelToplam = sorted.reduce((s, r) => s + r.toplam, 0);
+          return (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowStokDetay(false)}>
+              <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:900,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                  <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Mevcut Stok Detayı</h2>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:"0.85rem",color:"#64748b"}}>{sorted.length} kalem · <strong>{genelToplam}</strong> adet</span>
+                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowStokDetay(false)}>Kapat</button>
+                  </div>
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
+                    <thead>
+                      <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
+                        {stokTh("urun","Ürün Adı")}
+                        {stokTh("parti","Parti")}
+                        {stokTh("tur","Tür")}
+                        {stokTh("asli","Aslı Depo")}
+                        {stokTh("mihri","Mihri Depo")}
+                        {stokTh("toplam","Toplam")}
+                        {stokTh("alis","Alış Fiyatı")}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sorted.map((r, i) => (
+                        <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                          <td style={{padding:"7px 10px",fontWeight:500}}>{r.urun}</td>
+                          <td style={{padding:"7px 10px",color:"#64748b"}}>{r.parti}</td>
+                          <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{r.asli > 0 ? r.asli : "—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{r.mihri > 0 ? r.mihri : "—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.toplam}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{money(r.alisF)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
+                        <td colSpan={5} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
+                        <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{genelToplam}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
             </div>
           );
