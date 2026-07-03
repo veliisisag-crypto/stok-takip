@@ -258,6 +258,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [active, setActive] = useState("dashboard");
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(""), 6000);
+    return () => clearTimeout(t);
+  }, [message]);
+
+  const getMessageTone = (msg: string): "error" | "success" => {
+    const negative = ["yetersiz", "hata", "zorunlu", "olamaz", "olmalı", "silinmedi", "seçin", "girin", "eklemeli", "bulunamadı", "reddedildi", "geçerli"];
+    const lower = msg.toLowerCase();
+    return negative.some((w) => lower.includes(w)) ? "error" : "success";
+  };
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -1757,10 +1769,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div style={{position:"fixed",top:0,left:0,right:0,height:3,zIndex:99998,background:"linear-gradient(90deg,#0f172a 0%,#64748b 50%,#0f172a 100%)",backgroundSize:"200% 100%",animation:"loadbar 1.2s linear infinite"}} />
         )}
 
-        {message ? (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border bg-white p-3 text-sm shadow-sm">
-            <span>{message}</span>
-            <button type="button" className="btn-secondary" onClick={() => setMessage("")}>Kapat</button>
+        {message && getMessageTone(message) === "error" ? (
+          <div
+            style={{
+              position: "fixed",
+              top: 20,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 100000,
+              maxWidth: "92vw",
+              minWidth: 300,
+            }}
+            className="flex items-center gap-3 rounded-xl border-2 border-red-400 bg-red-50 p-4 text-sm font-semibold text-red-800 shadow-2xl"
+          >
+            <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+            <span className="flex-1">{message}</span>
+            <button type="button" onClick={() => setMessage("")} style={{ fontWeight: 700, fontSize: "1rem", lineHeight: 1, opacity: 0.6 }}>
+              ✕
+            </button>
           </div>
         ) : null}
 
