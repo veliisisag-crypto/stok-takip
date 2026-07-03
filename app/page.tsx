@@ -568,7 +568,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (sale.sale_type === "Fire/Bozuk") return toplam;
 
       const cost = toNum(sale.cost);
-      const ekMaliyet = getEkMaliyet(sale.batch_id);
+      const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty;
 
       if (sale.sale_type === "Hibe") {
         return toplam - (cost + ekMaliyet);
@@ -598,7 +598,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const sale = saleMap.get(alloc.sale_id)!;
         const cost = toNum(sale.cost);
         const total = toNum(sale.total);
-        const ekMaliyet = getEkMaliyet(sale.batch_id);
+        const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty;
         const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
         const gercekMaliyet = (cost + ekMaliyet) * oran;
         const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
