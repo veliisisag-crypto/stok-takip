@@ -132,16 +132,6 @@ type BatchCost = {
   aciklama: string;
 };
 
-type BatchExtraCost = {
-  id: string;
-  batch_id: string;
-  per_unit_cost: number;
-  total_amount: number;
-  batch_group: string[];
-  aciklama: string | null;
-  created_at: string;
-};
-
 type Period = {
   id: string;
   name: string;
@@ -269,11 +259,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [batchCosts, setBatchCosts] = useState<BatchCost[]>([]);
   const [costInputs, setCostInputs] = useState<Record<string, Record<string, string>>>({});
-  const [batchExtraCosts, setBatchExtraCosts] = useState<BatchExtraCost[]>([]);
-  const [ekMaliyetSelected, setEkMaliyetSelected] = useState<string[]>([]);
-  const [ekMaliyetAmount, setEkMaliyetAmount] = useState<string>("");
-  const [ekMaliyetWarning, setEkMaliyetWarning] = useState<string | null>(null);
-  const [ekMaliyetSaving, setEkMaliyetSaving] = useState(false);
   const [periods, setPeriods] = useState<Period[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [preorders, setPreorders] = useState<Preorder[]>([]);
@@ -375,7 +360,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -385,13 +370,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
         supabase.from("batch_costs").select("*"),
-        supabase.from("batch_extra_costs").select("*"),
         supabase.from("preorders").select("*").order("created_at", { ascending: false }),
         supabase.from("preorder_items").select("*"),
         supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -404,7 +388,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
       setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
-      setBatchExtraCosts((batchExtraCostsRes.data || []) as BatchExtraCost[]);
       setPreorders((preordersRes.data || []) as Preorder[]);
       setPreorderItems((preorderItemsRes.data || []) as PreorderItem[]);
       setPaymentAllocations((paymentAllocationsRes.data || []) as {id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]);
@@ -532,11 +515,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const getCustomerBalance = (customerId: string) =>
     Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
 
-  const ekMaliyetMap = useMemo(
-    () => new Map(batchExtraCosts.map((c) => [c.batch_id, c.per_unit_cost])),
-    [batchExtraCosts]
-  );
-  const getEkMaliyet = (batchId: string) => ekMaliyetMap.get(batchId) || 0;
+  const EK_MALIYET = 38.4;
+  const EK_MALIYET_7 = 30;
+  const EK_MALIYET_8 = 30;
+  const EK_MALIYET_PARTILER = ["1.parti","2.parti","3.parti","4.parti","5.parti","6.parti"];
+  const getEkMaliyet = (batchName: string) => {
+    const n = batchName.toLowerCase().replace(/\s/g, "");
+    if (["7.parti","8.parti"].includes(n)) return EK_MALIYET_7;
+    if (EK_MALIYET_PARTILER.includes(n)) return EK_MALIYET;
+    return 0;
+  };
 
   const anlıkKar = useMemo(() => {
     const lastClosed = periods
@@ -556,7 +544,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (sale.sale_type === "Fire/Bozuk") return toplam;
 
       const cost = toNum(sale.cost);
-      const ekMaliyet = getEkMaliyet(sale.batch_id);
+      const batchName = batchMap.get(sale.batch_id)?.name || "";
+      const ekMaliyet = getEkMaliyet(batchName);
 
       if (sale.sale_type === "Hibe") {
         return toplam - (cost + ekMaliyet);
@@ -567,7 +556,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const oran = alloc.amount / total;
       return toplam + alloc.amount - (cost + ekMaliyet) * oran;
     }, 0);
-  }, [paymentAllocations, activeSales, ekMaliyetMap, periods]);
+  }, [paymentAllocations, activeSales, batchMap, periods]);
 
   const karDetay = useMemo(() => {
     const lastClosed = periods
@@ -586,7 +575,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const sale = saleMap.get(alloc.sale_id)!;
         const cost = toNum(sale.cost);
         const total = toNum(sale.total);
-        const ekMaliyet = getEkMaliyet(sale.batch_id);
+        const batchName = batchMap.get(sale.batch_id)?.name || "";
+        const ekMaliyet = getEkMaliyet(batchName);
         const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
         const gercekMaliyet = (cost + ekMaliyet) * oran;
         const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
@@ -604,7 +594,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         };
       })
       .sort((a, b) => b.kar - a.kar);
-  }, [paymentAllocations, activeSales, ekMaliyetMap, periods, customerMap, productMap]);
+  }, [paymentAllocations, activeSales, batchMap, periods, customerMap, productMap]);
 
   const totals = useMemo(() => {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
@@ -836,69 +826,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Parti değiştirildi", "batches", oldName, { yeni_ad: clean });
     loadAll();
-  };
-
-  const toggleEkMaliyetBatch = (batchId: string) => {
-    setEkMaliyetWarning(null);
-    setEkMaliyetSelected((prev) => prev.includes(batchId) ? prev.filter((id) => id !== batchId) : [...prev, batchId]);
-  };
-
-  const saveEkMaliyet = async (force = false) => {
-    if (ekMaliyetSelected.length === 0) return setMessage("En az bir parti seçmelisin.");
-    const amount = Number(ekMaliyetAmount);
-    if (!amount || amount <= 0) return setMessage("Geçerli bir tutar gir.");
-
-    if (!force) {
-      const already = ekMaliyetSelected
-        .map((id) => batchExtraCosts.find((c) => c.batch_id === id))
-        .filter(Boolean) as BatchExtraCost[];
-      if (already.length > 0) {
-        const names = already.map((c) => batchMap.get(c.batch_id)?.name || c.batch_id).join(", ");
-        setEkMaliyetWarning(`${names} partisine daha önce ek maliyet girilmiş. Üzerine yazmak istiyor musun?`);
-        return;
-      }
-    }
-
-    setEkMaliyetSaving(true);
-    try {
-      const totalQty = batchItems
-        .filter((item) => ekMaliyetSelected.includes(item.batch_id))
-        .reduce((sum, item) => sum + item.bought, 0);
-      if (totalQty <= 0) { setMessage("Seçilen partilerde adet bulunamadı."); return; }
-      const perUnit = amount / totalQty;
-
-      for (const batchId of ekMaliyetSelected) {
-        const existing = batchExtraCosts.find((c) => c.batch_id === batchId);
-        const data = { batch_id: batchId, per_unit_cost: perUnit, total_amount: amount, batch_group: ekMaliyetSelected };
-        if (existing) {
-          const { error } = await supabase.from("batch_extra_costs").update(data).eq("id", existing.id);
-          if (error) { showError(error); continue; }
-          setBatchExtraCosts((prev) => prev.map((c) => c.batch_id === batchId ? { ...c, ...data } : c));
-        } else {
-          const { data: inserted, error } = await supabase.from("batch_extra_costs").insert(data).select();
-          if (error) { showError(error); continue; }
-          if (inserted && inserted[0]) setBatchExtraCosts((prev) => [...prev, inserted[0] as BatchExtraCost]);
-        }
-      }
-      const batchNames = ekMaliyetSelected.map((id) => batchMap.get(id)?.name || id).join(", ");
-      await logAction("Ek maliyet eklendi", "batch_extra_costs", batchNames, { tutar: amount, adet: totalQty, birim_maliyet: perUnit });
-      setMessage(`Ek maliyet kaydedildi: birim başı ${money(perUnit)} (${money(amount)} / ${totalQty} adet).`);
-      setEkMaliyetSelected([]);
-      setEkMaliyetAmount("");
-      setEkMaliyetWarning(null);
-    } finally {
-      setEkMaliyetSaving(false);
-    }
-  };
-
-  const deleteEkMaliyet = async (batchId: string) => {
-    const existing = batchExtraCosts.find((c) => c.batch_id === batchId);
-    if (!existing) return;
-    if (!confirm(`${batchMap.get(batchId)?.name || batchId} partisinin ek maliyet kaydı silinsin mi?`)) return;
-    const { error } = await supabase.from("batch_extra_costs").delete().eq("id", existing.id);
-    if (error) return showError(error);
-    setBatchExtraCosts((prev) => prev.filter((c) => c.id !== existing.id));
-    await logAction("Ek maliyet silindi", "batch_extra_costs", batchMap.get(batchId)?.name || batchId);
   };
 
   const addBatchProduct = async () => {
@@ -2884,101 +2811,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "partners" && (
           <div className="space-y-4">
-            <Card title="Ek Maliyet Ekle">
-              <p className="mb-4 text-sm text-slate-500">
-                Ek maliyet uygulanacak parti(leri) seç, toplam tutarı gir. Tutar, seçilen partilerdeki toplam adede bölünüp birim başı ek maliyet olarak Kâr hesabına eklenir.
-              </p>
-
-              <div className="mb-4 flex flex-wrap gap-2">
-                {sortedBatches.map((batch) => {
-                  const selected = ekMaliyetSelected.includes(batch.id);
-                  const existing = batchExtraCosts.find((c) => c.batch_id === batch.id);
-                  return (
-                    <button
-                      type="button"
-                      key={batch.id}
-                      onClick={() => toggleEkMaliyetBatch(batch.id)}
-                      className={selected ? "btn" : "btn-secondary"}
-                      style={{ fontSize: "0.8rem", padding: "6px 12px", position: "relative" }}
-                    >
-                      {batch.name}
-                      {existing ? <span style={{ marginLeft: 6, fontSize: "0.65rem", opacity: 0.8 }}>({money(existing.per_unit_cost)}/adet)</span> : null}
-                    </button>
-                  );
-                })}
-                {sortedBatches.length === 0 && <span className="text-sm text-slate-500">Henüz parti yok.</span>}
-              </div>
-
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="field-label" style={{ minWidth: 200 }}>
-                  Toplam Tutar (₺)
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    placeholder="Örn: 600"
-                    value={ekMaliyetAmount}
-                    onChange={(e) => { setEkMaliyetWarning(null); setEkMaliyetAmount(e.target.value); }}
-                  />
-                </div>
-                <button type="button" className="btn" disabled={ekMaliyetSaving} onClick={() => saveEkMaliyet(false)}>
-                  {ekMaliyetSaving ? "Kaydediliyor..." : "Hesapla ve Kaydet"}
-                </button>
-                {ekMaliyetSelected.length > 0 && (
-                  <button type="button" className="btn-secondary" onClick={() => { setEkMaliyetSelected([]); setEkMaliyetWarning(null); }}>
-                    Seçimi Temizle
-                  </button>
-                )}
-              </div>
-
-              {ekMaliyetSelected.length > 0 && (
-                <p className="mt-2 text-xs text-slate-500">
-                  Seçilen partilerdeki toplam adet: {batchItems.filter((i) => ekMaliyetSelected.includes(i.batch_id)).reduce((s, i) => s + i.bought, 0)}
-                </p>
-              )}
-
-              {ekMaliyetWarning && (
-                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                  <p className="mb-2">⚠️ {ekMaliyetWarning}</p>
-                  <div className="flex gap-2">
-                    <button type="button" className="btn-danger" onClick={() => saveEkMaliyet(true)}>Üzerine Yaz</button>
-                    <button type="button" className="btn-secondary" onClick={() => setEkMaliyetWarning(null)}>Vazgeç</button>
-                  </div>
-                </div>
-              )}
-
-              {batchExtraCosts.length > 0 && (
-                <div className="mt-5 overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100">
-                        <th className="p-2 text-left font-semibold border border-slate-200">Parti</th>
-                        <th className="p-2 text-right font-semibold border border-slate-200">Birim Ek Maliyet</th>
-                        <th className="p-2 text-right font-semibold border border-slate-200">Girilen Toplam Tutar</th>
-                        <th className="p-2 text-left font-semibold border border-slate-200">Birlikte Girildiği Partiler</th>
-                        <th className="p-2 border border-slate-200"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...batchExtraCosts].sort((a, b) => (batchMap.get(a.batch_id)?.name || "").localeCompare(batchMap.get(b.batch_id)?.name || "", "tr", { numeric: true })).map((c) => (
-                        <tr key={c.id} className="hover:bg-slate-50">
-                          <td className="p-2 font-semibold border border-slate-200">{batchMap.get(c.batch_id)?.name || c.batch_id}</td>
-                          <td className="p-2 text-right border border-slate-200">{money(c.per_unit_cost)}</td>
-                          <td className="p-2 text-right border border-slate-200">{money(c.total_amount)}</td>
-                          <td className="p-2 border border-slate-200 text-xs text-slate-500">
-                            {(c.batch_group || []).map((id) => batchMap.get(id)?.name || id).join(", ")}
-                          </td>
-                          <td className="p-2 border border-slate-200">
-                            <button type="button" className="btn-danger" style={{ fontSize: "0.7rem", padding: "3px 10px" }} onClick={() => deleteEkMaliyet(c.batch_id)}>Sil</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-
             <Card title="Parti Maliyet Kaydı">
               <p className="mb-4 text-sm text-slate-500">Her parti satırındaki değerleri doldurun ve "Kaydet" butonuna basın. Yeni parti eklendiğinde otomatik alt satıra eklenir.</p>
               <div className="overflow-x-auto">

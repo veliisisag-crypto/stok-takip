@@ -4,7 +4,7 @@ Sultan İçlek tonoğlun'dan 1.6.2026'da 1500 TL geldi, kim olduğu bilinmiyor.
 
 git status
 git add .
-git commit -m "satış tahsilat 2"
+git commit -m "depo gösterimi 2"
 git push
 
 

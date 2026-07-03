@@ -1,0 +1,126 @@
+[
+  {
+    "jsonb_agg": [
+      {
+        "id": "ce695cd9-3699-454d-bc91-d94a1c5e5460",
+        "asli": 700,
+        "kasa": 16650,
+        "veli": 0,
+        "diger": 2500,
+        "kargo": 700,
+        "aciklama": "Mihri yakıt",
+        "batch_id": "a42e6690-95c9-440e-99ca-e029f4354c04",
+        "mihrimah": 0,
+        "created_at": "2026-06-05T12:24:20.971925+00:00"
+      },
+      {
+        "id": "3c6eef0c-03ce-444f-8916-5b330e642ce4",
+        "asli": 1400,
+        "kasa": 42920,
+        "veli": 12500,
+        "diger": 0,
+        "kargo": 1400,
+        "aciklama": "tester-2300",
+        "batch_id": "861e1b45-3f20-4db7-9646-b5facb5347c0",
+        "mihrimah": 0,
+        "created_at": "2026-06-05T12:24:34.748973+00:00"
+      },
+      {
+        "id": "97aaeba0-1d9a-4168-808f-9900dc5a34f5",
+        "asli": 0,
+        "kasa": 28900,
+        "veli": 0,
+        "diger": 0,
+        "kargo": 900,
+        "aciklama": "",
+        "batch_id": "84b225f6-701b-41c2-a0b5-6624cee354be",
+        "mihrimah": 0,
+        "created_at": "2026-06-13T19:45:03.659207+00:00"
+      },
+      {
+        "id": "afc56386-2884-4f9e-b3b0-1bebef13b7f1",
+        "asli": 960,
+        "kasa": 15000,
+        "veli": 25000,
+        "diger": 0,
+        "kargo": 960,
+        "aciklama": "tester 1800",
+        "batch_id": "2d4be436-f35d-462a-9b07-721a4ab86dbf",
+        "mihrimah": 0,
+        "created_at": "2026-06-05T12:13:28.786321+00:00"
+      },
+      {
+        "id": "4bf7703a-52c1-4811-9f89-33907c828ef2",
+        "asli": 0,
+        "kasa": 14320,
+        "veli": 0,
+        "diger": 0,
+        "kargo": 300,
+        "aciklama": "tester-1250",
+        "batch_id": "746d7546-ca40-4285-a74d-2ec0423070c1",
+        "mihrimah": 0,
+        "created_at": "2026-06-18T10:15:32.102681+00:00"
+      },
+      {
+        "id": "f8cf73c9-dbfd-4f53-b3c1-02735225626b",
+        "asli": 0,
+        "kasa": 29323,
+        "veli": 0,
+        "diger": 0,
+        "kargo": 400,
+        "aciklama": "",
+        "batch_id": "72cc2935-9601-41a1-b10f-a7a34d04c054",
+        "mihrimah": 0,
+        "created_at": "2026-06-23T18:42:55.740453+00:00"
+      },
+      {
+        "id": "c09b3298-d5d1-4c51-905d-467ba53224a7",
+        "asli": 1696,
+        "kasa": 0,
+        "veli": 16300,
+        "diger": 0,
+        "kargo": 616,
+        "aciklama": "Laleli",
+        "batch_id": "b01f5b49-0edb-433a-a4c4-04ee73f9dca0",
+        "mihrimah": 0,
+        "created_at": "2026-06-05T12:13:11.381631+00:00"
+      },
+      {
+        "id": "aad17c09-fb9c-4a58-aa07-0db97c159ee8",
+        "asli": 0,
+        "kasa": 13800,
+        "veli": 12000,
+        "diger": 0,
+        "kargo": 0,
+        "aciklama": "Laleli",
+        "batch_id": "9710f3ca-854b-4d81-be3e-df7e16cfb22a",
+        "mihrimah": 0,
+        "created_at": "2026-06-05T12:13:12.914012+00:00"
+      },
+      {
+        "id": "6851e7e9-2256-4ea7-a0bf-e2cdeb6bc392",
+        "asli": 0,
+        "kasa": 13548,
+        "veli": 0,
+        "diger": 0,
+        "kargo": 0,
+        "aciklama": "Hasan",
+        "batch_id": "7ed89189-3997-4563-8403-4fd47c3f10a1",
+        "mihrimah": 0,
+        "created_at": "2026-07-02T10:08:35.402207+00:00"
+      },
+      {
+        "id": "cb5bc9dd-7dab-40c9-87aa-8f171dd9c72c",
+        "asli": 0,
+        "kasa": 9900,
+        "veli": 0,
+        "diger": 0,
+        "kargo": 600,
+        "aciklama": "Laleli-Yüksel",
+        "batch_id": "b00b3a88-c254-4537-ad34-b9fa3b58c0b1",
+        "mihrimah": 0,
+        "created_at": "2026-07-02T08:20:08.845578+00:00"
+      }
+    ]
+  }
+]
