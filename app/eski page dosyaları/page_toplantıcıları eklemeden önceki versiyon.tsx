@@ -72,27 +72,6 @@ type Batch = {
   id: string;
   name: string;
   created_at: string;
-  supplier_id?: string | null;
-};
-
-type Supplier = {
-  id: string;
-  name: string;
-  created_at: string;
-};
-
-type SupplierReturn = {
-  id: string;
-  product_id: string;
-  batch_item_id: string;
-  batch_id: string;
-  supplier_id: string | null;
-  qty: number;
-  resolution_type: "bekliyor" | "urun" | "para";
-  refund_amount: number | null;
-  note: string | null;
-  created_at: string;
-  resolved_at: string | null;
 };
 
 type BatchItem = {
@@ -304,16 +283,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [batchCosts, setBatchCosts] = useState<BatchCost[]>([]);
   const [costInputs, setCostInputs] = useState<Record<string, Record<string, string>>>({});
   const [batchExtraCosts, setBatchExtraCosts] = useState<BatchExtraCost[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierReturns, setSupplierReturns] = useState<SupplierReturn[]>([]);
-  const [newSupplierName, setNewSupplierName] = useState("");
-  const [newBatchSupplierId, setNewBatchSupplierId] = useState("");
-  const [returnFormItemId, setReturnFormItemId] = useState<string | null>(null);
-  const [returnFormQty, setReturnFormQty] = useState("");
-  const [returnFormSupplierId, setReturnFormSupplierId] = useState("");
-  const [returnFormNote, setReturnFormNote] = useState("");
-  const [resolvingReturnId, setResolvingReturnId] = useState<string | null>(null);
-  const [resolveMoneyAmount, setResolveMoneyAmount] = useState("");
   const [ekMaliyetSelected, setEkMaliyetSelected] = useState<string[]>([]);
   const [ekMaliyetAmount, setEkMaliyetAmount] = useState<string>("");
   const [ekMaliyetWarning, setEkMaliyetWarning] = useState<string | null>(null);
@@ -376,7 +345,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
-  const supplierMap = useMemo(() => new Map(suppliers.map((s) => [s.id, s])), [suppliers]);
 
   const sortedProducts = useMemo(
     () => [...products].sort((a, b) => a.name.localeCompare(b.name, "tr")),
@@ -420,7 +388,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -434,11 +402,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("preorders").select("*").order("created_at", { ascending: false }),
         supabase.from("preorder_items").select("*"),
         supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
-        supabase.from("suppliers").select("*").order("name", { ascending: true }),
-        supabase.from("supplier_returns").select("*").order("created_at", { ascending: false }),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, suppliersRes, supplierReturnsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -455,8 +421,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPreorders((preordersRes.data || []) as Preorder[]);
       setPreorderItems((preorderItemsRes.data || []) as PreorderItem[]);
       setPaymentAllocations((paymentAllocationsRes.data || []) as {id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]);
-      setSuppliers((suppliersRes.data || []) as Supplier[]);
-      setSupplierReturns((supplierReturnsRes.data || []) as SupplierReturn[]);
       // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
@@ -662,17 +626,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const lastClosedAt = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0]?.closed_at;
     const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
     const recentPayments = activePayments.filter((p) => new Date(p.created_at) > sinceDate);
-    const recentRefunds = supplierReturns.filter((r) => r.resolution_type === "para" && r.resolved_at && new Date(r.resolved_at) > sinceDate);
-    const refundIncome = recentRefunds.reduce((sum, r) => sum + Number(r.refund_amount || 0), 0);
-    const grossCash = recentPayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
+    const grossCash = recentPayments.reduce((sum, item) => sum + item.amount, 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome };
-  }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns]);
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments };
+  }, [products, customers, batchItems, activeSales, activePayments, periods]);
 
 
   const filteredCustomers = useMemo(() => {
@@ -860,11 +822,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newBatchName.trim();
     if (!name) return setMessage("Parti adı boş olamaz.");
     if (batches.some((b) => b.name === name)) return setMessage("Bu parti zaten kayıtlı.");
-    const { error } = await supabase.from("batches").insert({ name, supplier_id: newBatchSupplierId || null });
+    const { error } = await supabase.from("batches").insert({ name });
     if (error) return showError(error);
-    await logAction("Parti eklendi", "batches", name, { toptanci: newBatchSupplierId ? supplierMap.get(newBatchSupplierId)?.name : "Belirtilmedi" });
+    await logAction("Parti eklendi", "batches", name);
     setNewBatchName("");
-    setNewBatchSupplierId("");
     setMessage("Yeni parti adı kaynak listeye eklendi.");
     loadAll();
   };
@@ -887,86 +848,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("batches").update({ name: clean }).eq("id", batchId);
     if (error) return showError(error);
     await logAction("Parti değiştirildi", "batches", oldName, { yeni_ad: clean });
-    loadAll();
-  };
-
-  const addSupplier = async () => {
-    const clean = newSupplierName.trim();
-    if (!clean) return setMessage("Toptancı adı zorunlu.");
-    if (suppliers.some((s) => s.name.toLowerCase() === clean.toLowerCase())) return setMessage("Bu toptancı zaten var.");
-    const { data, error } = await supabase.from("suppliers").insert({ name: clean }).select();
-    if (error) return showError(error);
-    if (data && data[0]) setSuppliers((prev) => [...prev, data[0] as Supplier].sort((a, b) => a.name.localeCompare(b.name, "tr")));
-    await logAction("Toptancı eklendi", "suppliers", clean);
-    setNewSupplierName("");
-    setMessage(`${clean} eklendi.`);
-  };
-
-  const updateBatchSupplier = async (batchId: string, supplierId: string) => {
-    const value = supplierId || null;
-    const { error } = await supabase.from("batches").update({ supplier_id: value }).eq("id", batchId);
-    if (error) return showError(error);
-    setBatches((prev) => prev.map((b) => b.id === batchId ? { ...b, supplier_id: value } : b));
-    await logAction("Parti toptancısı güncellendi", "batches", batchMap.get(batchId)?.name || batchId, { toptanci: value ? supplierMap.get(value)?.name : "Belirtilmedi" });
-  };
-
-  const submitSupplierReturn = async (item: BatchItem) => {
-    const qty = Number(returnFormQty);
-    if (!qty || qty <= 0) return setMessage("Geçerli bir adet girin.");
-    const kalan = item.bought - getBatchSoldQtyForItem(item);
-    if (qty > kalan) return setMessage(`Yetersiz stok: bu partide en fazla ${kalan} adet iade gönderebilirsin.`);
-
-    const supplierId = returnFormSupplierId || batchMap.get(item.batch_id)?.supplier_id || null;
-
-    const { error: updateErr } = await supabase.from("batch_items").update({ bought: item.bought - qty }).eq("id", item.id);
-    if (updateErr) return showError(updateErr);
-
-    const { error: insertErr } = await supabase.from("supplier_returns").insert({
-      product_id: item.product_id,
-      batch_item_id: item.id,
-      batch_id: item.batch_id,
-      supplier_id: supplierId,
-      qty,
-      resolution_type: "bekliyor",
-      note: returnFormNote || null,
-    });
-    if (insertErr) return showError(insertErr);
-
-    await logAction("İade gönderildi", "supplier_returns", productMap.get(item.product_id)?.name || item.product_id, {
-      adet: qty,
-      parti: batchMap.get(item.batch_id)?.name,
-      toptanci: supplierId ? supplierMap.get(supplierId)?.name : "Belirtilmedi",
-    });
-    setMessage(`${qty} adet toptancıya iade için gönderildi olarak işaretlendi, stoktan düşüldü.`);
-    setReturnFormItemId(null);
-    setReturnFormQty("");
-    setReturnFormSupplierId("");
-    setReturnFormNote("");
-    loadAll();
-  };
-
-  const resolveReturnAsProduct = async (ret: SupplierReturn) => {
-    const item = batchItems.find((i) => i.id === ret.batch_item_id);
-    if (!item) return setMessage("Orijinal parti kalemi bulunamadı, elle kontrol etmen gerekebilir.");
-    const { error: updateErr } = await supabase.from("batch_items").update({ bought: item.bought + ret.qty }).eq("id", item.id);
-    if (updateErr) return showError(updateErr);
-    const { error } = await supabase.from("supplier_returns").update({ resolution_type: "urun", resolved_at: new Date().toISOString() }).eq("id", ret.id);
-    if (error) return showError(error);
-    await logAction("İade ürünle kapatıldı", "supplier_returns", productMap.get(ret.product_id)?.name || ret.product_id, { adet: ret.qty, parti: batchMap.get(ret.batch_id)?.name });
-    setMessage(`${ret.qty} adet, eski maliyetiyle aynı partiye geri eklendi.`);
-    loadAll();
-  };
-
-  const resolveReturnAsMoney = async (retId: string) => {
-    const amount = Number(resolveMoneyAmount);
-    if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
-    const ret = supplierReturns.find((r) => r.id === retId);
-    const { error } = await supabase.from("supplier_returns").update({ resolution_type: "para", refund_amount: amount, resolved_at: new Date().toISOString() }).eq("id", retId);
-    if (error) return showError(error);
-    await logAction("İade parayla kapatıldı", "supplier_returns", ret ? (productMap.get(ret.product_id)?.name || ret.product_id) : retId, { tutar: amount });
-    setMessage(`${money(amount)} iade geliri kaydedildi, dönem kapanışında ortaklara eşit dağıtılacak.`);
-    setResolvingReturnId(null);
-    setResolveMoneyAmount("");
     loadAll();
   };
 
@@ -1243,36 +1124,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setEditingSaleId(sale.id);
   };
 
-  const getAvailableStockForSaleEdit = (sale: Sale) => {
-    if (sale.batch_item_id) {
-      const item = batchItems.find((i) => i.id === sale.batch_item_id);
-      if (!item) return Infinity;
-      const soldExcludingThis = getBatchSoldQtyForItem(item) - sale.qty;
-      return item.bought - soldExcludingThis;
-    }
-    const items = batchItems.filter((i) => i.product_id === sale.product_id && i.batch_id === sale.batch_id);
-    const totalBought = items.reduce((s, i) => s + i.bought, 0);
-    const totalSoldAll = activeSales
-      .filter((s) => s.product_id === sale.product_id && s.batch_id === sale.batch_id)
-      .reduce((s, x) => s + x.qty, 0);
-    const soldExcludingThis = totalSoldAll - sale.qty;
-    return totalBought - soldExcludingThis;
-  };
-
   const saveSaleEdit = async (saleId: string) => {
     const draft = saleDrafts[saleId];
     if (!draft) return;
-    const sale = sales.find((s) => s.id === saleId);
-    const newQty = Number(draft.qty || 0);
-    if (sale && newQty > sale.qty) {
-      const available = getAvailableStockForSaleEdit(sale);
-      if (newQty > available) {
-        setMessage(`Yetersiz stok: bu partide en fazla ${Math.max(available, 0)} adete kadar çıkarabilirsin.`);
-        return;
-      }
-    }
     await updateSale(saleId, {
-      qty: newQty,
+      qty: Number(draft.qty || 0),
       total: Number(draft.total || 0),
       cost: Number(draft.cost || 0),
       seller: draft.seller,
@@ -1735,7 +1591,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["products", "Ürünler"],
     ["gallery", "Toplu Ürün Resimleri"],
     ["batchEntry", "Parti/Ürün Girişi"],
-    ["returns", "Toptancı İadeleri"],
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
     ["partners", "Parti Maliyet Kaydı"],
@@ -1966,9 +1821,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div onClick={() => setShowTahsilatDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Dönem Tahsilatları" value={money(totals.grossCash)} note="Detay için tıklayın ↗" />
               </div>
-              {totals.refundIncome > 0 && (
-                <StatCard title="Bekleyen İade Geliri" value={money(totals.refundIncome)} note="Toptancıdan gelen para iadesi, dönem kapanışında paylaşılır" />
-              )}
               <div onClick={() => setShowMusteriDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Detay için tıklayın ↗" />
               </div>
@@ -2196,61 +2048,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-batch-section">
                                 <h4 className="product-batch-title">Parti Detayları</h4>
                                 <div className="product-batch-table">
-                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div><div>İşlem</div></div>
+                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div></div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
                                     const sold = getBatchSoldQtyForItem(item);
-                                    const kalan = item.bought - sold;
                                     return (
-                                      <div key={item.id}>
-                                        <div className="product-batch-row">
-                                          <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
-                                          <div className="product-batch-cell">{item.bought}</div>
-                                          <div className="product-batch-cell">{sold}</div>
-                                          <div className="product-batch-cell">{kalan}</div>
-                                          <div className="product-batch-cell">{money(item.buy_price)}</div>
-                                          <div className="product-batch-cell">{money(item.sale_price)}</div>
-                                          <div className="product-batch-cell">
-                                            {kalan > 0 && (
-                                              <button
-                                                type="button"
-                                                style={{ fontSize: "0.65rem", padding: "3px 8px", borderRadius: 8, border: "1px solid #fca5a5", color: "#b91c1c", background: "#fef2f2" }}
-                                                onClick={() => {
-                                                  if (returnFormItemId === item.id) {
-                                                    setReturnFormItemId(null);
-                                                  } else {
-                                                    setReturnFormItemId(item.id);
-                                                    setReturnFormQty("");
-                                                    setReturnFormSupplierId(batchMap.get(item.batch_id)?.supplier_id || "");
-                                                    setReturnFormNote("");
-                                                  }
-                                                }}
-                                              >
-                                                İade Gönder
-                                              </button>
-                                            )}
-                                          </div>
-                                        </div>
-                                        {returnFormItemId === item.id && (
-                                          <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: 10, margin: "0 0 8px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-                                            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "0.7rem", color: "#7f1d1d" }}>
-                                              Adet (kalan: {kalan})
-                                              <input className="input" style={{ width: 80 }} type="number" min="1" max={kalan} value={returnFormQty} onChange={(e) => setReturnFormQty(e.target.value)} />
-                                            </label>
-                                            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "0.7rem", color: "#7f1d1d" }}>
-                                              Toptancı
-                                              <select className="input" style={{ width: 160 }} value={returnFormSupplierId} onChange={(e) => setReturnFormSupplierId(e.target.value)}>
-                                                <option value="">Belirtilmedi</option>
-                                                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                              </select>
-                                            </label>
-                                            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "0.7rem", color: "#7f1d1d", flex: 1, minWidth: 140 }}>
-                                              Not (opsiyonel)
-                                              <input className="input" type="text" placeholder="Örn: kutu hasarlı" value={returnFormNote} onChange={(e) => setReturnFormNote(e.target.value)} />
-                                            </label>
-                                            <button type="button" className="btn-danger" style={{ fontSize: "0.75rem" }} onClick={() => submitSupplierReturn(item)}>Gönder</button>
-                                            <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => setReturnFormItemId(null)}>Vazgeç</button>
-                                          </div>
-                                        )}
+                                      <div key={item.id} className="product-batch-row">
+                                        <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
+                                        <div className="product-batch-cell">{item.bought}</div>
+                                        <div className="product-batch-cell">{sold}</div>
+                                        <div className="product-batch-cell">{item.bought - sold}</div>
+                                        <div className="product-batch-cell">{money(item.buy_price)}</div>
+                                        <div className="product-batch-cell">{money(item.sale_price)}</div>
                                       </div>
                                     );
                                   }) : <div className="product-batch-empty">Kayıt yok.</div>}
@@ -2328,25 +2136,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <p className="mb-5 text-slate-500">Önce kaynak ürün ve parti adı oluşturulur. Sonra partiye ürün, adet, alış fiyatı ve hedef satış fiyatı girilir.</p>
               <div className="mb-5 flex flex-wrap gap-3">
                 <input className="input max-w-sm" placeholder="Yeni parti adı" value={newBatchName} onChange={(e) => setNewBatchName(e.target.value)} />
-                <select className="input max-w-xs" value={newBatchSupplierId} onChange={(e) => setNewBatchSupplierId(e.target.value)}>
-                  <option value="">Toptancı seçin (opsiyonel)</option>
-                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
                 <button type="button" className="btn-secondary" onClick={addBatchName}>Parti Adı Ekle</button>
               </div>
               <div className="mb-5 flex flex-wrap gap-2">
                 {sortedBatches.map((batch) => (
                   <div key={batch.id} className="flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
                     <span>{batch.name}</span>
-                    <select
-                      className="input"
-                      style={{ fontSize: "0.75rem", padding: "3px 6px", width: 140 }}
-                      value={batch.supplier_id || ""}
-                      onChange={(e) => updateBatchSupplier(batch.id, e.target.value)}
-                    >
-                      <option value="">Toptancı yok</option>
-                      {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
                     <button type="button" className="text-red-600" onClick={() => deleteBatchName(batch.id)}>Sil</button>
                     <button type="button" className="underline" onClick={() => {
                       const next = prompt("Yeni parti adı", batch.name);
@@ -2447,116 +2242,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ];
                     })}
                   />
-                );
-              })()}
-            </Card>
-          </div>
-        )}
-
-        {active === "returns" && (
-          <div className="space-y-4">
-            <Card title="Toptancılar">
-              <div className="mb-4 flex flex-wrap gap-3">
-                <input className="input max-w-sm" placeholder="Toptancı adı" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} />
-                <button type="button" className="btn-secondary" onClick={addSupplier}>Toptancı Ekle</button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {suppliers.length ? suppliers.map((s) => (
-                  <span key={s.id} className="rounded-xl border bg-slate-50 px-3 py-2 text-sm">{s.name}</span>
-                )) : <span className="text-sm text-slate-500">Henüz toptancı eklenmedi.</span>}
-              </div>
-            </Card>
-
-            <Card title="Bekleyen İadeler">
-              <p className="mb-4 text-sm text-slate-500">Toptancıya gönderilmiş, henüz "ürünle" ya da "parayla" kapatılmamış iadeler. Gönderildiği anda ilgili adet stoktan zaten düşülmüştür.</p>
-              {(() => {
-                const pending = supplierReturns.filter((r) => r.resolution_type === "bekliyor");
-                if (!pending.length) return <p className="text-sm text-slate-500">Bekleyen iade yok.</p>;
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100">
-                          <th className="p-2 text-left font-semibold border border-slate-200">Tarih</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Ürün</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Parti</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Toptancı</th>
-                          <th className="p-2 text-right font-semibold border border-slate-200">Adet</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Not</th>
-                          <th className="p-2 border border-slate-200">İşlem</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pending.map((r) => (
-                          <tr key={r.id} className="hover:bg-slate-50">
-                            <td className="p-2 border border-slate-200">{new Date(r.created_at).toLocaleDateString("tr-TR")}</td>
-                            <td className="p-2 border border-slate-200 font-semibold">{productMap.get(r.product_id)?.name || "-"}</td>
-                            <td className="p-2 border border-slate-200">{batchMap.get(r.batch_id)?.name || "-"}</td>
-                            <td className="p-2 border border-slate-200">{r.supplier_id ? (supplierMap.get(r.supplier_id)?.name || "-") : "Belirtilmedi"}</td>
-                            <td className="p-2 text-right border border-slate-200">{r.qty}</td>
-                            <td className="p-2 border border-slate-200 text-xs text-slate-500">{r.note || "—"}</td>
-                            <td className="p-2 border border-slate-200">
-                              {resolvingReturnId === r.id ? (
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <input className="input" style={{ width: 100 }} type="number" placeholder="Tutar ₺" value={resolveMoneyAmount} onChange={(e) => setResolveMoneyAmount(e.target.value)} />
-                                  <button type="button" className="btn" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsMoney(r.id)}>Kaydet</button>
-                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingReturnId(null); setResolveMoneyAmount(""); }}>Vazgeç</button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-wrap gap-2">
-                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsProduct(r)}>Ürünle Kapat</button>
-                                  <button type="button" className="btn" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingReturnId(r.id); setResolveMoneyAmount(""); }}>Parayla Kapat</button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
-            </Card>
-
-            <Card title="Geçmiş İadeler">
-              {(() => {
-                const resolved = supplierReturns.filter((r) => r.resolution_type !== "bekliyor");
-                if (!resolved.length) return <p className="text-sm text-slate-500">Henüz kapatılmış iade yok.</p>;
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100">
-                          <th className="p-2 text-left font-semibold border border-slate-200">Gönderim</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Kapanış</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Ürün</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Parti</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Toptancı</th>
-                          <th className="p-2 text-right font-semibold border border-slate-200">Adet</th>
-                          <th className="p-2 text-left font-semibold border border-slate-200">Sonuç</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {resolved.map((r) => (
-                          <tr key={r.id} className="hover:bg-slate-50">
-                            <td className="p-2 border border-slate-200">{new Date(r.created_at).toLocaleDateString("tr-TR")}</td>
-                            <td className="p-2 border border-slate-200">{r.resolved_at ? new Date(r.resolved_at).toLocaleDateString("tr-TR") : "-"}</td>
-                            <td className="p-2 border border-slate-200 font-semibold">{productMap.get(r.product_id)?.name || "-"}</td>
-                            <td className="p-2 border border-slate-200">{batchMap.get(r.batch_id)?.name || "-"}</td>
-                            <td className="p-2 border border-slate-200">{r.supplier_id ? (supplierMap.get(r.supplier_id)?.name || "-") : "Belirtilmedi"}</td>
-                            <td className="p-2 text-right border border-slate-200">{r.qty}</td>
-                            <td className="p-2 border border-slate-200">
-                              {r.resolution_type === "urun" ? (
-                                <span className="text-emerald-700 font-semibold">Ürünle kapatıldı (eski maliyetiyle geri eklendi)</span>
-                              ) : (
-                                <span className="text-blue-700 font-semibold">Parayla kapatıldı: {money(r.refund_amount || 0)}</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
                 );
               })()}
             </Card>
@@ -2685,26 +2370,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                 Düzenle
                               </button>
-                              {c.passive ? (
-                                <button
-                                  type="button"
-                                  className="product-btn product-btn--secondary"
-                                  onClick={async () => {
-                                    const { error } = await supabase.from("customers").update({ passive: false }).eq("id", c.id);
-                                    if (error) return showError(error);
-                                    await logAction("Cari aktif edildi", "customers", c.name);
-                                    setMessage("Cari tekrar aktif edildi.");
-                                    loadAll();
-                                  }}
-                                >
-                                  Aktif Et
-                                </button>
-                              ) : (
-                                <button type="button" className="product-btn product-btn--danger" onClick={() => deleteCustomer(c.id)}>
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                  Sil / Pasife Al
-                                </button>
-                              )}
+                              <button type="button" className="product-btn product-btn--danger" onClick={() => deleteCustomer(c.id)}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                Sil / Pasife Al
+                              </button>
                             </div>
                           )}
 
@@ -3445,9 +3114,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
                 <div className="rounded-xl bg-slate-100 p-4">Toplam tahsilat<br /><b>{money(totals.grossCash)}</b></div>
-                {totals.refundIncome > 0 && (
-                  <div className="rounded-xl bg-amber-50 border border-amber-300 p-4">Bunun içinde toptancı iadesi<br /><b>{money(totals.refundIncome)}</b></div>
-                )}
                 <div className="rounded-xl bg-slate-100 p-4">Önceki dağıtımlar<br /><b>{money(totals.distributedCash)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Kasadaki para<br /><b>{money(totals.cash)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(totals.cash / 2)}</b></div>
