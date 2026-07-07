@@ -82,6 +82,7 @@ type BatchItem = {
   buy_price: number;
   sale_price: number;
   depo?: string;
+  created_at: string;
 };
 
 type Sale = {
@@ -3012,6 +3013,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <thead>
                     <tr className="bg-slate-100">
                       <th className="p-3 text-left font-semibold border border-slate-200">Parti</th>
+                      <th className="p-3 text-left font-semibold border border-slate-200">İlk Parti Açılışı</th>
+                      <th className="p-3 text-left font-semibold border border-slate-200">İlk Mal Girişi</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
@@ -3028,6 +3031,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
                       const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.diger)||0);
+                      const ilkMalGirisiTarihi = batchItems
+                        .filter((i) => i.batch_id === batch.id)
+                        .reduce((min: string | null, i) => (!min || new Date(i.created_at) < new Date(min) ? i.created_at : min), null as string | null);
                       const saveCost = async () => {
                         const existing = batchCosts.find((c) => c.batch_id === batch.id);
                         const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "" };
@@ -3047,6 +3053,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       return (
                         <tr key={batch.id} className="hover:bg-slate-50">
                           <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
+                          <td className="p-3 border border-slate-200 text-slate-600">{batch.created_at ? new Date(batch.created_at).toLocaleDateString("tr-TR") : "-"}</td>
+                          <td className="p-3 border border-slate-200 text-slate-600">{ilkMalGirisiTarihi ? new Date(ilkMalGirisiTarihi).toLocaleDateString("tr-TR") : "-"}</td>
                           {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
@@ -3079,6 +3087,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.length > 0 && (
                       <tr className="bg-slate-200 font-bold">
                         <td className="p-3 border border-slate-300">Toplam</td>
+                        <td className="p-3 border border-slate-300"></td>
+                        <td className="p-3 border border-slate-300"></td>
                         {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
                             {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
