@@ -239,6 +239,76 @@ function StatCard({ title, value, note }: { title: string; value: ReactNode; not
   );
 }
 
+function SearchableSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = options.find((o) => o.value === value);
+  const filtered = query.trim()
+    ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        className="input"
+        placeholder={placeholder}
+        value={open ? query : (selected?.label || "")}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setQuery(""); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 200,
+            top: "100%",
+            left: 0,
+            right: 0,
+            marginTop: 4,
+            maxHeight: 240,
+            overflowY: "auto",
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(15,23,42,0.12)",
+          }}
+        >
+          {value && (
+            <div
+              onMouseDown={() => { onChange(""); setQuery(""); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer", fontSize: "0.8rem", color: "#94a3b8", borderBottom: "1px solid #f1f5f9" }}
+            >
+              Seçimi temizle
+            </div>
+          )}
+          {filtered.length ? filtered.map((o) => (
+            <div
+              key={o.value}
+              onMouseDown={() => { onChange(o.value); setQuery(""); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer", fontSize: "0.85rem", background: o.value === value ? "#f1f5f9" : "transparent" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = o.value === value ? "#f1f5f9" : "transparent")}
+            >
+              {o.label}
+            </div>
+          )) : <div style={{ padding: "8px 10px", fontSize: "0.85rem", color: "#94a3b8" }}>Sonuç yok</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Table({ headers, rows }: { headers: ReactNode[]; rows: ReactNode[][] }) {
   return (
     <div className="overflow-x-auto rounded-xl border">
@@ -2360,10 +2430,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <option value="">Parti seçin</option>
                   {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                 </select>
-                <select className="input" value={batchForm.productId} onChange={(e) => setBatchForm({ ...batchForm, productId: e.target.value })}>
-                  <option value="">Kaynak ürün seçin</option>
-                  {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <SearchableSelect
+                  placeholder="Kaynak ürün ara..."
+                  value={batchForm.productId}
+                  onChange={(v) => setBatchForm({ ...batchForm, productId: v })}
+                  options={sortedActiveProducts.map((p) => ({ value: p.id, label: p.name }))}
+                />
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
@@ -2778,10 +2850,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div className="space-y-3">
                 <div>
                   <label className="label">Cari</label>
-                  <select className="input" value={preorderForm.customerId} onChange={(e) => setPreorderForm({ ...preorderForm, customerId: e.target.value })}>
-                    <option value="">Cari seçin</option>
-                    {sortedActiveCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    placeholder="Cari ara..."
+                    value={preorderForm.customerId}
+                    onChange={(v) => setPreorderForm({ ...preorderForm, customerId: v })}
+                    options={sortedActiveCustomers.map((c) => ({ value: c.id, label: c.name }))}
+                  />
                 </div>
                 <div>
                   <label className="label">Not (opsiyonel)</label>
@@ -2792,10 +2866,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <div className="space-y-2">
                     {preorderForm.items.map((item, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
-                        <select className="input" style={{flex:3}} value={item.productId} onChange={(e) => { const items = [...preorderForm.items]; items[idx].productId = e.target.value; setPreorderForm({ ...preorderForm, items }); }}>
-                          <option value="">Ürün seçin</option>
-                          {sortedActiveProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <div style={{ flex: 3 }}>
+                          <SearchableSelect
+                            placeholder="Ürün ara..."
+                            value={item.productId}
+                            onChange={(v) => { const items = [...preorderForm.items]; items[idx].productId = v; setPreorderForm({ ...preorderForm, items }); }}
+                            options={sortedActiveProducts.map((p) => ({ value: p.id, label: p.name }))}
+                          />
+                        </div>
                         <input className="input" style={{flex:1, minWidth:60}} type="number" min="1" value={item.qty} onChange={(e) => { const items = [...preorderForm.items]; items[idx].qty = e.target.value; setPreorderForm({ ...preorderForm, items }); }} placeholder="Adet" />
                         {preorderForm.items.length > 1 && (
                           <button type="button" className="btn-danger" style={{padding:"6px 10px", flexShrink:0}} onClick={() => { const items = preorderForm.items.filter((_, i) => i !== idx); setPreorderForm({ ...preorderForm, items }); }}>✕</button>
@@ -3149,19 +3227,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <Card title="Yeni Satış Girişi">
               <p className="mb-5 text-slate-500">Satış girebilmek için önce cari kaydı ve ürün kaydı var olmalıdır.</p>
               <div className="grid gap-3 md:grid-cols-4">
-                <select className="input" value={saleForm.customerId} onChange={(e) => setSaleForm({ ...saleForm, customerId: e.target.value })}>
-                  <option value="">Cari seçin</option>
-                  {sortedActiveCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <select className="input" value={saleForm.productId} onChange={(e) => setSaleForm({ ...saleForm, productId: e.target.value, batchId: "" })}>
-                  <option value="">Ürün seçin</option>
-                  {sortedActiveProducts
+                <SearchableSelect
+                  placeholder="Cari ara..."
+                  value={saleForm.customerId}
+                  onChange={(v) => setSaleForm({ ...saleForm, customerId: v })}
+                  options={sortedActiveCustomers.map((c) => ({ value: c.id, label: c.name }))}
+                />
+                <SearchableSelect
+                  placeholder="Ürün ara..."
+                  value={saleForm.productId}
+                  onChange={(v) => setSaleForm({ ...saleForm, productId: v, batchId: "" })}
+                  options={sortedActiveProducts
                     .filter((p) => batchItemsForProduct(p.id).some((i) => i.bought - getBatchSoldQtyForItem(i) > 0))
                     .map((p) => {
                       const stok = batchItemsForProduct(p.id).reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      return <option key={p.id} value={p.id}>{p.name} — Stok: {stok}</option>;
+                      return { value: p.id, label: `${p.name} — Stok: ${stok}` };
                     })}
-                </select>
+                />
                 {/* Parti: birden fazla stoklu parti varsa göster */}
                 {saleForm.productId && (() => {
                   const partiler = batchItemsForProduct(saleForm.productId).filter((i) => {
