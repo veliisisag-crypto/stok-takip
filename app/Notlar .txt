@@ -4,7 +4,7 @@ Sultan İçlek tonoğlun'dan 1.6.2026'da 1500 TL geldi, kim olduğu bilinmiyor.
 
 git status
 git add .
-git commit -m "ek maliyet çarpanı"
+git commit -m "aktif arama eklendi"
 git push
 
 

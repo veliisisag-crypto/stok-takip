@@ -119,6 +119,7 @@ type Sale = {
   cost: number;
   paid: boolean;
   paid_amount: number;
+  payment_method?: "nakit" | "banka" | null;
   cancelled: boolean;
   created_at: string;
 };
@@ -127,6 +128,7 @@ type Payment = {
   id: string;
   customer_id: string;
   amount: number;
+  payment_method?: "nakit" | "banka" | null;
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
@@ -402,6 +404,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [search, setSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
+  const [paymentMethodInputs, setPaymentMethodInputs] = useState<Record<string, string>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -788,7 +791,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         date: payment.created_at,
         type: "Tahsilat",
         customer: customerMap.get(payment.customer_id)?.name || "-",
-        detail: "Cari ödeme",
+        detail: payment.payment_method === "nakit" ? "Tahsilat nakit alındı" : payment.payment_method === "banka" ? "Tahsilat banka alındı" : "Cari ödeme",
         amount: toNum(payment.amount),
         user: shortUser(payment.user_email ?? undefined),
       }));
@@ -1181,6 +1184,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (take <= 0) continue;
       const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
       const totalPrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || 0);
+      const isPaid = saleForm.paid !== "false" || isZeroPrice;
       rows.push({
         customer_id: customer.id,
         product_id: product.id,
@@ -1191,8 +1195,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         qty: take,
         total: totalPrice,
         cost: item.buy_price * take,
-        paid: saleForm.paid === "true" || isZeroPrice,
-        paid_amount: saleForm.paid === "true" || isZeroPrice ? totalPrice : 0,
+        paid: isPaid,
+        paid_amount: isPaid ? totalPrice : 0,
+        payment_method: (saleForm.paid === "banka" || saleForm.paid === "nakit") ? saleForm.paid : null,
         cancelled: false,
       });
       remainingQty -= take;
@@ -1203,12 +1208,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
 
     // Peşin satışsa payments + allocation ekle
-    if (saleForm.paid === "true" && saleForm.saleType === "Normal satış") {
+    if (saleForm.paid !== "false" && saleForm.saleType === "Normal satış") {
       const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka" })
           .select()
           .single();
         if (payErr) {
@@ -1469,6 +1474,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     try {
     const amount = Number(paymentInputs[customerId] || 0);
     if (!amount || amount <= 0) return;
+    const method = paymentMethodInputs[customerId] === "nakit" ? "nakit" : "banka";
     // Toplam satışı aşıyor mu kontrol et
     const totalSales = getCustomerSalesTotal(customerId);
     const totalPaid = getCustomerCollectedTotal(customerId);
@@ -1479,14 +1485,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
     } catch (err) {
       return showError(err);
     }
-    await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
+    await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount, yontem: method === "nakit" ? "Nakit" : "Banka" });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
     loadAll();
     } finally {
@@ -2751,6 +2757,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <div className="product-action-row" style={{marginBottom: 14}}>
                               <div className="cari-payment-row">
                                 <input className="input" style={{maxWidth: 160}} type="number" min="0" placeholder="Ödeme tutarı" value={paymentInputs[c.id] || ""} onChange={(e) => setPaymentInputs({ ...paymentInputs, [c.id]: e.target.value })} />
+                                <select className="input" style={{maxWidth: 160}} value={paymentMethodInputs[c.id] || "banka"} onChange={(e) => setPaymentMethodInputs({ ...paymentMethodInputs, [c.id]: e.target.value })}>
+                                  <option value="banka">Tahsilat banka alındı</option>
+                                  <option value="nakit">Tahsilat nakit alındı</option>
+                                </select>
                                 <button type="button" className="product-btn product-btn--secondary" disabled={paymentLoading === c.id} onClick={() => addCustomerPayment(c.id)}>{paymentLoading === c.id ? "..." : "Ödeme Ekle"}</button>
                               </div>
                               <button type="button" className="product-btn product-btn--secondary" onClick={() => startCustomerEdit(c)}>
@@ -3275,7 +3285,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
                 )}
                 {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
-                  <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}><option value="false">Cari borç olarak yaz</option><option value="true">Ödeme alındı</option></select>
+                  <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}>
+                    <option value="false">Cari borç olarak yaz</option>
+                    <option value="banka">Ödeme banka alındı</option>
+                    <option value="nakit">Ödeme nakit alındı</option>
+                  </select>
                 )}
                 <button type="button" className="btn" onClick={addSaleFromForm} disabled={saleLoading} style={{opacity: saleLoading ? 0.6 : 1, pointerEvents: saleLoading ? "none" : "auto", cursor: saleLoading ? "not-allowed" : "pointer"}}>{saleLoading ? "Kaydediliyor..." : "Satışı Kaydet"}</button>
               </div>
