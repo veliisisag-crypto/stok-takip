@@ -129,6 +129,7 @@ type Payment = {
   customer_id: string;
   amount: number;
   payment_method?: "nakit" | "banka" | null;
+  note?: string | null;
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
@@ -405,6 +406,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerSearch, setCustomerSearch] = useState("");
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [paymentMethodInputs, setPaymentMethodInputs] = useState<Record<string, string>>({});
+  const [editingPaymentNoteId, setEditingPaymentNoteId] = useState<string | null>(null);
+  const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -764,15 +767,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       return email.split("@")[0];
     };
 
-    const saleRows = activeSales.map((sale) => ({
-      id: `sale-${sale.id}`,
-      date: sale.created_at,
-      type: sale.sale_type === "Fire/Bozuk" ? "Fire/Bozuk" : sale.paid ? "Peşin satış" : "Cari satış",
-      customer: customerMap.get(sale.customer_id)?.name || "-",
-      detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet`,
-      amount: toNum(sale.total),
-      user: shortUser(undefined, sale.seller),
-    }));
+    const saleRows = activeSales.map((sale) => {
+      const methodSuffix = sale.paid && sale.sale_type === "Normal satış"
+        ? (sale.payment_method === "nakit" ? " (Nakit)" : sale.payment_method === "banka" ? " (Banka)" : "")
+        : "";
+      return {
+        id: `sale-${sale.id}`,
+        date: sale.created_at,
+        type: sale.sale_type === "Fire/Bozuk" ? "Fire/Bozuk" : sale.paid ? "Peşin satış" : "Cari satış",
+        customer: customerMap.get(sale.customer_id)?.name || "-",
+        detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet${methodSuffix}`,
+        amount: toNum(sale.total),
+        user: shortUser(undefined, sale.seller),
+      };
+    });
 
     // Peşin satışlara otomatik eklenen payment'ları filtrele (aynı müşteri, aynı tutar, aynı dakika)
     const pesinSaleKeys = new Set(
@@ -1498,6 +1506,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     } finally {
       setPaymentLoading(null);
     }
+  };
+
+  const savePaymentNote = async (paymentId: string) => {
+    const note = paymentNoteDraft.trim();
+    const { error } = await supabase.from("payments").update({ note: note || null }).eq("id", paymentId);
+    if (error) return showError(error);
+    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, note: note || null } : p));
+    await logAction("Tahsilat notu güncellendi", "payments", paymentId, { not: note });
+    setEditingPaymentNoteId(null);
+    setPaymentNoteDraft("");
   };
 
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
@@ -2978,7 +2996,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Tarih</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Cari</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Ekleyen</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Yöntem</th>
                       <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Not</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2987,14 +3007,46 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
                         <td style={{padding:"7px 10px"}}>{customerMap.get(pay.customer_id)?.name || "-"}</td>
                         <td style={{padding:"7px 10px",color:"#64748b"}}>{pay.user_email?.split("@")[0] || "-"}</td>
+                        <td style={{padding:"7px 10px"}}>
+                          {pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : <span style={{color:"#cbd5e1"}}>—</span>}
+                        </td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{money(pay.amount)}</td>
+                        <td style={{padding:"7px 10px", minWidth: 180}}>
+                          {editingPaymentNoteId === pay.id ? (
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input
+                                className="input"
+                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                                value={paymentNoteDraft}
+                                onChange={(e) => setPaymentNoteDraft(e.target.value)}
+                                placeholder="Not yaz..."
+                                autoFocus
+                              />
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => savePaymentNote(pay.id)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingPaymentNoteId(null); setPaymentNoteDraft(""); }}>Vazgeç</button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              {pay.note && <span style={{color:"#475569",fontStyle:"italic"}}>{pay.note}</span>}
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                                onClick={() => { setEditingPaymentNoteId(pay.id); setPaymentNoteDraft(pay.note || ""); }}
+                              >
+                                {pay.note ? "Değiştir" : "Not Ekle"}
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={3} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
+                      <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
