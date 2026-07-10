@@ -361,7 +361,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   }, [message]);
 
   const getMessageTone = (msg: string): "error" | "success" => {
-    const negative = ["yetersiz", "hata", "zorunlu", "olamaz", "olmalı", "silinmedi", "seçin", "girin", "eklemeli", "bulunamadı", "reddedildi", "geçerli"];
+    const negative = ["yetersiz", "hata", "zorunlu", "olamaz", "olmalı", "silinmedi", "seçin", "girin", "eklemeli", "bulunamadı", "reddedildi", "geçerli", "yok"];
     const lower = msg.toLowerCase();
     return negative.some((w) => lower.includes(w)) ? "error" : "success";
   };
@@ -1473,7 +1473,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     if (loadingAction) return;
     setLoadingAction(key);
-    try { await fn(); } finally { setLoadingAction(null); }
+    try {
+      await fn();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setLoadingAction(null);
+    }
   };
 
   const addCustomerPayment = async (customerId: string) => {
@@ -1686,13 +1692,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const closePeriod = async () => {
-    const distributableCash = Number(totals.cash || 0);
-    if (distributableCash <= 0) {
-      setMessage("Kasada dağıtılacak para yok.");
+   try {
+    const distributableProfit = Math.round(anlıkKar * 100) / 100;
+    if (!Number.isFinite(distributableProfit)) {
+      window.alert("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
+      setMessage("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
+      return;
+    }
+    if (distributableProfit <= 0) {
+      window.alert(`Kar tablosuna göre dağıtılacak kar yok. (Hesaplanan: ${money(distributableProfit)})`);
+      setMessage("Kar tablosuna göre dağıtılacak kar yok.");
       return;
     }
 
-    const half = distributableCash / 2;
+    const half = distributableProfit / 2;
     const closedAt = new Date().toISOString();
     const asli = partners.find((p) => p.partner_name === "Aslı");
     const mihrimah = partners.find((p) => p.partner_name === "Mihrimah");
@@ -1705,10 +1718,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const periodPayload = {
       closed: true,
       closed_at: closedAt,
-      closing_cash: distributableCash,
+      closing_cash: Number(totals.cash || 0),
       asli_distribution: half,
       mihrimah_distribution: half,
-      donem_kari: Math.round(anlıkKar * 100) / 100,
+      donem_kari: distributableProfit,
     };
 
     if (openPeriod) {
@@ -1729,10 +1742,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     const results = await Promise.all(updates);
     const firstError = results.find((r) => r.error)?.error;
-    if (firstError) return showError(firstError);
-    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kasa: distributableCash, asli_payi: half, mihrimah_payi: half });
-    setMessage(`Dönem kapatıldı; ${money(distributableCash)} kasa Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
+    if (firstError) {
+      window.alert(`Dönem kapatma başarısız oldu:\n${firstError.message || firstError}`);
+      return showError(firstError);
+    }
+    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half });
+    window.alert(`Dönem kapatıldı.\n${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}`);
+    setMessage(`Dönem kapatıldı; ${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
     loadAll();
+   } catch (err: unknown) {
+     const msg = err instanceof Error ? err.message : String(err);
+     window.alert(`Dönem kapatma sırasında beklenmeyen bir hata oluştu:\n${msg}`);
+     showError(err);
+   }
   };
 
   const openProductDetail = (product: Product) => {
@@ -3590,16 +3612,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         {active === "period" && (
           <div className="space-y-4">
             <Card title="Dönem Kapanışı">
-              <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
+              <p className="mb-5 text-slate-500">Dağıtım, Kar tablosunun (Net Kar Detayı) dip toplamına göre eşit yapılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
                 <div className="rounded-xl bg-slate-100 p-4">Toplam tahsilat<br /><b>{money(totals.grossCash)}</b></div>
                 {totals.refundIncome > 0 && (
                   <div className="rounded-xl bg-amber-50 border border-amber-300 p-4">Bunun içinde toptancı iadesi<br /><b>{money(totals.refundIncome)}</b></div>
                 )}
-                <div className="rounded-xl bg-slate-100 p-4">Önceki dağıtımlar<br /><b>{money(totals.distributedCash)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para<br /><b>{money(totals.cash)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(totals.cash / 2)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(totals.cash / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(totals.cash)}</b></div>
+                <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(anlıkKar)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(anlıkKar / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Müşteri cari<br /><b>{money(totals.customerDebt)}</b></div>
               </div>
               <button type="button" className="btn" disabled={isLoading("closePeriod")} onClick={() => withLoading("closePeriod", closePeriod)}>{isLoading("closePeriod") ? "Kapatılıyor..." : "Dönemi Kapat ve Mahsuplaştır"}</button>
