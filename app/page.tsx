@@ -130,6 +130,8 @@ type Payment = {
   amount: number;
   payment_method?: "nakit" | "banka" | null;
   note?: string | null;
+  kasa_tutari?: number | null;
+  aciklama?: string | null;
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
@@ -408,6 +410,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [paymentMethodInputs, setPaymentMethodInputs] = useState<Record<string, string>>({});
   const [editingPaymentNoteId, setEditingPaymentNoteId] = useState<string | null>(null);
   const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
+  const [editingPaymentAciklamaId, setEditingPaymentAciklamaId] = useState<string | null>(null);
+  const [paymentAciklamaDraft, setPaymentAciklamaDraft] = useState("");
+  const [kasaTutariDrafts, setKasaTutariDrafts] = useState<Record<string, string>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1522,6 +1527,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Tahsilat notu güncellendi", "payments", paymentId, { not: note });
     setEditingPaymentNoteId(null);
     setPaymentNoteDraft("");
+  };
+
+  const savePaymentAciklama = async (paymentId: string) => {
+    const aciklama = paymentAciklamaDraft.trim();
+    const { error } = await supabase.from("payments").update({ aciklama: aciklama || null }).eq("id", paymentId);
+    if (error) return showError(error);
+    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, aciklama: aciklama || null } : p));
+    await logAction("Tahsilat açıklaması güncellendi", "payments", paymentId, { aciklama });
+    setEditingPaymentAciklamaId(null);
+    setPaymentAciklamaDraft("");
+  };
+
+  const saveKasaTutari = async (paymentId: string) => {
+    const raw = kasaTutariDrafts[paymentId];
+    const value = raw === undefined || raw === "" ? null : Number(raw);
+    if (value !== null && !Number.isFinite(value)) return setMessage("Geçerli bir tutar girin.");
+    const { error } = await supabase.from("payments").update({ kasa_tutari: value }).eq("id", paymentId);
+    if (error) return showError(error);
+    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, kasa_tutari: value } : p));
+    await logAction("Tahsilat kasa tutarı güncellendi", "payments", paymentId, { kasa_tutari: value });
   };
 
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
@@ -3003,7 +3028,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {showTahsilatDetay && (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowTahsilatDetay(false)}>
-            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:700,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:1180,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                 <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
                 <div style={{display:"flex",gap:12,alignItems:"center"}}>
@@ -3021,6 +3046,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Yöntem</th>
                       <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Not</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kasa</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3061,6 +3088,45 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </div>
                           )}
                         </td>
+                        <td style={{padding:"7px 10px", minWidth: 110}}>
+                          <input
+                            className="input"
+                            type="number"
+                            style={{fontSize:"0.78rem",padding:"4px 6px", width: 100}}
+                            placeholder="₺"
+                            value={kasaTutariDrafts[pay.id] ?? (pay.kasa_tutari ?? "")}
+                            onChange={(e) => setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: e.target.value }))}
+                            onBlur={() => saveKasaTutari(pay.id)}
+                          />
+                        </td>
+                        <td style={{padding:"7px 10px", minWidth: 180}}>
+                          {editingPaymentAciklamaId === pay.id ? (
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input
+                                className="input"
+                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                                value={paymentAciklamaDraft}
+                                onChange={(e) => setPaymentAciklamaDraft(e.target.value)}
+                                placeholder="Açıklama yaz..."
+                                autoFocus
+                              />
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => savePaymentAciklama(pay.id)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingPaymentAciklamaId(null); setPaymentAciklamaDraft(""); }}>Vazgeç</button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              {pay.aciklama && <span style={{color:"#475569",fontStyle:"italic"}}>{pay.aciklama}</span>}
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                                onClick={() => { setEditingPaymentAciklamaId(pay.id); setPaymentAciklamaDraft(pay.aciklama || ""); }}
+                              >
+                                {pay.aciklama ? "Değiştir" : "Açıklama Ekle"}
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -3068,6 +3134,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
                       <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
+                      <td></td>
+                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
                       <td></td>
                     </tr>
                   </tfoot>
