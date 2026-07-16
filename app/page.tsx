@@ -1951,7 +1951,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     else if (salesSort.col === "cost") { av = a.cost; bv = b.cost; }
     else if (salesSort.col === "profit") { av = a.total-a.cost; bv = b.total-b.cost; }
     else if (salesSort.col === "status") { av = getSaleStatus(a) as string||""; bv = getSaleStatus(b) as string||""; }
-    const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr");
+    const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr",{numeric:true});
     return salesSort.dir === "asc" ? cmp : -cmp;
   });
   const salesTh = (col: string, label: string) => (
@@ -2607,7 +2607,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   else if (batchReportSort.col === "kalan") { av = a.bought - getBatchSoldQtyForItem(a); bv = b.bought - getBatchSoldQtyForItem(b); }
                   else if (batchReportSort.col === "buy_price") { av = a.buy_price; bv = b.buy_price; }
                   else if (batchReportSort.col === "sale_price") { av = a.sale_price; bv = b.sale_price; }
-                  const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr");
+                  const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr",{numeric:true});
                   return batchReportSort.dir === "asc" ? cmp : -cmp;
                 });
                 return (
@@ -3294,7 +3294,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const sorted = [...rows].sort((a, b) => {
             const dir = stokSort.dir === "asc" ? 1 : -1;
             if (stokSort.col === "urun") return a.urun.localeCompare(b.urun, "tr") * dir;
-            if (stokSort.col === "parti") return a.parti.localeCompare(b.parti, "tr") * dir;
+            if (stokSort.col === "parti") return a.parti.localeCompare(b.parti, "tr", { numeric: true }) * dir;
             if (stokSort.col === "tur") return a.tur.localeCompare(b.tur, "tr") * dir;
             if (stokSort.col === "toplam") return (a.toplam - b.toplam) * dir;
             if (stokSort.col === "alis") return (a.alisF - b.alisF) * dir;
