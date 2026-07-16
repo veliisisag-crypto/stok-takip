@@ -1626,9 +1626,38 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!product) return;
     const seller: Seller = currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı";
     const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
-    if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok.`);
-    const batchItem = depoBatchItems[0];
-    const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_id: batchItem.batch_id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: convertPaid === "true", paid_amount: convertPaid === "true" ? price * item.qty : 0 });
+    const totalAvailable = depoBatchItems.reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
+    if (totalAvailable < item.qty) return setMessage(`${product.name} için yeterli stok yok. Mevcut: ${totalAvailable}, gereken: ${item.qty}.`);
+
+    const isPaid = convertPaid !== "false";
+    const paymentMethod = convertPaid === "nakit" ? "nakit" : convertPaid === "banka" ? "banka" : null;
+
+    // Gerekirse birden fazla partiden karşıla
+    let remainingQty = item.qty;
+    const rows: Record<string, unknown>[] = [];
+    for (const bi of depoBatchItems) {
+      if (remainingQty <= 0) break;
+      const available = Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0);
+      const take = Math.min(available, remainingQty);
+      if (take <= 0) continue;
+      rows.push({
+        customer_id: po.customer_id,
+        product_id: product.id,
+        batch_id: bi.batch_id,
+        batch_item_id: bi.id,
+        qty: take,
+        total: price * take,
+        cost: bi.buy_price * take,
+        seller,
+        sale_type: "Normal satış",
+        paid: isPaid,
+        paid_amount: isPaid ? price * take : 0,
+        payment_method: paymentMethod,
+      });
+      remainingQty -= take;
+    }
+    if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
+    const { error } = await supabase.from("sales").insert(rows);
     if (error) return showError(error);
     // Bu item'ı sil
     await supabase.from("preorder_items").delete().eq("id", item.id);
@@ -1637,20 +1666,33 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remaining.length === 0) {
       await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
     }
-    // Peşin ise payment + allocation ekle
-    if (convertPaid === "true") {
-      const totalAmount = price * item.qty;
-      const { data: payData, error: payErr } = await supabase.from("payments").insert({ customer_id: po.customer_id, amount: totalAmount, user_email: currentUserEmail }).select().single();
-      if (!payErr && payData) {
-        const { data: newSale } = await supabase.from("sales").select("id").eq("customer_id", po.customer_id).eq("cancelled", false).order("created_at", { ascending: false }).limit(1).single();
-        if (newSale) {
-          await supabase.from("payment_allocations").insert({ payment_id: payData.id, sale_id: newSale.id, amount: totalAmount, created_at: payData.created_at });
+    // Peşin ise payments + allocation ekle
+    if (isPaid) {
+      const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      if (totalAmount > 0) {
+        const { data: payData, error: payErr } = await supabase
+          .from("payments")
+          .insert({ customer_id: po.customer_id, amount: totalAmount, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: totalAmount })
+          .select()
+          .single();
+        if (!payErr && payData) {
+          const { data: newSales } = await supabase
+            .from("sales")
+            .select("id,total")
+            .eq("customer_id", po.customer_id)
+            .eq("cancelled", false)
+            .order("created_at", { ascending: false })
+            .limit(rows.length);
+          if (newSales && newSales.length > 0) {
+            const allocations = newSales.map((s: {id: string; total: number}) => ({ payment_id: payData.id, sale_id: s.id, amount: s.total, created_at: payData.created_at }));
+            await supabase.from("payment_allocations").insert(allocations);
+          }
         }
       }
     } else {
       try { await allocatePaymentsForCustomer(po.customer_id); } catch (err) { console.warn("allocate error", err); }
     }
-    await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty });
+    await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty, odeme_yontemi: paymentMethod });
     setConvertModal(null);
     setMessage("");
     loadAll();
@@ -3360,7 +3402,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <label className="label">Ödeme Türü</label>
                     <select className="input" value={convertPaid} onChange={(e) => setConvertPaid(e.target.value)}>
                       <option value="false">Cari borç</option>
-                      <option value="true">Peşin / Ödendi</option>
+                      <option value="banka">Peşin - Banka alındı</option>
+                      <option value="nakit">Peşin - Nakit alındı</option>
                     </select>
                   </div>
                 </div>
