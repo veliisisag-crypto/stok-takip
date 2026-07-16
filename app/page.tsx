@@ -88,7 +88,7 @@ type SupplierReturn = {
   batch_id: string;
   supplier_id: string | null;
   qty: number;
-  resolution_type: "bekliyor" | "urun" | "para";
+  resolution_type: "bekliyor" | "urun" | "para" | "farkli_urun";
   refund_amount: number | null;
   note: string | null;
   created_at: string;
@@ -389,6 +389,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [returnFormNote, setReturnFormNote] = useState("");
   const [resolvingReturnId, setResolvingReturnId] = useState<string | null>(null);
   const [resolveMoneyAmount, setResolveMoneyAmount] = useState("");
+  const [resolvingDifferentId, setResolvingDifferentId] = useState<string | null>(null);
+  const [resolveDifferentProductNote, setResolveDifferentProductNote] = useState("");
   const [ekMaliyetSelected, setEkMaliyetSelected] = useState<string[]>([]);
   const [ekMaliyetAmount, setEkMaliyetAmount] = useState<string>("");
   const [ekMaliyetWarning, setEkMaliyetWarning] = useState<string | null>(null);
@@ -1041,6 +1043,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("İade ürünle kapatıldı", "supplier_returns", productMap.get(ret.product_id)?.name || ret.product_id, { adet: ret.qty, parti: batchMap.get(ret.batch_id)?.name });
     setMessage(`${ret.qty} adet, eski maliyetiyle aynı partiye geri eklendi.`);
+    loadAll();
+  };
+
+  const resolveReturnAsDifferentProduct = async (retId: string) => {
+    const noteText = resolveDifferentProductNote.trim();
+    if (!noteText) return setMessage("Yerine gelen ürünü açıklayan bir not girin.");
+    const ret = supplierReturns.find((r) => r.id === retId);
+    const { error } = await supabase.from("supplier_returns").update({ resolution_type: "farkli_urun", note: noteText, resolved_at: new Date().toISOString() }).eq("id", retId);
+    if (error) return showError(error);
+    await logAction("İade farklı ürünle kapatıldı", "supplier_returns", ret ? (productMap.get(ret.product_id)?.name || ret.product_id) : retId, { not: noteText });
+    setMessage("İade, yerine farklı ürün geldi notuyla kapatıldı. Stoğa dokunulmadı (yeni ürünü zaten manuel eklediğini varsayıyorum).");
+    setResolvingDifferentId(null);
+    setResolveDifferentProductNote("");
     loadAll();
   };
 
@@ -2690,9 +2705,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   <button type="button" className="btn" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsMoney(r.id)}>Kaydet</button>
                                   <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingReturnId(null); setResolveMoneyAmount(""); }}>Vazgeç</button>
                                 </div>
+                              ) : resolvingDifferentId === r.id ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <input className="input" style={{ width: 220 }} type="text" placeholder="Yerine ne geldi? (örn: 9.parti X ürünü, manuel eklendi)" value={resolveDifferentProductNote} onChange={(e) => setResolveDifferentProductNote(e.target.value)} />
+                                  <button type="button" className="btn" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsDifferentProduct(r.id)}>Kaydet</button>
+                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingDifferentId(null); setResolveDifferentProductNote(""); }}>Vazgeç</button>
+                                </div>
                               ) : (
                                 <div className="flex flex-wrap gap-2">
-                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsProduct(r)}>Ürünle Kapat</button>
+                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => resolveReturnAsProduct(r)}>Ürünle Kapat (Aynı Ürün)</button>
+                                  <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingDifferentId(r.id); setResolveDifferentProductNote(""); }}>Farklı Ürün Geldi</button>
                                   <button type="button" className="btn" style={{ fontSize: "0.75rem" }} onClick={() => { setResolvingReturnId(r.id); setResolveMoneyAmount(""); }}>Parayla Kapat</button>
                                 </div>
                               )}
@@ -2736,6 +2758,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <td className="p-2 border border-slate-200">
                               {r.resolution_type === "urun" ? (
                                 <span className="text-emerald-700 font-semibold">Ürünle kapatıldı (eski maliyetiyle geri eklendi)</span>
+                              ) : r.resolution_type === "farkli_urun" ? (
+                                <span className="text-amber-700 font-semibold">Yerine farklı ürün geldi: {r.note || "—"}</span>
                               ) : (
                                 <span className="text-blue-700 font-semibold">Parayla kapatıldı: {money(r.refund_amount || 0)}</span>
                               )}
