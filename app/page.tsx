@@ -413,6 +413,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingPaymentAciklamaId, setEditingPaymentAciklamaId] = useState<string | null>(null);
   const [paymentAciklamaDraft, setPaymentAciklamaDraft] = useState("");
   const [kasaTutariDrafts, setKasaTutariDrafts] = useState<Record<string, string>>({});
+  const [editingKasaId, setEditingKasaId] = useState<string | null>(null);
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1226,7 +1227,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka" })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount })
           .select()
           .single();
         if (payErr) {
@@ -1504,7 +1505,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
@@ -1547,6 +1548,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, kasa_tutari: value } : p));
     await logAction("Tahsilat kasa tutarı güncellendi", "payments", paymentId, { kasa_tutari: value });
+    setEditingKasaId(null);
+    setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
   };
 
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
@@ -3130,16 +3133,35 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </div>
                           )}
                         </td>
-                        <td style={{padding:"7px 10px", minWidth: 110}}>
-                          <input
-                            className="input"
-                            type="number"
-                            style={{fontSize:"0.78rem",padding:"4px 6px", width: 100}}
-                            placeholder="₺"
-                            value={kasaTutariDrafts[pay.id] ?? (pay.kasa_tutari ?? "")}
-                            onChange={(e) => setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: e.target.value }))}
-                            onBlur={() => saveKasaTutari(pay.id)}
-                          />
+                        <td style={{padding:"7px 10px", minWidth: 130}}>
+                          {editingKasaId === pay.id ? (
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input
+                                className="input"
+                                type="number"
+                                style={{fontSize:"0.78rem",padding:"4px 6px", width: 90}}
+                                placeholder="₺"
+                                value={kasaTutariDrafts[pay.id] ?? ""}
+                                onChange={(e) => setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: e.target.value }))}
+                                autoFocus
+                                onKeyDown={(e) => { if (e.key === "Enter") saveKasaTutari(pay.id); }}
+                              />
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveKasaTutari(pay.id)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingKasaId(null); setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[pay.id]; return n; }); }}>Vazgeç</button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              <span>{pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? money(pay.kasa_tutari) : <span style={{color:"#cbd5e1"}}>—</span>}</span>
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                                onClick={() => { setEditingKasaId(pay.id); setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? String(pay.kasa_tutari) : "" })); }}
+                              >
+                                {pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? "Değiştir" : "Kasa Ekle"}
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td style={{padding:"7px 10px", minWidth: 180}}>
                           {editingPaymentAciklamaId === pay.id ? (

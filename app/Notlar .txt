@@ -4,7 +4,7 @@ Kar hesabından düştü genel tahsilatlarda duruyor.
 
 git status
 git add .
-git commit -m "önsipariş alanı"
+git commit -m "tahsilat kasa alanı"
 git push
 
 
