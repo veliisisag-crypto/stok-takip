@@ -187,6 +187,8 @@ type Period = {
   diger_maliyetler?: number | null;
   toplam_tahsilat?: number | null;
   donem_kari?: number | null;
+  devir_bakiyesi?: number | null;
+  devir_bakiyesi_notu?: string | null;
   closed: boolean;
   created_at: string;
   closed_at: string | null;
@@ -416,6 +418,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [paymentAciklamaDraft, setPaymentAciklamaDraft] = useState("");
   const [kasaTutariDrafts, setKasaTutariDrafts] = useState<Record<string, string>>({});
   const [editingKasaId, setEditingKasaId] = useState<string | null>(null);
+  const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
+  const [openingBalanceDraft, setOpeningBalanceDraft] = useState("");
+  const [editingOpeningBalanceNote, setEditingOpeningBalanceNote] = useState(false);
+  const [openingBalanceNoteDraft, setOpeningBalanceNoteDraft] = useState("");
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -743,7 +749,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
-    const lastClosedAt = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0]?.closed_at;
+    const lastClosedPeriod = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
+    const lastClosedAt = lastClosedPeriod?.closed_at;
+    const openingBalance = Number(lastClosedPeriod?.devir_bakiyesi || 0);
+    const openingBalancePeriodId = lastClosedPeriod?.id || null;
+    const openingBalanceNote = lastClosedPeriod?.devir_bakiyesi_notu || "";
     const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
     const recentPayments = activePayments.filter((p) => new Date(p.created_at) > sinceDate);
     const recentRefunds = supplierReturns.filter((r) => r.resolution_type === "para" && r.resolved_at && new Date(r.resolved_at) > sinceDate);
@@ -755,7 +765,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome };
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote };
   }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns]);
 
 
@@ -1567,6 +1577,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
   };
 
+  const saveOpeningBalance = async (periodId: string) => {
+    const value = Number(openingBalanceDraft);
+    if (!Number.isFinite(value)) return setMessage("Geçerli bir tutar girin.");
+    const { error } = await supabase.from("periods").update({ devir_bakiyesi: value }).eq("id", periodId);
+    if (error) return showError(error);
+    setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, devir_bakiyesi: value } : p));
+    await logAction("Devir bakiyesi güncellendi", "periods", periodId, { devir_bakiyesi: value });
+    setEditingOpeningBalance(false);
+    setOpeningBalanceDraft("");
+  };
+
+  const saveOpeningBalanceNote = async (periodId: string) => {
+    const noteText = openingBalanceNoteDraft.trim();
+    const { error } = await supabase.from("periods").update({ devir_bakiyesi_notu: noteText || null }).eq("id", periodId);
+    if (error) return showError(error);
+    setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, devir_bakiyesi_notu: noteText || null } : p));
+    await logAction("Devir bakiyesi notu güncellendi", "periods", periodId, { not: noteText });
+    setEditingOpeningBalanceNote(false);
+    setOpeningBalanceNoteDraft("");
+  };
+
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
     if (!newAmount || newAmount <= 0) return setMessage("Tutar 0'dan büyük olmalı.");
     const { error } = await supabase.from("payments").update({ amount: newAmount }).eq("id", paymentId);
@@ -1799,6 +1830,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (asli) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(asli.debt - half, 0), profit_share: asli.profit_share + half }).eq("id", asli.id));
     if (mihrimah) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(mihrimah.debt - half, 0), profit_share: mihrimah.profit_share + half }).eq("id", mihrimah.id));
 
+    // Kasada fiilen olan para ile dağıtılan kar arasındaki fark (dağıtılmayan/devreden kasa)
+    const devirBakiyesi = Math.round((Number(totals.cash || 0) - distributableProfit) * 100) / 100;
+
     const openPeriod = periods.find((p) => !p.closed);
     const periodPayload = {
       closed: true,
@@ -1807,6 +1841,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       asli_distribution: half,
       mihrimah_distribution: half,
       donem_kari: distributableProfit,
+      devir_bakiyesi: devirBakiyesi,
     };
 
     if (openPeriod) {
@@ -1831,8 +1866,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       window.alert(`Dönem kapatma başarısız oldu:\n${firstError.message || firstError}`);
       return showError(firstError);
     }
-    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half });
-    window.alert(`Dönem kapatıldı.\n${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}`);
+    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi });
+    window.alert(`Dönem kapatıldı.\n${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
     setMessage(`Dönem kapatıldı; ${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
     loadAll();
    } catch (err: unknown) {
@@ -3120,6 +3155,63 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
+                    {totals.openingBalance !== 0 && totals.openingBalancePeriodId && (
+                      <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fffbeb"}}>
+                        <td style={{padding:"7px 10px", color:"#92400e", fontWeight:600}} colSpan={4}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",color:"#cbd5e1"}}>—</td>
+                        <td></td>
+                        <td style={{padding:"7px 10px",fontWeight:700, color:"#92400e"}}>
+                          {editingOpeningBalance ? (
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input
+                                className="input"
+                                type="number"
+                                style={{fontSize:"0.78rem",padding:"4px 6px", width: 100}}
+                                value={openingBalanceDraft}
+                                onChange={(e) => setOpeningBalanceDraft(e.target.value)}
+                                autoFocus
+                                onKeyDown={(e) => { if (e.key === "Enter") saveOpeningBalance(totals.openingBalancePeriodId!); }}
+                              />
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalance(totals.openingBalancePeriodId!)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(false); setOpeningBalanceDraft(""); }}>Vazgeç</button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              <span>{money(totals.openingBalance)}</span>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(true); setOpeningBalanceDraft(String(totals.openingBalance)); }}>Değiştir</button>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:"7px 10px", minWidth: 180}}>
+                          {editingOpeningBalanceNote ? (
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input
+                                className="input"
+                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                                value={openingBalanceNoteDraft}
+                                onChange={(e) => setOpeningBalanceNoteDraft(e.target.value)}
+                                placeholder="Örn: 1500 TL bundan 12.parti alımına gitti"
+                                autoFocus
+                              />
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalanceNote(totals.openingBalancePeriodId!)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalanceNote(false); setOpeningBalanceNoteDraft(""); }}>Vazgeç</button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              {totals.openingBalanceNote && <span style={{color:"#92400e",fontStyle:"italic"}}>{totals.openingBalanceNote}</span>}
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                                onClick={() => { setEditingOpeningBalanceNote(true); setOpeningBalanceNoteDraft(totals.openingBalanceNote || ""); }}
+                              >
+                                {totals.openingBalanceNote ? "Değiştir" : "Not Ekle"}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
                     {totals.recentPayments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => (
                       <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9"}}>
                         <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
@@ -3223,7 +3315,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
                       <td></td>
-                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
+                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.openingBalance)}</td>
                       <td></td>
                     </tr>
                   </tfoot>

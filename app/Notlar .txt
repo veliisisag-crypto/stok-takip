@@ -4,7 +4,7 @@ Kar hesabından düştü genel tahsilatlarda duruyor.
 
 git status
 git add .
-git commit -m "iade düzeltmesi"
+git commit -m "devir bakiye düzeltmesi"
 git push
 
 
