@@ -213,6 +213,15 @@ const money = (n: number) =>
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const shortUserName = (email?: string | null) => {
+  if (!email) return "-";
+  const lower = email.toLowerCase();
+  if (lower.includes("asli")) return "Aslı";
+  if (lower.includes("mihrimah")) return "Mihri";
+  if (lower.includes("veli")) return "Veli";
+  return email.split("@")[0];
+};
+
 const toTR = (isoStr?: string | null, withTime = false) => {
   if (!isoStr) return "-";
   const d = new Date(isoStr);
@@ -3082,7 +3091,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <div className="flex justify-between items-start flex-wrap gap-2">
                         <div>
                           <div className="font-semibold text-slate-800">{customer?.name || "—"}</div>
-                          <div className="text-xs text-slate-500 mt-0.5">{toTR(po.created_at, true)} · {po.created_by} {po.note ? `· ${po.note}` : ""}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)} {po.note ? `· ${po.note}` : ""}</div>
                           <ul className="mt-2 space-y-1">
                             {items.map((item) => (
                               <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
@@ -3114,7 +3123,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <div className="flex justify-between items-start flex-wrap gap-2">
                         <div>
                           <div className="font-semibold text-slate-500">{customer?.name || "—"} <span className="text-xs text-green-600 font-semibold ml-1">✓ Tamamlandı</span></div>
-                          <div className="text-xs text-slate-400 mt-0.5">{toTR(po.created_at, true)} · {po.created_by}</div>
+                          <div className="text-xs text-slate-400 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)}</div>
                           <ul className="mt-1 space-y-0.5">
                             {items.map((item) => (
                               <li key={item.id} className="text-xs text-slate-500">• {productMap.get(item.product_id)?.name || "—"} — {item.qty} adet</li>
