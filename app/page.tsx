@@ -58,6 +58,8 @@ type Product = {
   code: string;
   gender_category: GenderCategory;
   image_url: string | null;
+  usd_fiyat_tyuksel?: number | null;
+  usd_fiyat_thasan?: number | null;
 
   passive: boolean;
 };
@@ -73,6 +75,7 @@ type Batch = {
   name: string;
   created_at: string;
   supplier_id?: string | null;
+  usd_kuru?: number | null;
 };
 
 type Supplier = {
@@ -477,6 +480,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
   const supplierMap = useMemo(() => new Map(suppliers.map((s) => [s.id, s])), [suppliers]);
 
+  const getUsdPriceForBatch = (product: Product | undefined, batch: Batch | undefined): number | null => {
+    if (!product || !batch || !batch.supplier_id) return null;
+    const supplier = supplierMap.get(batch.supplier_id);
+    if (!supplier) return null;
+    if (supplier.name === "T-Yüksel") return product.usd_fiyat_tyuksel ?? null;
+    if (supplier.name === "T-Hasan") return product.usd_fiyat_thasan ?? null;
+    return null;
+  };
+
+  const recalcBatchFormBuyPrice = (productId: string, batchId: string) => {
+    const product = productMap.get(productId);
+    const batch = batchMap.get(batchId);
+    if (!product || !batch) return;
+    const usdPrice = getUsdPriceForBatch(product, batch);
+    if (usdPrice === null || !batch.usd_kuru) return;
+    const computed = Math.round(usdPrice * batch.usd_kuru * 100) / 100;
+    setBatchForm((prev) => ({ ...prev, buyPrice: String(computed) }));
+  };
+
+  useEffect(() => {
+    if (!batchForm.productId || !batchForm.batchId) return;
+    recalcBatchFormBuyPrice(batchForm.productId, batchForm.batchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchForm.productId, batchForm.batchId, products, batches]);
+
   const sortedProducts = useMemo(
     () => [...products].sort((a, b) => a.name.localeCompare(b.name, "tr")),
     [products]
@@ -520,7 +548,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -1162,6 +1190,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const salePrice = Number(batchForm.salePrice || 0);
     if (!productId) return setMessage("Parti kaydı için kaynak ürün seçmelisiniz.");
     if (!batchId) return setMessage("Parti adı zorunlu.");
+    const batch = batchMap.get(batchId);
+    if (!batch?.supplier_id) return setMessage("Bu partiye henüz toptancı atanmamış. Önce Parti Maliyet Kaydı'ndan toptancıyı seçin.");
+    if (!batch?.usd_kuru) return setMessage("Bu partiye henüz USD kuru girilmemiş. Önce Parti Maliyet Kaydı'ndan USD kurunu girin.");
     if (bought <= 0 || buyPrice <= 0) return setMessage("Adet ve alış fiyatı 0'dan büyük olmalı.");
 
     const { error } = await supabase.from("batch_items").insert({
@@ -2435,7 +2466,46 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <div className="product-info-chips product-info-chips--sm">
                                   <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kod</div><div className="product-info-chip-val">{p.code}</div></div>
                                   <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kategori</div><div className="product-info-chip-val">{p.gender_category}</div></div>
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Durum</div><div className={`product-info-chip-val ${p.passive ? "product-info-chip-val--passive" : "product-info-chip-val--active"}`}>{p.passive ? "Pasif" : "Aktif"}</div></div>
+                                  <div className="product-info-chip product-info-chip--sm">
+                                    <div className="product-info-chip-label">T-Yüksel ($)</div>
+                                    <input
+                                      className="input"
+                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      defaultValue={p.usd_fiyat_tyuksel ?? ""}
+                                      placeholder="—"
+                                      onBlur={async (e) => {
+                                        const value = e.target.value === "" ? null : Number(e.target.value);
+                                        if (value === (p.usd_fiyat_tyuksel ?? null)) return;
+                                        const { error } = await supabase.from("products").update({ usd_fiyat_tyuksel: value }).eq("id", p.id);
+                                        if (error) return showError(error);
+                                        setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_tyuksel: value } : pr));
+                                        await logAction("Ürün T-Yüksel USD fiyatı güncellendi", "products", p.name, { usd_fiyat: value });
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="product-info-chip product-info-chip--sm">
+                                    <div className="product-info-chip-label">T-Hasan ($)</div>
+                                    <input
+                                      className="input"
+                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      defaultValue={p.usd_fiyat_thasan ?? ""}
+                                      placeholder="—"
+                                      onBlur={async (e) => {
+                                        const value = e.target.value === "" ? null : Number(e.target.value);
+                                        if (value === (p.usd_fiyat_thasan ?? null)) return;
+                                        const { error } = await supabase.from("products").update({ usd_fiyat_thasan: value }).eq("id", p.id);
+                                        if (error) return showError(error);
+                                        setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_thasan: value } : pr));
+                                        await logAction("Ürün T-Hasan USD fiyatı güncellendi", "products", p.name, { usd_fiyat: value });
+                                      }}
+                                    />
+                                  </div>
                                 </div>
                               </div>
                               <div className="product-batch-section">
@@ -2612,10 +2682,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   options={sortedActiveProducts.map((p) => ({ value: p.id, label: p.name }))}
                 />
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
-                <input className="input" type="number" placeholder="Alış fiyatı" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
+                <input className="input" type="number" placeholder="Alış fiyatı (otomatik hesaplanır, isterseniz değiştirin)" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
               </div>
+              {batchForm.batchId && batchForm.productId && (() => {
+                const batch = batchMap.get(batchForm.batchId);
+                const product = productMap.get(batchForm.productId);
+                const supplier = batch?.supplier_id ? supplierMap.get(batch.supplier_id) : null;
+                if (!batch?.supplier_id) return <p className="mt-2 text-sm text-red-600">⚠️ Bu partiye henüz toptancı atanmamış. Önce "Parti Maliyet Kaydı" ekranından bu partinin toptancısını ve USD kurunu girin.</p>;
+                if (!batch?.usd_kuru) return <p className="mt-2 text-sm text-red-600">⚠️ Bu partiye henüz USD kuru girilmemiş. Önce "Parti Maliyet Kaydı" ekranından USD kurunu girin.</p>;
+                const usdPrice = product ? getUsdPriceForBatch(product, batch) : null;
+                if (usdPrice === null) return <p className="mt-2 text-sm text-red-600">⚠️ "{product?.name}" ürününde "{supplier?.name}" için USD fiyatı girilmemiş. Önce ürün kartından bu alanı doldurun.</p>;
+                return <p className="mt-2 text-sm text-emerald-600">✓ {supplier?.name}: ${usdPrice} × {batch.usd_kuru} kur = {money(Math.round(usdPrice * batch.usd_kuru * 100) / 100)} olarak hesaplandı.</p>;
+              })()}
             </Card>
 
             <Card title="Parti Bazlı Ürün / Stok Raporu">
@@ -3774,6 +3854,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-left font-semibold border border-slate-200">Parti</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Parti Açılışı</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Mal Girişi</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">USD Kuru</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
@@ -3814,6 +3895,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{batch.created_at ? new Date(batch.created_at).toLocaleDateString("tr-TR") : "-"}</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{ilkMalGirisiTarihi ? new Date(ilkMalGirisiTarihi).toLocaleDateString("tr-TR") : "-"}</td>
+                          <td className="p-1 border border-slate-200">
+                            <input
+                              className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              defaultValue={batch.usd_kuru ?? ""}
+                              placeholder="—"
+                              onBlur={async (e) => {
+                                const value = e.target.value === "" ? null : Number(e.target.value);
+                                const { error } = await supabase.from("batches").update({ usd_kuru: value }).eq("id", batch.id);
+                                if (error) return showError(error);
+                                setBatches((prev) => prev.map((b) => b.id === batch.id ? { ...b, usd_kuru: value } : b));
+                                await logAction("Parti USD kuru güncellendi", "batches", batch.name, { usd_kuru: value });
+                              }}
+                            />
+                          </td>
                           {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
@@ -3846,6 +3944,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.length > 0 && (
                       <tr className="bg-slate-200 font-bold">
                         <td className="p-3 border border-slate-300">Toplam</td>
+                        <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
                         {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
