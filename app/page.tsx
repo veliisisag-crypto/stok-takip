@@ -4118,13 +4118,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-batch-section { margin-bottom: 16px; }
         .product-batch-title { font-size: 0.875rem; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
         .product-batch-table { background: white; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
-        .product-batch-thead { display: grid; grid-template-columns: 1.2fr 0.9fr 0.6fr 0.6fr 0.6fr 0.9fr 0.9fr; padding: 8px 12px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
-        .product-batch-thead > div:not(:first-child):not(:nth-child(2)) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
-        .product-batch-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.6fr 0.6fr 0.6fr 0.9fr 0.9fr; padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
+        .product-batch-thead { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px minmax(64px, 1fr); padding: 8px 6px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
+        .product-batch-thead > div:not(:first-child) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
+        .product-batch-row { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px minmax(64px, 1fr); padding: 10px 6px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
         .product-batch-row:last-child { border-bottom: none; }
         .product-batch-cell { color: #334155; }
         .product-batch-cell--name { font-weight: 600; color: #0f172a; }
         .product-batch-empty { padding: 12px; font-size: 0.8125rem; color: #94a3b8; text-align: center; }
+
+        @media (max-width: 640px) {
+          .product-info-row { flex-direction: column; }
+          .product-img-box { width: 100%; height: 180px; }
+          .product-info-chips { grid-template-columns: 1fr; }
+          .product-info-chips--sm { grid-template-columns: 1fr 1fr; }
+          .product-batch-table { overflow-x: auto; }
+          .product-batch-thead, .product-batch-row { min-width: 400px; }
+        }
 
         /* Action Buttons */
         .product-action-row { display: flex; gap: 8px; flex-wrap: wrap; }
