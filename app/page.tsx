@@ -2,6 +2,7 @@
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import * as XLSX from "xlsx";
 
 function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -1847,6 +1848,81 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
+  const exportTahsilatToExcel = () => {
+    const rows: (string | number)[][] = [];
+    rows.push(["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Açıklama"]);
+
+    if (totals.openingBalance !== 0) {
+      rows.push([
+        "Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)", "", "", "",
+        "",
+        "",
+        Number(totals.openingBalance),
+        totals.openingBalanceNote || "",
+      ]);
+    }
+
+    [...totals.recentPayments]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .forEach((pay) => {
+        rows.push([
+          toTR(pay.created_at, true),
+          customerMap.get(pay.customer_id)?.name || "-",
+          pay.user_email?.split("@")[0] || "-",
+          pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : "-",
+          Number(pay.amount),
+          pay.note || "",
+          pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? Number(pay.kasa_tutari) : "",
+          pay.aciklama || "",
+        ]);
+      });
+
+    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.openingBalance;
+    rows.push(["Toplam", "", "", "", Number(totals.grossCash), "", kasaToplam, ""]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 17 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 34 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tahsilatlar");
+    XLSX.writeFile(wb, `Donem_Tahsilatlari_${today()}.xlsx`);
+  };
+
+  const exportKarDetayToExcel = () => {
+    const rows: (string | number)[][] = [];
+    rows.push(["Tarih", "Cari", "Ürün", "Adet", "Satış", "Tahsilat", "Maliyet", "Ek Maliyet", "Kar"]);
+
+    [...karDetay]
+      .sort((a, b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime())
+      .forEach((row) => {
+        rows.push([
+          toTR(row.tarih, true),
+          row.cari,
+          row.urun + (row.saleType === "Hibe" ? " (Hibe)" : ""),
+          row.adet,
+          Number(row.satisFiyati),
+          Number(row.tahsilat),
+          Number(row.maliyet),
+          Number(row.ekMaliyet),
+          Number(row.kar),
+        ]);
+      });
+
+    rows.push([
+      "Toplam Tahsilat", "", "", "", "",
+      karDetay.reduce((s, r) => s + r.tahsilat, 0),
+      karDetay.reduce((s, r) => s + r.maliyet, 0),
+      karDetay.reduce((s, r) => s + r.ekMaliyet, 0),
+      "",
+    ]);
+    rows.push(["Toplam Net Kar", "", "", "", "", "", "", "", Number(anlıkKar)]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 17 }, { wch: 22 }, { wch: 26 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 11 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Net Kar Detayi");
+    XLSX.writeFile(wb, `Net_Kar_Detayi_${today()}.xlsx`);
+  };
+
   const closePeriod = async () => {
    try {
     const distributableProfit = Math.round(anlıkKar * 100) / 100;
@@ -3219,6 +3295,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
                 <div style={{display:"flex",gap:12,alignItems:"center"}}>
                   <span style={{fontSize:"0.85rem",color:"#64748b"}}>{totals.recentPayments.length} ödeme · Toplam: <strong>{money(totals.grossCash)}</strong></span>
+                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportTahsilatToExcel}>Excel'e Aktar</button>
                   <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
                 </div>
               </div>
@@ -3558,6 +3635,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Net Kar Detayı</h2>
                 <div style={{display:"flex",gap:12,alignItems:"center"}}>
                   <span style={{fontSize:"0.85rem",color:"#64748b"}}>{karDetay.length} satır · Toplam: <strong>{money(anlıkKar)}</strong></span>
+                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportKarDetayToExcel}>Excel'e Aktar</button>
                   <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowKarDetay(false)}>Kapat</button>
                 </div>
               </div>
