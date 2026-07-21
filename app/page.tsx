@@ -136,6 +136,7 @@ type Payment = {
   note?: string | null;
   kasa_tutari?: number | null;
   aciklama?: string | null;
+  preorder_id?: string | null;
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
@@ -418,6 +419,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
   const [editingPreorderId, setEditingPreorderId] = useState<string | null>(null);
   const [convertModal, setConvertModal] = useState<{ preorder: Preorder; item: PreorderItem } | null>(null);
+  const [advancePaymentModal, setAdvancePaymentModal] = useState<Preorder | null>(null);
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [advanceMethod, setAdvanceMethod] = useState("banka");
+  const [advanceNote, setAdvanceNote] = useState("");
   const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
   const [convertPaid, setConvertPaid] = useState<string>("false");
 
@@ -478,6 +483,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
+  const preorderMap = useMemo(() => new Map(preorders.map((po) => [po.id, po])), [preorders]);
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
   const supplierMap = useMemo(() => new Map(suppliers.map((s) => [s.id, s])), [suppliers]);
 
@@ -794,17 +800,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const openingBalanceNote = lastClosedPeriod?.devir_bakiyesi_notu || "";
     const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
     const recentPayments = activePayments.filter((p) => new Date(p.created_at) > sinceDate);
+    const isPendingAdvance = (p: Payment) => {
+      if (!p.preorder_id) return false;
+      const po = preorderMap.get(p.preorder_id);
+      return !!po && po.status === "bekliyor";
+    };
+    const tahsilatEligiblePayments = recentPayments.filter((p) => !isPendingAdvance(p));
     const recentRefunds = supplierReturns.filter((r) => r.resolution_type === "para" && r.resolved_at && new Date(r.resolved_at) > sinceDate);
     const refundIncome = recentRefunds.reduce((sum, r) => sum + Number(r.refund_amount || 0), 0);
-    const grossCash = recentPayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
+    const grossCash = tahsilatEligiblePayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
+    const pendingAdvanceTotal = activePayments
+      .filter((p) => isPendingAdvance(p))
+      .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote };
-  }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns]);
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal };
+  }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns, preorderMap]);
 
 
   const filteredCustomers = useMemo(() => {
@@ -1707,6 +1722,29 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setConvertModal({ preorder: po, item });
   };
 
+  const addPreorderAdvancePayment = async () => {
+    if (!advancePaymentModal) return;
+    const amount = Number(advanceAmount);
+    if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
+    const method = advanceMethod === "nakit" ? "nakit" : "banka";
+    const { error } = await supabase.from("payments").insert({
+      customer_id: advancePaymentModal.customer_id,
+      amount,
+      payment_method: method,
+      kasa_tutari: amount,
+      preorder_id: advancePaymentModal.id,
+      note: advanceNote || "Ön ödeme",
+      user_email: currentUserEmail,
+    });
+    if (error) return showError(error);
+    await logAction("Ön ödeme alındı", "preorders", customerMap.get(advancePaymentModal.customer_id)?.name || "", { tutar: amount, yontem: method });
+    setMessage(`${money(amount)} ön ödeme kaydedildi.`);
+    setAdvancePaymentModal(null);
+    setAdvanceAmount("");
+    setAdvanceNote("");
+    loadAll();
+  };
+
   const convertToSales = async () => {
     if (!convertModal) return;
     const { preorder: po, item } = convertModal;
@@ -1719,7 +1757,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const totalAvailable = depoBatchItems.reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
     if (totalAvailable < item.qty) return setMessage(`${product.name} için yeterli stok yok. Mevcut: ${totalAvailable}, gereken: ${item.qty}.`);
 
-    const isPaid = convertPaid !== "false";
+    // Bu ön siparişe daha önce ön ödeme alınmış mı kontrol et
+    const advancePayments = payments.filter((p) => p.preorder_id === po.id && !p.cancelled);
+    const advanceTotal = advancePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    const saleTotalTarget = price * item.qty;
+    const advanceApplied = Math.min(advanceTotal, saleTotalTarget);
+    const remainder = Math.max(saleTotalTarget - advanceTotal, 0);
     const paymentMethod = convertPaid === "nakit" ? "nakit" : convertPaid === "banka" ? "banka" : null;
 
     // Gerekirse birden fazla partiden karşıla
@@ -1730,18 +1774,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const available = Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0);
       const take = Math.min(available, remainingQty);
       if (take <= 0) continue;
+      const rowTotal = price * take;
+      const rowShareOfAdvance = saleTotalTarget > 0 ? (rowTotal / saleTotalTarget) * advanceApplied : 0;
+      const rowShareOfNewPayment = remainder > 0 && convertPaid !== "false" ? (rowTotal / saleTotalTarget) * remainder : 0;
+      const rowPaidAmount = Math.min(rowTotal, rowShareOfAdvance + rowShareOfNewPayment);
       rows.push({
         customer_id: po.customer_id,
         product_id: product.id,
         batch_id: bi.batch_id,
         batch_item_id: bi.id,
         qty: take,
-        total: price * take,
+        total: rowTotal,
         cost: bi.buy_price * take,
         seller,
         sale_type: "Normal satış",
-        paid: isPaid,
-        paid_amount: isPaid ? price * take : 0,
+        paid: rowPaidAmount >= rowTotal,
+        paid_amount: rowPaidAmount,
         payment_method: paymentMethod,
       });
       remainingQty -= take;
@@ -1756,33 +1804,85 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remaining.length === 0) {
       await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
     }
-    // Peşin ise payments + allocation ekle
-    if (isPaid) {
-      const totalAmount = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-      if (totalAmount > 0) {
-        const { data: payData, error: payErr } = await supabase
-          .from("payments")
-          .insert({ customer_id: po.customer_id, amount: totalAmount, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: totalAmount })
-          .select()
-          .single();
-        if (!payErr && payData) {
-          const { data: newSales } = await supabase
-            .from("sales")
-            .select("id,total")
-            .eq("customer_id", po.customer_id)
-            .eq("cancelled", false)
-            .order("created_at", { ascending: false })
-            .limit(rows.length);
-          if (newSales && newSales.length > 0) {
-            const allocations = newSales.map((s: {id: string; total: number}) => ({ payment_id: payData.id, sale_id: s.id, amount: s.total, created_at: payData.created_at }));
+
+    const { data: newSales } = await supabase
+      .from("sales")
+      .select("id,total")
+      .eq("customer_id", po.customer_id)
+      .eq("cancelled", false)
+      .order("created_at", { ascending: false })
+      .limit(rows.length);
+
+    // 1) Ön ödeme varsa: her ön ödeme için, o ödemeden SONRA kapanmış bir dönem var mı kontrol et
+    if (advanceTotal > 0 && newSales && newSales.length > 0) {
+      let remainingAdvanceToAllocate = advanceApplied;
+      for (const payment of advancePayments) {
+        if (remainingAdvanceToAllocate <= 0) break;
+        const paymentPortion = Math.min(Number(payment.amount), remainingAdvanceToAllocate);
+        const periodClosedAfter = periods.some((per) => per.closed && per.closed_at && new Date(per.closed_at) > new Date(payment.created_at));
+
+        if (periodClosedAfter) {
+          // Dönem kapanmış: eski ödeme kaydına dokunma, sadece bu döneme ait yeni bir allocation ekle
+          const allocations = newSales.map((s: { id: string; total: number }) => ({
+            payment_id: payment.id,
+            sale_id: s.id,
+            amount: (s.total / saleTotalTarget) * paymentPortion,
+            created_at: new Date().toISOString(),
+          }));
+          await supabase.from("payment_allocations").insert(allocations);
+        } else {
+          // Dönem kapanmamış: ön ödeme kaydını silip tek, temiz bir peşin tahsilat kaydına dönüştür
+          await supabase.from("payments").delete().eq("id", payment.id);
+          const { data: cleanPay, error: cleanErr } = await supabase
+            .from("payments")
+            .insert({
+              customer_id: po.customer_id,
+              amount: paymentPortion,
+              payment_method: payment.payment_method,
+              kasa_tutari: paymentPortion,
+              user_email: payment.user_email,
+              created_at: payment.created_at,
+            })
+            .select()
+            .single();
+          if (!cleanErr && cleanPay) {
+            const allocations = newSales.map((s: { id: string; total: number }) => ({
+              payment_id: cleanPay.id,
+              sale_id: s.id,
+              amount: (s.total / saleTotalTarget) * paymentPortion,
+              created_at: cleanPay.created_at,
+            }));
             await supabase.from("payment_allocations").insert(allocations);
           }
         }
+        remainingAdvanceToAllocate -= paymentPortion;
       }
-    } else {
+    }
+
+    // 2) Ön ödemenin karşılamadığı kalan tutar için (varsa), seçilen ödeme türüne göre yeni tahsilat ekle
+    if (remainder > 0 && convertPaid !== "false" && newSales && newSales.length > 0) {
+      const { data: payData, error: payErr } = await supabase
+        .from("payments")
+        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder })
+        .select()
+        .single();
+      if (!payErr && payData) {
+        const allocations = newSales.map((s: { id: string; total: number }) => ({
+          payment_id: payData.id,
+          sale_id: s.id,
+          amount: (s.total / saleTotalTarget) * remainder,
+          created_at: payData.created_at,
+        }));
+        await supabase.from("payment_allocations").insert(allocations);
+      }
+    }
+
+    // 3) Hiç ön ödeme yoksa ve cari borç seçiliyse, cari bakiyesindeki fazla ödemeleri otomatik eşleştir
+    if (advanceTotal === 0 && convertPaid === "false") {
       try { await allocatePaymentsForCustomer(po.customer_id); } catch (err) { console.warn("allocate error", err); }
     }
-    await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty, odeme_yontemi: paymentMethod });
+
+    await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty, odeme_yontemi: paymentMethod, on_odeme_kullanildi: advanceApplied });
     setConvertModal(null);
     setMessage("");
     loadAll();
@@ -2320,6 +2420,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
               {totals.refundIncome > 0 && (
                 <StatCard title="Bekleyen İade Geliri" value={money(totals.refundIncome)} note="Toptancıdan gelen para iadesi, dönem kapanışında paylaşılır" />
+              )}
+              {totals.pendingAdvanceTotal > 0 && (
+                <StatCard title="Bekleyen Ön Ödemeler" value={money(totals.pendingAdvanceTotal)} note="Henüz satışa dönüşmemiş sipariş ön ödemeleri, kasada duruyor" />
               )}
               <div onClick={() => setShowMusteriDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Detay için tıklayın ↗" />
@@ -3235,12 +3338,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 : preorders.filter((po) => po.status === "bekliyor").map((po) => {
                   const items = preorderItems.filter((i) => i.preorder_id === po.id);
                   const customer = customerMap.get(po.customer_id);
+                  const advancePayments = payments.filter((p) => p.preorder_id === po.id && !p.cancelled);
+                  const advanceTotal = advancePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
                   return (
                     <div key={po.id} className="border rounded-xl p-4 mb-3 bg-white">
                       <div className="flex justify-between items-start flex-wrap gap-2">
                         <div>
                           <div className="font-semibold text-slate-800">{customer?.name || "—"}</div>
                           <div className="text-xs text-slate-500 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)} {po.note ? `· ${po.note}` : ""}</div>
+                          {advanceTotal > 0 && (
+                            <div className="text-xs font-semibold mt-1" style={{color:"#92400e"}}>
+                              💰 Ön ödeme alınmış: {money(advanceTotal)}
+                            </div>
+                          )}
                           <ul className="mt-2 space-y-1">
                             {items.map((item) => (
                               <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
@@ -3251,6 +3361,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           </ul>
                         </div>
                         <div className="flex gap-2 flex-wrap">
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => { setAdvancePaymentModal(po); setAdvanceAmount(""); setAdvanceMethod("banka"); setAdvanceNote(""); }}>Ön Ödeme Ekle</button>
                           <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => startEditPreorder(po)}>Düzenle</button>
                           <button type="button" className="btn-danger" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => deletePreorder(po.id)}>Sil</button>
                         </div>
@@ -3371,15 +3482,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </td>
                       </tr>
                     )}
-                    {totals.recentPayments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => (
-                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    {totals.recentPayments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => {
+                      const linkedPreorder = pay.preorder_id ? preorderMap.get(pay.preorder_id) : null;
+                      const isPendingAdvance = !!linkedPreorder && linkedPreorder.status === "bekliyor";
+                      return (
+                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9", background: isPendingAdvance ? "#fffbeb" : undefined}}>
                         <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
-                        <td style={{padding:"7px 10px"}}>{customerMap.get(pay.customer_id)?.name || "-"}</td>
+                        <td style={{padding:"7px 10px"}}>
+                          {customerMap.get(pay.customer_id)?.name || "-"}
+                          {isPendingAdvance && <span style={{marginLeft:6, fontSize:"0.7rem", fontWeight:700, color:"#92400e"}}>💰 Ön Ödeme</span>}
+                        </td>
                         <td style={{padding:"7px 10px",color:"#64748b"}}>{pay.user_email?.split("@")[0] || "-"}</td>
                         <td style={{padding:"7px 10px"}}>
                           {pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : <span style={{color:"#cbd5e1"}}>—</span>}
                         </td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{money(pay.amount)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{isPendingAdvance ? <span style={{color:"#cbd5e1"}}>—</span> : money(pay.amount)}</td>
                         <td style={{padding:"7px 10px", minWidth: 180}}>
                           {editingPaymentNoteId === pay.id ? (
                             <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -3467,7 +3584,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
@@ -3682,22 +3800,64 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
+        {advancePaymentModal && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setAdvancePaymentModal(null)}>
+            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:420}} onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-bold mb-1">Ön Ödeme Ekle</h2>
+              <p className="text-sm text-slate-500 mb-4">{customerMap.get(advancePaymentModal.customer_id)?.name} — henüz satışa dönüşmemiş sipariş için alınan ön ödeme. Kasaya işlenir ama satış gerçekleşene kadar tahsilat/kâr hesabına dahil edilmez.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="label">Tutar (₺)</label>
+                  <input className="input" type="number" min="0" value={advanceAmount} onChange={(e) => setAdvanceAmount(e.target.value)} placeholder="Örn: 1500" autoFocus />
+                </div>
+                <div>
+                  <label className="label">Yöntem</label>
+                  <select className="input" value={advanceMethod} onChange={(e) => setAdvanceMethod(e.target.value)}>
+                    <option value="banka">Banka</option>
+                    <option value="nakit">Nakit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Not (opsiyonel)</label>
+                  <input className="input" value={advanceNote} onChange={(e) => setAdvanceNote(e.target.value)} placeholder="Örn: Kapora" />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" className="btn" disabled={isLoading("advancePayment")} onClick={() => withLoading("advancePayment", addPreorderAdvancePayment)}>{isLoading("advancePayment") ? "..." : "Kaydet"}</button>
+                <button type="button" className="btn-secondary" onClick={() => setAdvancePaymentModal(null)}>Vazgeç</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {convertModal && (() => {
           const { preorder: po, item } = convertModal;
           const customer = customerMap.get(po.customer_id);
           const product = productMap.get(item.product_id);
+          const advanceTotal = payments.filter((p) => p.preorder_id === po.id && !p.cancelled).reduce((s, p) => s + Number(p.amount || 0), 0);
+          const price = Number(convertPrices[item.id] || 0);
+          const saleTotalPreview = price * item.qty;
+          const remainderPreview = Math.max(saleTotalPreview - advanceTotal, 0);
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
               <div style={{background:"white",borderRadius:"16px",padding:"24px",width:"100%",maxWidth:"400px"}}>
                 <h2 className="text-lg font-bold mb-1">Satışa Dönüştür</h2>
                 <p className="text-sm text-slate-500 mb-4">{customer?.name} · {product?.name} × {item.qty}</p>
+                {advanceTotal > 0 && (
+                  <div className="text-sm rounded-lg p-3 mb-3" style={{background:"#fffbeb", color:"#92400e", border:"1px solid #fde68a"}}>
+                    💰 Bu siparişe daha önce <b>{money(advanceTotal)}</b> ön ödeme alınmış.
+                    {saleTotalPreview > 0 && (
+                      <> Satış tutarı <b>{money(saleTotalPreview)}</b> girilirse, kalan <b>{money(remainderPreview)}</b> için aşağıdaki ödeme türü geçerli olur.</>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-3">
                   <div>
                     <label className="label">Birim Fiyat</label>
                     <input className="input" type="number" min="0" placeholder="Birim fiyat" value={convertPrices[item.id] || ""} onChange={(e) => setConvertPrices({ [item.id]: e.target.value })} />
                   </div>
                   <div>
-                    <label className="label">Ödeme Türü</label>
+                    <label className="label">{advanceTotal > 0 ? "Kalan Tutar İçin Ödeme Türü" : "Ödeme Türü"}</label>
                     <select className="input" value={convertPaid} onChange={(e) => setConvertPaid(e.target.value)}>
                       <option value="false">Cari borç</option>
                       <option value="banka">Peşin - Banka alındı</option>
