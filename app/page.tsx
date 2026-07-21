@@ -2341,8 +2341,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div key={p.id} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
                       <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
                         <div className="product-row-left">
-                          <div className="product-name">{p.name}</div>
-                          <div className="product-meta">{p.code} • {p.gender_category}</div>
+                          <div className={`product-name product-name--${p.gender_category === "Erkek" ? "erkek" : p.gender_category === "Kadın" ? "kadin" : "unisex"}`}>{p.name}</div>
                         </div>
                         <div className="product-row-stats">
                           <div className="product-stat-chip">
@@ -2464,8 +2463,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   )}
                                 </div>
                                 <div className="product-info-chips product-info-chips--sm">
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kod</div><div className="product-info-chip-val">{p.code}</div></div>
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kategori</div><div className="product-info-chip-val">{p.gender_category}</div></div>
                                   <div className="product-info-chip product-info-chip--sm">
                                     <div className="product-info-chip-label">T-Yüksel ($)</div>
                                     <input
@@ -2579,10 +2576,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => setSalesModalProductId(p.id)}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                                   Satış Detayı
-                                </button>
-                                <button type="button" className="product-btn product-btn--danger" onClick={() => deleteProduct(p.id)}>
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                  Pasife Al
                                 </button>
                               </div>
                             </>
@@ -4083,7 +4076,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 14px 14px 16px; text-align: left; background: transparent; border: none; cursor: pointer; }
         .product-row:active { background: #f8fafc; }
         .product-row-left { flex: 1; min-width: 0; }
-        .product-name { font-size: 0.9375rem; font-weight: 700; color: #0f172a; line-height: 1.3; }
+        .product-name { font-size: 0.9375rem; font-weight: 700; line-height: 1.3; }
+        .product-name--erkek { color: #3b82c4; }
+        .product-name--kadin { color: #d6598f; }
+        .product-name--unisex { color: #c99a2e; }
         .product-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
 
         .product-row-stats { display: flex; gap: 6px; flex-shrink: 0; }
