@@ -4,7 +4,7 @@ Kar hesabından düştü genel tahsilatlarda duruyor.
 
 git status
 git add .
-git commit -m "önsipariş düzeltmesi"
+git commit -m "ön ödeme eklendi"
 git push
 
 

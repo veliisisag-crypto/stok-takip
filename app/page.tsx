@@ -812,13 +812,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const pendingAdvanceTotal = activePayments
       .filter((p) => isPendingAdvance(p))
       .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
+    const pastPendingAdvanceTotal = activePayments
+      .filter((p) => isPendingAdvance(p) && new Date(p.created_at) <= sinceDate)
+      .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
     const distributedCash = periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal };
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal, pastPendingAdvanceTotal };
   }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns, preorderMap]);
 
 
@@ -2421,9 +2424,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {totals.refundIncome > 0 && (
                 <StatCard title="Bekleyen İade Geliri" value={money(totals.refundIncome)} note="Toptancıdan gelen para iadesi, dönem kapanışında paylaşılır" />
               )}
-              {totals.pendingAdvanceTotal > 0 && (
-                <StatCard title="Bekleyen Ön Ödemeler" value={money(totals.pendingAdvanceTotal)} note="Henüz satışa dönüşmemiş sipariş ön ödemeleri, kasada duruyor" />
-              )}
               <div onClick={() => setShowMusteriDetay(true)} style={{cursor:"pointer"}}>
                 <StatCard title="Müşteri Borcu" value={money(totals.customerDebt)} note="Detay için tıklayın ↗" />
               </div>
@@ -3479,6 +3479,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               </button>
                             </div>
                           )}
+                        </td>
+                      </tr>
+                    )}
+                    {totals.pastPendingAdvanceTotal > 0 && (
+                      <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fef9c3"}}>
+                        <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={8}>
+                          💰 Geçmiş dönem(ler)den bekleyen ön ödemeler (henüz satışa dönüşmedi, bu ekranda ayrı satır olarak görünmüyor çünkü eski dönemde kalmış): <b>{money(totals.pastPendingAdvanceTotal)}</b> — satışa dönüştükçe bu tutar otomatik azalır.
                         </td>
                       </tr>
                     )}
