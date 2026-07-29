@@ -966,6 +966,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.gender_category !== undefined) dbPatch.gender_category = patch.gender_category;
     if (patch.image_url !== undefined) dbPatch.image_url = patch.image_url;
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
+    if (patch.manual_price !== undefined) dbPatch.manual_price = patch.manual_price;
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
     // Exclude image_url from log to avoid storing large base64/URL data
@@ -2157,12 +2158,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       delete pendingImageRef.current[productId];
     }
 
+    const newManualPrice = draft.manual_price !== undefined ? (draft.manual_price as number | null) : (product?.manual_price ?? null);
+
     await updateProduct(productId, {
       name: String(draft.name || product?.name || "").trim(),
       gender_category: (draft.gender_category || product?.gender_category) as GenderCategory,
       image_url: imageUrl,
-      manual_price: draft.manual_price !== undefined ? (draft.manual_price as number | null) : (product?.manual_price ?? null),
+      manual_price: newManualPrice,
     });
+
+    // Fiyat sadece bir tavsiye - satış anında elle girilen fiyat asıl geçerli olan.
+    // Yine de tüm parti kayıtlarındaki tavsiye fiyatı güncel tutalım.
+    if (newManualPrice !== undefined && newManualPrice !== null && Number(newManualPrice) !== Number(product?.manual_price ?? NaN)) {
+      await supabase.from("batch_items").update({ sale_price: newManualPrice }).eq("product_id", productId);
+    }
+
     cancelProductEdit(productId);
   };
 
@@ -2423,7 +2433,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         </nav>
       </aside>
 
-      <section className="p-5 lg:ml-72 lg:p-8">
+      <section className="p-3 lg:ml-72 lg:p-8">
         {/* Scroll to top button - top right */}
         <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
           ↑ En Üste
@@ -4501,6 +4511,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           .product-info-chips--sm { grid-template-columns: 1fr 1fr; }
           .product-batch-table { overflow-x: auto; }
           .product-batch-thead, .product-batch-row { min-width: 400px; }
+          .product-row { flex-wrap: wrap; padding: 12px; }
+          .product-row-left { flex-basis: 100%; margin-bottom: 6px; }
+          .product-row-stats { flex-basis: 100%; justify-content: space-between; }
+          .product-stat-chip { flex: 1; min-width: 0; }
+          .product-chevron { position: absolute; top: 12px; right: 12px; }
+          .product-card { position: relative; }
+          .product-sort-row { padding: 4px 6px 8px; }
+          .product-list { padding: 12px 6px 4px; }
         }
 
         /* Action Buttons */
