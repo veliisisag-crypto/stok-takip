@@ -4,10 +4,12 @@ Kar hesabından düştü genel tahsilatlarda duruyor.
 
 git status
 git add .
-git commit -m "ön ödeme eklendi"
+git commit -m "ürünler düzenleme"
 git push
 
 
 Rq6*dM1^sG5@kCpJ  mihrimah
 Tz4!bN8&jF3%hYeW  aslı
 Kx9#mP2$vL7@nQwR  veli
+
+05316172939

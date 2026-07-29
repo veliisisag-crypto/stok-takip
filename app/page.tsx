@@ -61,6 +61,7 @@ type Product = {
   image_url: string | null;
   usd_fiyat_tyuksel?: number | null;
   usd_fiyat_thasan?: number | null;
+  manual_price?: number | null;
 
   passive: boolean;
 };
@@ -520,6 +521,28 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     () => sortedProducts.filter((p) => !p.passive),
     [sortedProducts]
   );
+  type ProductSortCol = "fiyat" | "alinan" | "satilan" | "stok";
+  type ProductSortState =
+    | { mode: "az" }
+    | { mode: "gender"; orderIndex: number }
+    | { mode: "column"; col: ProductSortCol; dir: "asc" | "desc" }
+    | { mode: "gender-column"; orderIndex: number; col: ProductSortCol; dir: "asc" | "desc" };
+  const [productSort, setProductSort] = useState<ProductSortState>({ mode: "az" });
+  const genderSortOrders: GenderCategory[][] = [
+    ["Kadın", "Erkek", "Unisex"],
+    ["Erkek", "Kadın", "Unisex"],
+    ["Unisex", "Kadın", "Erkek"],
+  ];
+  const getProductLatestPrice = (productId: string) => {
+    const items = batchItemsForProduct(productId).filter((i) => Number(i.sale_price) > 0);
+    if (items.length) {
+      return Number(
+        items.slice().sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0].sale_price
+      );
+    }
+    const product = productMap.get(productId);
+    return Number(product?.manual_price || 0);
+  };
   const sortedCustomers = useMemo(
     () => [...customers].sort((a, b) => a.name.localeCompare(b.name, "tr")),
     [customers]
@@ -555,7 +578,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -2138,6 +2161,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       name: String(draft.name || product?.name || "").trim(),
       gender_category: (draft.gender_category || product?.gender_category) as GenderCategory,
       image_url: imageUrl,
+      manual_price: draft.manual_price !== undefined ? (draft.manual_price as number | null) : (product?.manual_price ?? null),
     });
     cancelProductEdit(productId);
   };
@@ -2199,6 +2223,45 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   ];
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
+
+  useEffect(() => {
+    if (active !== "products") {
+      setProductSort({ mode: "az" });
+    }
+  }, [active]);
+
+  const displayedProducts = useMemo(() => {
+    if (productSort.mode === "az") {
+      return [...filteredProducts].sort((a, b) => a.name.localeCompare(b.name, "tr"));
+    }
+    if (productSort.mode === "gender") {
+      const order = genderSortOrders[productSort.orderIndex % genderSortOrders.length];
+      return [...filteredProducts].sort((a, b) => {
+        const ai = order.indexOf(a.gender_category);
+        const bi = order.indexOf(b.gender_category);
+        if (ai !== bi) return ai - bi;
+        return a.name.localeCompare(b.name, "tr");
+      });
+    }
+    const getVal = (p: Product) => {
+      if (productSort.col === "fiyat") return getProductLatestPrice(p.id);
+      if (productSort.col === "alinan") return getProductTotalBought(p.id);
+      if (productSort.col === "satilan") return getProductSoldQty(p.id);
+      return getProductStock(p.id);
+    };
+    if (productSort.mode === "gender-column") {
+      const order = genderSortOrders[productSort.orderIndex % genderSortOrders.length];
+      return [...filteredProducts].sort((a, b) => {
+        const ai = order.indexOf(a.gender_category);
+        const bi = order.indexOf(b.gender_category);
+        if (ai !== bi) return ai - bi;
+        return (getVal(a) - getVal(b)) * (productSort.dir === "asc" ? 1 : -1);
+      });
+    }
+    return [...filteredProducts].sort((a, b) => (getVal(a) - getVal(b)) * (productSort.dir === "asc" ? 1 : -1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredProducts, productSort, batchItems, sales]);
+
 
   const handleSalesSort = (col: string) => setSalesSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
   const salesSortArr = (col: string) => salesSort.col === col ? (salesSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
@@ -2507,8 +2570,48 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <input className="product-search-input" placeholder="Ürün ara" value={search} onChange={(e) => setSearch(e.target.value)} />
                 </div>
               </div>
+              <div className="product-sort-row">
+                <div className="product-sort-buttons">
+                  <button type="button" className={`product-sort-btn ${productSort.mode === "az" ? "product-sort-btn--active" : ""}`} onClick={() => setProductSort({ mode: "az" })}>A-Z</button>
+                  <button
+                    type="button"
+                    className={`product-sort-btn ${productSort.mode === "gender" || productSort.mode === "gender-column" ? "product-sort-btn--active" : ""}`}
+                    onClick={() => setProductSort((prev) => {
+                      if (prev.mode === "gender") return { mode: "gender", orderIndex: prev.orderIndex + 1 };
+                      if (prev.mode === "gender-column") return { ...prev, orderIndex: prev.orderIndex + 1 };
+                      return { mode: "gender", orderIndex: 0 };
+                    })}
+                  >
+                    K-E-U
+                  </button>
+                </div>
+                {(["fiyat", "alinan", "satilan", "stok"] as const).map((col) => (
+                  <button
+                    key={col}
+                    type="button"
+                    className="product-sort-col"
+                    onClick={() => setProductSort((prev) => {
+                      if (prev.mode === "gender" || prev.mode === "gender-column") {
+                        const orderIndex = prev.orderIndex;
+                        if (prev.mode === "gender-column" && prev.col === col) {
+                          return { mode: "gender-column", orderIndex, col, dir: prev.dir === "asc" ? "desc" : "asc" };
+                        }
+                        return { mode: "gender-column", orderIndex, col, dir: "desc" };
+                      }
+                      if (prev.mode === "column" && prev.col === col) {
+                        return { mode: "column", col, dir: prev.dir === "asc" ? "desc" : "asc" };
+                      }
+                      return { mode: "column", col, dir: "desc" };
+                    })}
+                  >
+                    <span>{col === "fiyat" ? "Fiyat" : col === "alinan" ? "Alınan" : col === "satilan" ? "Satılan" : "Stok"}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M3 7h13M3 12h9M3 17h5"/><path d="m17 4 3 3-3 3M20 7H7"/></svg>
+                  </button>
+                ))}
+                <span></span>
+              </div>
               <div className="product-list">
-                {filteredProducts.length ? filteredProducts.map((p) => {
+                {displayedProducts.length ? displayedProducts.map((p) => {
                   const isOpen = expandedProductId === p.id;
                   const isEditing = editingProductId === p.id;
                   const draft = productDrafts[p.id] || {};
@@ -2516,6 +2619,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const totalSold = getProductSoldQty(p.id);
                   const stock = getProductStock(p.id);
                   const isLowStock = stock === 0;
+                  const latestPrice = getProductLatestPrice(p.id);
                   return (
                     <div key={p.id} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
                       <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
@@ -2523,6 +2627,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <div className={`product-name product-name--${p.gender_category === "Erkek" ? "erkek" : p.gender_category === "Kadın" ? "kadin" : "unisex"}`}>{p.name}</div>
                         </div>
                         <div className="product-row-stats">
+                          <div className="product-stat-chip">
+                            <span className="product-stat-label">Fiyat</span>
+                            <b className="product-stat-val">{latestPrice > 0 ? money(latestPrice) : "—"}</b>
+                          </div>
                           <div className="product-stat-chip">
                             <span className="product-stat-label">Alınan</span>
                             <b className="product-stat-val">{totalBought}</b>
@@ -2574,6 +2682,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-edit-fields">
                                 <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
                                 <label className="field-label"><span>Kategori</span><select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select></label>
+                                <label className="field-label">
+                                  <span>Fiyat (₺) {batchItemsForProduct(p.id).some((i) => Number(i.sale_price) > 0) ? "— parti kaydı yoksa yedek olarak kullanılır" : ""}</span>
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    placeholder="Örn: 1500"
+                                    value={String(draft.manual_price ?? p.manual_price ?? "")}
+                                    onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), manual_price: e.target.value === "" ? null : Number(e.target.value) } })}
+                                  />
+                                </label>
                               </div>
                               {/* Parti satırları düzenleme */}
                               {batchItemsForProduct(p.id).length > 0 && (
@@ -4315,6 +4434,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-search-input::placeholder { color: #94a3b8; }
 
         .product-list { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 4px; }
+        .product-sort-row { display: flex; align-items: center; gap: 6px; padding: 4px 16px 8px; }
+        .product-sort-buttons { display: flex; gap: 6px; flex: 1; }
+        .product-sort-btn { font-size: 0.7rem; font-weight: 700; padding: 5px 10px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: white; color: #475569; }
+        .product-sort-btn--active { background: #0f172a; color: white; border-color: #0f172a; }
+        .product-sort-col { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 0.625rem; color: #94a3b8; font-weight: 600; background: transparent; border: none; padding: 0; min-width: 44px; }
+        .product-sort-col svg { flex-shrink: 0; }
+        .product-sort-row > span:last-child { width: 18px; flex-shrink: 0; }
+
         .product-card { background: white; border: 1.5px solid #e2e8f0; border-radius: 18px; overflow: hidden; transition: box-shadow 0.15s; }
         .product-card--open { box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-color: #cbd5e1; }
 
@@ -4328,7 +4455,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
 
         .product-row-stats { display: flex; gap: 6px; flex-shrink: 0; }
-        .product-stat-chip { background: #f1f5f9; border-radius: 10px; padding: 5px 8px; text-align: center; min-width: 48px; }
+        .product-stat-chip { background: #f1f5f9; border-radius: 10px; padding: 5px 6px; text-align: center; min-width: 44px; }
         .product-stat-chip--low { background: #fff1f2; }
         .product-stat-label { display: block; font-size: 0.625rem; color: #64748b; font-weight: 500; line-height: 1; margin-bottom: 2px; }
         .product-stat-label--stock { color: #dc2626; }
