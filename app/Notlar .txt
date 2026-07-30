@@ -1,15 +1,13 @@
-Sevgi Kasa'dan fazla tahsilat var 1500 TL, ütün iade etti para bizde kaldı . 
-Kar hesabından düştü genel tahsilatlarda duruyor. 
 
 
 git status
 git add .
-git commit -m "ürünler düzenleme"
+git commit -m "ürünler düzenleme 2"
 git push
 
 
 Rq6*dM1^sG5@kCpJ  mihrimah
 Tz4!bN8&jF3%hYeW  aslı
 Kx9#mP2$vL7@nQwR  veli
+Samsun2026+	  eso	
 
-05316172939

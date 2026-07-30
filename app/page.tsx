@@ -36,6 +36,23 @@ type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
 type Seller = "Aslı" | "Mihrimah";
 
+type SellerAccount = {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+  created_at: string;
+};
+
+type SellerSettlement = {
+  id: string;
+  seller_account_id: string;
+  amount: number;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
 type PreorderItem = {
   id: string;
   preorder_id: string;
@@ -50,6 +67,7 @@ type Preorder = {
   created_at: string;
   note: string;
   status: string;
+  seller_account_id?: string | null;
   items?: PreorderItem[];
 };
 
@@ -70,6 +88,7 @@ type Customer = {
   id: string;
   name: string;
   passive: boolean;
+  seller_account_id?: string | null;
 };
 
 type Batch = {
@@ -125,6 +144,8 @@ type Sale = {
   paid: boolean;
   paid_amount: number;
   payment_method?: "nakit" | "banka" | null;
+  seller_account_id?: string | null;
+  seller_profit?: number | null;
   cancelled: boolean;
   created_at: string;
 };
@@ -138,6 +159,7 @@ type Payment = {
   kasa_tutari?: number | null;
   aciklama?: string | null;
   preorder_id?: string | null;
+  seller_account_id?: string | null;
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
@@ -385,6 +407,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return negative.some((w) => lower.includes(w)) ? "error" : "success";
   };
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  const [sellerAccounts, setSellerAccounts] = useState<SellerAccount[]>([]);
+  const [sellerSettlements, setSellerSettlements] = useState<SellerSettlement[]>([]);
+  const [newSellerName, setNewSellerName] = useState("");
+  const [newSellerEmail, setNewSellerEmail] = useState("");
+  const [sellerSettlementDrafts, setSellerSettlementDrafts] = useState<Record<string, string>>({});
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -476,7 +503,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -487,6 +514,33 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const preorderMap = useMemo(() => new Map(preorders.map((po) => [po.id, po])), [preorders]);
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
   const supplierMap = useMemo(() => new Map(suppliers.map((s) => [s.id, s])), [suppliers]);
+  const sellerAccountMap = useMemo(() => new Map(sellerAccounts.map((s) => [s.id, s])), [sellerAccounts]);
+  const currentSellerAccount = useMemo(
+    () => sellerAccounts.find((s) => s.email.toLowerCase() === currentUserEmail.toLowerCase() && s.active),
+    [sellerAccounts, currentUserEmail]
+  );
+  const isSellerRole = !!currentSellerAccount;
+
+  // Satıcı ekranlarında kullanılacak "sadece benim verim" görünümleri.
+  // Stok hesapları (getProductStock vb.) HER ZAMAN tam veriyi (sales/activeSales) kullanır, bunları değil.
+  const mySales = useMemo(
+    () => (isSellerRole ? sales.filter((s) => s.seller_account_id === currentSellerAccount!.id) : sales),
+    [sales, isSellerRole, currentSellerAccount]
+  );
+  const myActiveSales = useMemo(() => mySales.filter((s) => !s.cancelled), [mySales]);
+  const myCustomers = useMemo(
+    () => (isSellerRole ? customers.filter((c) => c.seller_account_id === currentSellerAccount!.id) : customers),
+    [customers, isSellerRole, currentSellerAccount]
+  );
+  const myPayments = useMemo(
+    () => (isSellerRole ? payments.filter((p) => p.seller_account_id === currentSellerAccount!.id) : payments),
+    [payments, isSellerRole, currentSellerAccount]
+  );
+  const myActivePayments = useMemo(() => myPayments.filter((p) => !p.cancelled), [myPayments]);
+  const myPreorders = useMemo(
+    () => (isSellerRole ? preorders.filter((p) => p.seller_account_id === currentSellerAccount!.id) : preorders),
+    [preorders, isSellerRole, currentSellerAccount]
+  );
 
   const getUsdPriceForBatch = (product: Product | undefined, batch: Batch | undefined): number | null => {
     if (!product || !batch || !batch.supplier_id) return null;
@@ -544,8 +598,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return Number(product?.manual_price || 0);
   };
   const sortedCustomers = useMemo(
-    () => [...customers].sort((a, b) => a.name.localeCompare(b.name, "tr")),
-    [customers]
+    () => [...(isSellerRole ? myCustomers : customers)].sort((a, b) => a.name.localeCompare(b.name, "tr")),
+    [customers, myCustomers, isSellerRole]
   );
   const sortedActiveCustomers = useMemo(
     () => sortedCustomers.filter((c) => !c.passive),
@@ -577,7 +631,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -593,13 +647,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
         supabase.from("suppliers").select("*").order("name", { ascending: true }),
         supabase.from("supplier_returns").select("*").order("created_at", { ascending: false }),
+        supabase.from("seller_accounts").select("*").order("name", { ascending: true }),
+        supabase.from("seller_settlements").select("*").order("created_at", { ascending: false }),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, suppliersRes, supplierReturnsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, batchExtraCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes]) {
         if (res.error) throw res.error;
       }
 
       setProducts((productsRes.data || []) as Product[]);
+
+      const loadedSellers = (sellerAccountsRes.data || []) as SellerAccount[];
+
       setCustomers((customersRes.data || []) as Customer[]);
       setBatches((batchesRes.data || []) as Batch[]);
       setBatchItems((batchItemsRes.data || []) as BatchItem[]);
@@ -614,6 +673,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPaymentAllocations((paymentAllocationsRes.data || []) as {id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]);
       setSuppliers((suppliersRes.data || []) as Supplier[]);
       setSupplierReturns((supplierReturnsRes.data || []) as SupplierReturn[]);
+      setSellerAccounts(loadedSellers);
+      setSellerSettlements((sellerSettlementsRes.data || []) as SellerSettlement[]);
       // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
@@ -761,17 +822,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (!sale) return toplam;
       if (sale.sale_type === "Fire/Bozuk") return toplam;
 
-      const cost = toNum(sale.cost);
-      const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty;
+      const realCost = toNum(sale.cost) - Number(sale.seller_profit || 0);
+      const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty + Number(sale.seller_profit || 0);
 
       if (sale.sale_type === "Hibe") {
-        return toplam - (cost + ekMaliyet);
+        return toplam - (realCost + ekMaliyet);
       }
 
       const total = toNum(sale.total);
       if (total <= 0) return toplam;
       const oran = alloc.amount / total;
-      return toplam + alloc.amount - (cost + ekMaliyet) * oran;
+      return toplam + alloc.amount - (realCost + ekMaliyet) * oran;
     }, 0);
   }, [paymentAllocations, activeSales, ekMaliyetMap, periods]);
 
@@ -790,12 +851,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       })
       .map((alloc) => {
         const sale = saleMap.get(alloc.sale_id)!;
-        const cost = toNum(sale.cost);
+        const realCost = toNum(sale.cost) - Number(sale.seller_profit || 0);
         const total = toNum(sale.total);
-        const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty;
+        const ekMaliyet = getEkMaliyet(sale.batch_id) * sale.qty + Number(sale.seller_profit || 0);
         const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
-        const gercekMaliyet = (cost + ekMaliyet) * oran;
-        const kar = sale.sale_type === "Hibe" ? -(cost + ekMaliyet) : alloc.amount - gercekMaliyet;
+        const gercekMaliyet = (realCost + ekMaliyet) * oran;
+        const kar = sale.sale_type === "Hibe" ? -(realCost + ekMaliyet) : alloc.amount - gercekMaliyet;
         return {
           tarih: alloc.created_at,
           cari: customerMap.get(sale.customer_id)?.name || "-",
@@ -803,7 +864,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           adet: sale.qty,
           satisFiyati: total,
           tahsilat: alloc.amount,
-          maliyet: cost,
+          maliyet: realCost,
           ekMaliyet,
           kar,
           saleType: sale.sale_type,
@@ -813,7 +874,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   }, [paymentAllocations, activeSales, ekMaliyetMap, periods, customerMap, productMap]);
 
   const totals = useMemo(() => {
-    const customerDebt = customers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
+    const scopedCustomers = isSellerRole ? myCustomers : customers;
+    const scopedActivePayments = isSellerRole ? myActivePayments : activePayments;
+    const scopedActiveSales = isSellerRole ? myActiveSales : activeSales;
+    const customerDebt = scopedCustomers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
     const lastClosedPeriod = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
@@ -822,7 +886,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const openingBalancePeriodId = lastClosedPeriod?.id || null;
     const openingBalanceNote = lastClosedPeriod?.devir_bakiyesi_notu || "";
     const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
-    const recentPayments = activePayments.filter((p) => new Date(p.created_at) > sinceDate);
+    const recentPayments = scopedActivePayments.filter((p) => new Date(p.created_at) > sinceDate);
     const isPendingAdvance = (p: Payment) => {
       if (!p.preorder_id) return false;
       const po = preorderMap.get(p.preorder_id);
@@ -830,22 +894,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     };
     const tahsilatEligiblePayments = recentPayments.filter((p) => !isPendingAdvance(p));
     const recentRefunds = supplierReturns.filter((r) => r.resolution_type === "para" && r.resolved_at && new Date(r.resolved_at) > sinceDate);
-    const refundIncome = recentRefunds.reduce((sum, r) => sum + Number(r.refund_amount || 0), 0);
+    const refundIncome = isSellerRole ? 0 : recentRefunds.reduce((sum, r) => sum + Number(r.refund_amount || 0), 0);
     const grossCash = tahsilatEligiblePayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
-    const pendingAdvanceTotal = activePayments
+    const pendingAdvanceTotal = scopedActivePayments
       .filter((p) => isPendingAdvance(p))
       .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
-    const pastPendingAdvanceTotal = activePayments
+    const pastPendingAdvanceTotal = scopedActivePayments
       .filter((p) => isPendingAdvance(p) && new Date(p.created_at) <= sinceDate)
       .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
-    const distributedCash = periods
+    const distributedCash = isSellerRole ? 0 : periods
       .filter((period) => period.closed)
       .reduce((sum, period) => sum + Number(period.asli_distribution || 0) + Number(period.mihrimah_distribution || 0), 0);
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
-    const profit = activeSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
+    const profit = scopedActiveSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
     return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal, pastPendingAdvanceTotal };
-  }, [products, customers, batchItems, activeSales, activePayments, periods, supplierReturns, preorderMap]);
+  }, [products, customers, myCustomers, batchItems, activeSales, myActiveSales, activePayments, myActivePayments, periods, supplierReturns, preorderMap, isSellerRole]);
 
 
   const filteredCustomers = useMemo(() => {
@@ -855,16 +919,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   }, [sortedCustomers, customerSearch]);
 
   const recentMovements = useMemo(() => {
+    const scopedActiveSales = isSellerRole ? myActiveSales : activeSales;
+    const scopedActivePayments = isSellerRole ? myActivePayments : activePayments;
     const shortUser = (email?: string, seller?: string) => {
       if (seller === "Aslı" || seller === "Mihrimah") return seller === "Mihrimah" ? "Mihri" : "Aslı";
       if (!email) return "-";
       if (email.includes("asli")) return "Aslı";
       if (email.includes("mihrimah")) return "Mihri";
       if (email.includes("veli")) return "Veli";
+      const matchedSeller = sellerAccounts.find((s) => s.email.toLowerCase() === email.toLowerCase());
+      if (matchedSeller) return matchedSeller.name;
       return email.split("@")[0];
     };
 
-    const saleRows = activeSales.map((sale) => {
+    const saleRows = scopedActiveSales.map((sale) => {
       const methodSuffix = sale.paid && sale.sale_type === "Normal satış"
         ? (sale.payment_method === "nakit" ? " (Nakit)" : sale.payment_method === "banka" ? " (Banka)" : "")
         : "";
@@ -875,18 +943,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         customer: customerMap.get(sale.customer_id)?.name || "-",
         detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet${methodSuffix}`,
         amount: toNum(sale.total),
-        user: shortUser(undefined, sale.seller),
+        user: sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : shortUser(undefined, sale.seller),
       };
     });
 
     // Peşin satışlara otomatik eklenen payment'ları filtrele (aynı müşteri, aynı tutar, aynı dakika)
     const pesinSaleKeys = new Set(
-      activeSales
+      scopedActiveSales
         .filter((s) => s.paid && s.sale_type === "Normal satış")
         .map((s) => `${s.customer_id}-${s.total}-${s.created_at?.slice(0,16)}`)
     );
 
-    const paymentRows = activePayments
+    const paymentRows = scopedActivePayments
       .filter((payment) => {
         const key = `${payment.customer_id}-${payment.amount}-${payment.created_at?.slice(0,16)}`;
         return !pesinSaleKeys.has(key);
@@ -901,7 +969,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         user: shortUser(payment.user_email ?? undefined),
       }));
 
-    const auditRows = auditLogs.map((log) => ({
+    const auditRows = isSellerRole ? [] : auditLogs.map((log) => ({
       id: `audit-${log.id}`,
       date: log.created_at,
       type: log.action,
@@ -914,7 +982,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return [...saleRows, ...paymentRows, ...auditRows]
       .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())
       .slice(0, 100);
-  }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
+  }, [activeSales, myActiveSales, activePayments, myActivePayments, isSellerRole, auditLogs, customerMap, productMap, batchMap, sellerAccounts, sellerAccountMap]);
 
   const uploadImageToStorage = async (base64: string, fileName: string): Promise<string | null> => {
     try {
@@ -1000,7 +1068,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newCustomerName.trim();
     if (!name || name.length > 50) return setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
-    const { error } = await supabase.from("customers").insert({ name });
+    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null });
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
@@ -1079,6 +1147,50 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Toptancı eklendi", "suppliers", clean);
     setNewSupplierName("");
     setMessage(`${clean} eklendi.`);
+  };
+
+  const addSellerAccount = async () => {
+    const name = newSellerName.trim();
+    const email = newSellerEmail.trim().toLowerCase();
+    if (!name || !email) return setMessage("Satıcı adı ve e-postası zorunlu.");
+    if (sellerAccounts.some((s) => s.email.toLowerCase() === email)) return setMessage("Bu e-posta zaten bir satıcıya ait.");
+    const { data, error } = await supabase.from("seller_accounts").insert({ name, email, active: true }).select();
+    if (error) return showError(error);
+    if (data && data[0]) setSellerAccounts((prev) => [...prev, data[0] as SellerAccount].sort((a, b) => a.name.localeCompare(b.name, "tr")));
+    await logAction("Satıcı eklendi", "seller_accounts", name, { email });
+    setNewSellerName("");
+    setNewSellerEmail("");
+    setMessage(`${name} satıcı olarak eklendi. Şimdi Supabase Authentication'dan bu e-posta ile bir kullanıcı oluşturman gerekiyor: ${email}`);
+  };
+
+  const toggleSellerActive = async (seller: SellerAccount) => {
+    const { error } = await supabase.from("seller_accounts").update({ active: !seller.active }).eq("id", seller.id);
+    if (error) return showError(error);
+    setSellerAccounts((prev) => prev.map((s) => s.id === seller.id ? { ...s, active: !s.active } : s));
+    await logAction(seller.active ? "Satıcı pasif edildi" : "Satıcı aktif edildi", "seller_accounts", seller.name);
+  };
+
+  const getSellerSummary = (sellerId: string) => {
+    const sellerSales = activeSales.filter((s) => s.seller_account_id === sellerId);
+    const sellerCustomerIds = new Set(customers.filter((c) => c.seller_account_id === sellerId).map((c) => c.id));
+    const totalSatis = sellerSales.reduce((sum, s) => sum + toNum(s.total), 0);
+    const totalKarPayi = sellerSales.reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
+    const totalBizeBorc = sellerSales.reduce((sum, s) => sum + (toNum(s.cost) - Number(s.seller_profit || 0)), 0);
+    const totalTeslimEdilen = sellerSettlements.filter((se) => se.seller_account_id === sellerId).reduce((sum, se) => sum + Number(se.amount || 0), 0);
+    const kalanBorc = Math.max(totalBizeBorc - totalTeslimEdilen, 0);
+    const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
+    const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + toNum(p.amount), 0);
+    const kasaTutari = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
+    return { totalSatis, totalKarPayi, totalBizeBorc, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, kasaTutari };
+  };
+
+  const recordSellerSettlement = async (sellerId: string, amount: number, note: string) => {
+    if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
+    const { error } = await supabase.from("seller_settlements").insert({ seller_account_id: sellerId, amount, note: note || null, created_by: currentUserEmail });
+    if (error) return showError(error);
+    await logAction("Satıcı teslimatı kaydedildi", "seller_settlements", sellerAccountMap.get(sellerId)?.name || sellerId, { tutar: amount });
+    setMessage(`${money(amount)} teslimat kaydedildi.`);
+    loadAll();
   };
 
   const updateBatchSupplier = async (batchId: string, supplierId: string) => {
@@ -1307,6 +1419,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
       const totalPrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || 0);
       const isPaid = saleForm.paid !== "false" || isZeroPrice;
+      const sellerProfitTotal = isSellerRole && !isZeroPrice ? Number(saleForm.sellerProfit || 0) : 0;
+      const rowSellerProfit = qty > 0 ? (take / qty) * sellerProfitTotal : 0;
       rows.push({
         customer_id: customer.id,
         product_id: product.id,
@@ -1316,10 +1430,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         sale_type: saleForm.saleType,
         qty: take,
         total: totalPrice,
-        cost: item.buy_price * take,
+        cost: item.buy_price * take + rowSellerProfit,
         paid: isPaid,
         paid_amount: isPaid ? totalPrice : 0,
         payment_method: (saleForm.paid === "banka" || saleForm.paid === "nakit") ? saleForm.paid : null,
+        seller_account_id: currentSellerAccount?.id || null,
+        seller_profit: isSellerRole ? rowSellerProfit : null,
         cancelled: false,
       });
       remainingQty -= take;
@@ -1335,7 +1451,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, seller_account_id: currentSellerAccount?.id || null })
           .select()
           .single();
         if (payErr) {
@@ -1368,7 +1484,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
-    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo }));
+    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "" }));
     setMessage("Satış kaydedildi.");
     loadAll();
     } finally {
@@ -1613,7 +1729,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount, seller_account_id: currentSellerAccount?.id || null });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
@@ -1715,7 +1831,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", { items: validItems.length });
       setEditingPreorderId(null);
     } else {
-      const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor" }).select().single();
+      const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor", seller_account_id: currentSellerAccount?.id || null }).select().single();
       if (error || !newPO) return showError(error);
       const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty) })));
       if (itemErr) return showError(itemErr);
@@ -1979,7 +2095,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const rows: (string | number)[][] = [];
     rows.push(["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Açıklama"]);
 
-    if (totals.openingBalance !== 0) {
+    if (!isSellerRole && totals.openingBalance !== 0) {
       rows.push([
         "Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)", "", "", "",
         "",
@@ -2004,7 +2120,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         ]);
       });
 
-    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.openingBalance;
+    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
     rows.push(["Toplam", "", "", "", Number(totals.grossCash), "", kasaToplam, ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -2218,7 +2334,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  const menu = [
+  const fullMenu = [
     ["dashboard", "Özet Tablo"],
     ["preorders", "Ön Siparişler"],
     ["products", "Ürünler"],
@@ -2228,9 +2344,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
     ["partners", "Parti Maliyet Kaydı"],
+    ["sellers", "Satıcılar"],
     ["period", "Dönem Kapanışı"],
     ["audit", "İşlem Geçmişi"],
   ];
+  const sellerMenu = [
+    ["dashboard", "Özet Tablo"],
+    ["preorders", "Ön Siparişler"],
+    ["products", "Stok"],
+    ["customers", "Müşteriler / Cari"],
+    ["sales", "Satışlar"],
+  ];
+  const menu = isSellerRole ? sellerMenu : fullMenu;
+
+  useEffect(() => {
+    if (isSellerRole && !sellerMenu.some(([key]) => key === active)) {
+      setActive("dashboard");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSellerRole, active]);
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
 
@@ -2275,7 +2407,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const handleSalesSort = (col: string) => setSalesSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
   const salesSortArr = (col: string) => salesSort.col === col ? (salesSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
-  const sortedSales = [...activeSales].filter((sale) => {
+  const sortedSales = [...(isSellerRole ? myActiveSales : activeSales)].filter((sale) => {
     if (saleStatusFilter === "Tümü") return true;
     const status = getSaleStatus(sale);
     if (typeof status === "string") return status === saleStatusFilter;
@@ -2487,7 +2619,36 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
 
-        {active === "dashboard" && (
+        {active === "dashboard" && isSellerRole && (
+          <div className="space-y-4">
+            <div className="stat-grid">
+              <StatCard title="Toplam Satış" value={money(myActiveSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Kendi satış toplamın" />
+              <div onClick={() => setShowTahsilatDetay(true)} style={{cursor:"pointer"}}>
+                <StatCard title="Tahsilatlarım" value={money(totals.grossCash)} note="Detay için tıklayın ↗" />
+              </div>
+              <div onClick={() => setShowMusteriDetay(true)} style={{cursor:"pointer"}}>
+                <StatCard title="Cari Borçlarım" value={money(totals.customerDebt)} note="Detay için tıklayın ↗" />
+              </div>
+              <StatCard title="Kendi Karım" value={money(myActiveSales.reduce((s,sale) => s + Number(sale.seller_profit || 0), 0))} note="Bu döneme ait toplam payın" />
+              <StatCard title="Mevcut Stok" value={totals.totalStock} note="Toplam ürün adedi" />
+            </div>
+            <Card title="Son Hareketlerim">
+              <Table
+                headers={["Tarih", "Tür", "Cari", "Detay", "Tutar", "Kim"]}
+                rows={recentMovements.map((movement) => [
+                  toTR(movement.date, true),
+                  movement.type,
+                  movement.customer,
+                  movement.detail,
+                  money(movement.amount),
+                  movement.user,
+                ])}
+              />
+            </Card>
+          </div>
+        )}
+
+        {active === "dashboard" && !isSellerRole && (
           <div className="space-y-4">
             <div className="stat-grid">
               <StatCard title="Toplam Satış" value={money(activeSales.reduce((s,sale) => s + toNum(sale.total), 0))} note="Aktif satış toplamı" />
@@ -2551,12 +2712,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             {/* Mobile-first product page */}
             <div className="product-page">
               <div className="product-page-header">
-                <h2 className="product-page-title">Ürün Listesi ve Stok Özeti</h2>
-                <div style={{display:"flex", gap:8}}>
-                  <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
-                  <a href="/galeri" target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px", textDecoration:"none"}}>🔗 Paylaşım Linki</a>
-                </div>
+                <h2 className="product-page-title">{isSellerRole ? "Ürünler" : "Ürün Listesi ve Stok Özeti"}</h2>
+                {!isSellerRole && (
+                  <div style={{display:"flex", gap:8}}>
+                    <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
+                    <a href="/galeri" target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px", textDecoration:"none"}}>🔗 Paylaşım Linki</a>
+                  </div>
+                )}
               </div>
+              {!isSellerRole && (
               <div className="product-add-wrap product-add-wrap--top">
                 <details className="w-full">
                   <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
@@ -2574,6 +2738,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </details>
               </div>
+              )}
               <div className="product-search-wrap">
                 <div className="product-search-inner">
                   <svg className="product-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -2595,7 +2760,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     K-E-U
                   </button>
                 </div>
-                {(["fiyat", "alinan", "satilan", "stok"] as const).map((col) => (
+                {(isSellerRole ? (["fiyat", "stok"] as const) : (["fiyat", "alinan", "satilan", "stok"] as const)).map((col) => (
                   <button
                     key={col}
                     type="button"
@@ -2641,14 +2806,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <span className="product-stat-label">Fiyat</span>
                             <b className="product-stat-val">{latestPrice > 0 ? money(latestPrice) : "—"}</b>
                           </div>
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Alınan</span>
-                            <b className="product-stat-val">{totalBought}</b>
-                          </div>
-                          <div className="product-stat-chip">
-                            <span className="product-stat-label">Satılan</span>
-                            <b className="product-stat-val">{totalSold}</b>
-                          </div>
+                          {!isSellerRole && (
+                            <>
+                              <div className="product-stat-chip">
+                                <span className="product-stat-label">Alınan</span>
+                                <b className="product-stat-val">{totalBought}</b>
+                              </div>
+                              <div className="product-stat-chip">
+                                <span className="product-stat-label">Satılan</span>
+                                <b className="product-stat-val">{totalSold}</b>
+                              </div>
+                            </>
+                          )}
                           <div className={`product-stat-chip ${isLowStock ? "product-stat-chip--low" : ""}`}>
                             <span className={`product-stat-label ${isLowStock ? "product-stat-label--stock" : ""}`}>Stok</span>
                             <b className={`product-stat-val ${isLowStock ? "product-stat-val--stock" : ""}`}>{stock}</b>
@@ -2770,6 +2939,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     </div>
                                   )}
                                 </div>
+                                {!isSellerRole && (
                                 <div className="product-info-chips product-info-chips--sm">
                                   <div className="product-info-chip product-info-chip--sm">
                                     <div className="product-info-chip-label">T-Yüksel ($)</div>
@@ -2812,7 +2982,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     />
                                   </div>
                                 </div>
+                                )}
                               </div>
+                              {!isSellerRole && (
                               <div className="product-batch-section">
                                 <h4 className="product-batch-title">Parti Detayları</h4>
                                 <div className="product-batch-table">
@@ -2876,6 +3048,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   }) : <div className="product-batch-empty">Kayıt yok.</div>}
                                 </div>
                               </div>
+                              )}
+                              {isSellerRole && (
+                                <div className="product-batch-section">
+                                  <h4 className="product-batch-title">Satışlarım</h4>
+                                  <div className="product-batch-table">
+                                    <div className="product-batch-thead" style={{gridTemplateColumns: "1fr 0.6fr 0.9fr 0.9fr"}}><div>Tarih / Cari</div><div>Adet</div><div>Tutar</div><div>Durum</div></div>
+                                    {myActiveSales.filter((s) => s.product_id === p.id).length ? myActiveSales.filter((s) => s.product_id === p.id).sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((sale) => (
+                                      <div key={sale.id} className="product-batch-row" style={{gridTemplateColumns: "1fr 0.6fr 0.9fr 0.9fr"}}>
+                                        <div className="product-batch-cell product-batch-cell--name" style={{lineHeight:1.3}}>
+                                          {toTR(sale.created_at)}<br /><span style={{fontWeight:400, color:"#64748b"}}>{customerMap.get(sale.customer_id)?.name || "-"}</span>
+                                        </div>
+                                        <div className="product-batch-cell">{sale.qty}</div>
+                                        <div className="product-batch-cell">{money(sale.total)}</div>
+                                        <div className="product-batch-cell">{getSaleStatus(sale)}</div>
+                                      </div>
+                                    )) : <div className="product-batch-empty">Henüz bu üründen satışın yok.</div>}
+                                  </div>
+                                </div>
+                              )}
+                              {!isSellerRole && (
                               <div className="product-action-row">
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => startProductEdit(p)}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2886,6 +3078,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   Satış Detayı
                                 </button>
                               </div>
+                              )}
                             </>
                           )}
                         </div>
@@ -3200,6 +3393,79 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
+        {active === "sellers" && (
+          <div className="space-y-4">
+            <Card title="Satıcı Ekle">
+              <p className="mb-4 text-sm text-slate-500">
+                Buraya eklediğin satıcı, uygulamaya kendi ekranını görebilir (Stok, Ön Sipariş, Satış, Cari, Tahsilat — kendi verisi). Ekledikten sonra Supabase → Authentication'dan aynı e-posta ile bir kullanıcı hesabı oluşturup şifresini satıcıya iletmen gerekiyor.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <input className="input max-w-xs" placeholder="Satıcı adı" value={newSellerName} onChange={(e) => setNewSellerName(e.target.value)} />
+                <input className="input max-w-xs" placeholder="E-posta (giriş için)" value={newSellerEmail} onChange={(e) => setNewSellerEmail(e.target.value)} />
+                <button type="button" className="btn" onClick={addSellerAccount}>Satıcı Ekle</button>
+              </div>
+            </Card>
+
+            <Card title="Satıcılar">
+              {sellerAccounts.length === 0 ? (
+                <p className="text-sm text-slate-500">Henüz satıcı eklenmedi.</p>
+              ) : (
+                <div className="space-y-3">
+                  {sellerAccounts.map((seller) => {
+                    const summary = getSellerSummary(seller.id);
+                    return (
+                      <div key={seller.id} className="border rounded-xl p-4 bg-white">
+                        <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
+                          <div>
+                            <div className="font-semibold text-slate-800 flex items-center gap-2">
+                              {seller.name}
+                              {!seller.active && <span className="text-xs font-normal text-red-600 border border-red-300 rounded px-2 py-0.5">Pasif</span>}
+                            </div>
+                            <div className="text-xs text-slate-500">{seller.email}</div>
+                          </div>
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.75rem"}} onClick={() => toggleSellerActive(seller)}>
+                            {seller.active ? "Pasif Et" : "Aktif Et"}
+                          </button>
+                        </div>
+                        <div className="grid gap-2 text-sm md:grid-cols-3 lg:grid-cols-6">
+                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satış</div><b>{money(summary.totalSatis)}</b></div>
+                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Tahsilat</div><b>{money(summary.totalTahsilat)}</b></div>
+                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Cari Borcu</div><b>{money(summary.cariBorcu)}</b></div>
+                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı</div><b>{money(summary.totalKarPayi)}</b></div>
+                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Kasa (Nakit+Banka)</div><b>{money(summary.kasaTutari)}</b></div>
+                          <div className="rounded-lg bg-amber-50 p-2"><div className="text-xs text-slate-500">Size Kalan Borç</div><b style={{color: summary.kalanBorc > 0 ? "#b45309" : "#16a34a"}}>{money(summary.kalanBorc)}</b></div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <input
+                            className="input"
+                            style={{width: 140}}
+                            type="number"
+                            placeholder="Teslim alınan ₺"
+                            value={sellerSettlementDrafts[seller.id] || ""}
+                            onChange={(e) => setSellerSettlementDrafts({ ...sellerSettlementDrafts, [seller.id]: e.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{fontSize:"0.8rem"}}
+                            onClick={() => {
+                              recordSellerSettlement(seller.id, Number(sellerSettlementDrafts[seller.id] || 0), "");
+                              setSellerSettlementDrafts({ ...sellerSettlementDrafts, [seller.id]: "" });
+                            }}
+                          >
+                            Teslimat Kaydet
+                          </button>
+                          <span className="text-xs text-slate-400">Satıcı size nakit/havale teslim ettiğinde buraya tutarı girip kaydet, borcundan düşer.</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
         {active === "customers" && (
           <div className="space-y-0">
             <div className="product-page">
@@ -3462,9 +3728,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             {/* Bekleyen Ön Siparişler */}
             <Card title="Bekleyen Ön Siparişler">
-              {preorders.filter((po) => po.status === "bekliyor").length === 0
+              {(isSellerRole ? myPreorders : preorders).filter((po) => po.status === "bekliyor").length === 0
                 ? <p className="text-sm text-slate-500">Bekleyen ön sipariş yok.</p>
-                : preorders.filter((po) => po.status === "bekliyor").map((po) => {
+                : (isSellerRole ? myPreorders : preorders).filter((po) => po.status === "bekliyor").map((po) => {
                   const items = preorderItems.filter((i) => i.preorder_id === po.id);
                   const customer = customerMap.get(po.customer_id);
                   const advancePayments = payments.filter((p) => p.preorder_id === po.id && !p.cancelled);
@@ -3502,9 +3768,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             {/* Tamamlanan Ön Siparişler */}
             <Card title="Tamamlanan Ön Siparişler">
-              {preorders.filter((po) => po.status === "tamamlandı").length === 0
+              {(isSellerRole ? myPreorders : preorders).filter((po) => po.status === "tamamlandı").length === 0
                 ? <p className="text-sm text-slate-500">Tamamlanan ön sipariş yok.</p>
-                : preorders.filter((po) => po.status === "tamamlandı").map((po) => {
+                : (isSellerRole ? myPreorders : preorders).filter((po) => po.status === "tamamlandı").map((po) => {
                   const items = preorderItems.filter((i) => i.preorder_id === po.id);
                   const customer = customerMap.get(po.customer_id);
                   return (
@@ -3554,7 +3820,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {totals.openingBalance !== 0 && totals.openingBalancePeriodId && (
+                    {!isSellerRole && totals.openingBalance !== 0 && totals.openingBalancePeriodId && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fffbeb"}}>
                         <td style={{padding:"7px 10px", color:"#92400e", fontWeight:600}} colSpan={4}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",color:"#cbd5e1"}}>—</td>
@@ -3611,7 +3877,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </td>
                       </tr>
                     )}
-                    {totals.pastPendingAdvanceTotal > 0 && (
+                    {!isSellerRole && totals.pastPendingAdvanceTotal > 0 && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fef9c3"}}>
                         <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={8}>
                           💰 Geçmiş dönem(ler)den bekleyen ön ödemeler (henüz satışa dönüşmedi, bu ekranda ayrı satır olarak görünmüyor çünkü eski dönemde kalmış): <b>{money(totals.pastPendingAdvanceTotal)}</b> — satışa dönüştükçe bu tutar otomatik azalır.
@@ -3728,7 +3994,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
                       <td></td>
-                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.openingBalance)}</td>
+                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -4053,7 +4319,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })()}
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
-                <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
+                {!isSellerRole && (
+                  <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
+                )}
                 <select className="input" value={saleForm.saleType} onChange={(e) => {
                   const t = e.target.value as SaleType;
                   setSaleForm({ ...saleForm, saleType: t, customSalePrice: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : saleForm.customSalePrice });
@@ -4062,6 +4330,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </select>
                 {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
                   <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                )}
+                {isSellerRole && saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
+                  <input className="input" type="number" min="0" placeholder="Kendi Karım (₺)" value={saleForm.sellerProfit} onChange={(e) => setSaleForm({ ...saleForm, sellerProfit: e.target.value })} />
                 )}
                 {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
                   <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}>
@@ -4087,7 +4358,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {saleStatusFilter !== "Tümü" && <span style={{fontSize:"0.75rem", color:"var(--color-text-secondary)"}}>{sortedSales.length} kayıt</span>}
               </div>
               <Table
-                headers={[salesTh("created_at","Tarih"), salesTh("customer","Müşteri"), salesTh("product","Ürün"), salesTh("batch","Parti"), salesTh("seller","Satıcı"), salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"), salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar"), salesTh("status","Durum"), "İşlem"]}
+                headers={[
+                  salesTh("created_at","Tarih"), salesTh("customer","Müşteri"), salesTh("product","Ürün"), salesTh("batch","Parti"),
+                  ...(!isSellerRole ? [salesTh("seller","Satıcı")] : []),
+                  salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"),
+                  ...(!isSellerRole ? [salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar")] : []),
+                  salesTh("status","Durum"), "İşlem"
+                ]}
                 rows={sortedSales.map((sale) => {
                   const isEditing = editingSaleId === sale.id;
                   const draft = saleDrafts[sale.id];
@@ -4096,14 +4373,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     customerMap.get(sale.customer_id)?.name || "-",
                     productMap.get(sale.product_id)?.name || "-",
                     batchMap.get(sale.batch_id)?.name || "-",
-                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : sale.seller,
+                    ...(!isSellerRole ? [isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : (sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : sale.seller)] : []),
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
-                    isEditing ? <input key="cost" className="input" style={{width:100}} type="number" min="0" value={draft.cost} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], cost: e.target.value } }))} /> : money(sale.cost),
-                    isEditing
-                      ? <span key="profit" className={(Number(draft.total||0) - Number(draft.cost||0)) < 0 ? "text-red-600" : ""}>{money(Number(draft.total||0) - Number(draft.cost||0))}</span>
-                      : <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                    ...(!isSellerRole ? [
+                      isEditing ? <input key="cost" className="input" style={{width:100}} type="number" min="0" value={draft.cost} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], cost: e.target.value } }))} /> : money(sale.cost),
+                      isEditing
+                        ? <span key="profit" className={(Number(draft.total||0) - Number(draft.cost||0)) < 0 ? "text-red-600" : ""}>{money(Number(draft.total||0) - Number(draft.cost||0))}</span>
+                        : <span key={sale.id} className={sale.total - sale.cost < 0 ? "text-red-600" : ""}>{money(sale.total - sale.cost)}</span>,
+                    ] : []),
                     isEditing ? <select key="paid" className="input" value={draft.paid ? "true" : "false"} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], paid: e.target.value === "true" } }))}><option value="false">Cari borç</option><option value="true">Ödendi</option></select> : getSaleStatus(sale),
                     isEditing
                       ? <div key="actions" className="flex gap-2"><button type="button" className="btn" disabled={isLoading(`sale-save-${sale.id}`)} onClick={() => withLoading(`sale-save-${sale.id}`, () => saveSaleEdit(sale.id))}>{isLoading(`sale-save-${sale.id}`) ? "..." : "Kaydet"}</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
