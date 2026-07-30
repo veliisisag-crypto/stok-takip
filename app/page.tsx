@@ -454,6 +454,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [advanceNote, setAdvanceNote] = useState("");
   const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
   const [convertPaid, setConvertPaid] = useState<string>("false");
+  const [convertSellerProfit, setConvertSellerProfit] = useState<string>("");
 
   const [search, setSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -844,6 +845,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const sinceDate = lastClosed ? new Date(lastClosed.closed_at!) : new Date(0);
     const recentAllocs = paymentAllocations.filter((a) => new Date(a.created_at) > sinceDate);
     const saleMap = new Map(activeSales.map((s) => [s.id, s]));
+    const paymentMap = new Map(payments.map((p) => [p.id, p]));
 
     return recentAllocs
       .filter((alloc) => {
@@ -858,6 +860,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const oran = sale.sale_type === "Hibe" ? 1 : (total > 0 ? alloc.amount / total : 1);
         const gercekMaliyet = (realCost + ekMaliyet) * oran;
         const kar = sale.sale_type === "Hibe" ? -(realCost + ekMaliyet) : alloc.amount - gercekMaliyet;
+        const linkedPayment = paymentMap.get(alloc.payment_id);
+        const fromPreviousPeriod = !!linkedPayment && new Date(linkedPayment.created_at) <= sinceDate;
         return {
           tarih: alloc.created_at,
           cari: customerMap.get(sale.customer_id)?.name || "-",
@@ -869,10 +873,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           ekMaliyet,
           kar,
           saleType: sale.sale_type,
+          fromPreviousPeriod,
         };
       })
       .sort((a, b) => b.kar - a.kar);
-  }, [paymentAllocations, activeSales, ekMaliyetMap, periods, customerMap, productMap]);
+  }, [paymentAllocations, activeSales, payments, ekMaliyetMap, periods, customerMap, productMap]);
 
   const totals = useMemo(() => {
     const scopedCustomers = isSellerRole ? myCustomers : customers;
@@ -1863,6 +1868,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const openConvertModal = (po: Preorder, item: PreorderItem) => {
     setConvertPrices({ [item.id]: "" });
     setConvertPaid("false");
+    setConvertSellerProfit("");
     setConvertModal({ preorder: po, item });
   };
 
@@ -1922,6 +1928,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const rowShareOfAdvance = saleTotalTarget > 0 ? (rowTotal / saleTotalTarget) * advanceApplied : 0;
       const rowShareOfNewPayment = remainder > 0 && convertPaid !== "false" ? (rowTotal / saleTotalTarget) * remainder : 0;
       const rowPaidAmount = Math.min(rowTotal, rowShareOfAdvance + rowShareOfNewPayment);
+      const sellerProfitTotal = isSellerRole ? Number(convertSellerProfit || 0) : 0;
+      const rowSellerProfit = item.qty > 0 ? (take / item.qty) * sellerProfitTotal : 0;
       rows.push({
         customer_id: po.customer_id,
         product_id: product.id,
@@ -1929,12 +1937,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         batch_item_id: bi.id,
         qty: take,
         total: rowTotal,
-        cost: bi.buy_price * take,
+        cost: bi.buy_price * take + rowSellerProfit,
         seller,
         sale_type: "Normal satış",
         paid: rowPaidAmount >= rowTotal,
         paid_amount: rowPaidAmount,
         payment_method: paymentMethod,
+        seller_account_id: currentSellerAccount?.id || null,
+        seller_profit: isSellerRole ? rowSellerProfit : null,
       });
       remainingQty -= take;
     }
@@ -2007,7 +2017,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainder > 0 && convertPaid !== "false" && newSales && newSales.length > 0) {
       const { data: payData, error: payErr } = await supabase
         .from("payments")
-        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder })
+        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, seller_account_id: currentSellerAccount?.id || null })
         .select()
         .single();
       if (!payErr && payData) {
@@ -2141,7 +2151,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         rows.push([
           toTR(row.tarih, true),
           row.cari,
-          row.urun + (row.saleType === "Hibe" ? " (Hibe)" : ""),
+          row.urun + (row.saleType === "Hibe" ? " (Hibe)" : "") + (row.fromPreviousPeriod ? " (önceki dönem ön ödemesi)" : ""),
           row.adet,
           Number(row.satisFiyati),
           Number(row.tahsilat),
@@ -2158,6 +2168,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       karDetay.reduce((s, r) => s + r.ekMaliyet, 0),
       "",
     ]);
+    const eskiDonemTahsilatExport = karDetay.filter((r) => r.fromPreviousPeriod).reduce((s, r) => s + r.tahsilat, 0);
+    if (eskiDonemTahsilatExport > 0) {
+      const buDonemTahsilatExport = karDetay.reduce((s, r) => s + r.tahsilat, 0) - eskiDonemTahsilatExport;
+      rows.push([`  - Bu dönemin gerçek tahsilatı: ${buDonemTahsilatExport}`, "", "", "", "", "", "", "", ""]);
+      rows.push([`  - Önceki dönem ön ödemelerinden: ${eskiDonemTahsilatExport}`, "", "", "", "", "", "", "", ""]);
+    }
     rows.push(["Toplam Net Kar", "", "", "", "", "", "", "", Number(anlıkKar)]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -3822,7 +3838,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {!isSellerRole && totals.openingBalance !== 0 && totals.openingBalancePeriodId && (
+                    {!isSellerRole && totals.openingBalancePeriodId && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fffbeb"}}>
                         <td style={{padding:"7px 10px", color:"#92400e", fontWeight:600}} colSpan={4}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",color:"#cbd5e1"}}>—</td>
@@ -4180,7 +4196,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td style={{padding:"7px 10px",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.urun} {row.saleType==="Hibe"?<span style={{fontSize:"0.7rem",color:"#92400e"}}>(Hibe)</span>:null}</td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{row.adet}</td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.satisFiyati)}</td>
-                        <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.tahsilat)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right"}}>
+                          {money(row.tahsilat)}
+                          {row.fromPreviousPeriod && <span title="Bu tahsilat önceki dönemden alınan ön ödemeden geliyor" style={{marginLeft:4}}>💰</span>}
+                        </td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{money(row.maliyet)}</td>
                         <td style={{padding:"7px 10px",textAlign:"right"}}>{row.ekMaliyet > 0 ? money(row.ekMaliyet) : "—"}</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500,color:row.kar<0?"#dc2626":"#16a34a"}}>{money(row.kar)}</td>
@@ -4195,6 +4214,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}></td>
                     </tr>
+                    {(() => {
+                      const eskiDonemTahsilat = karDetay.filter((r) => r.fromPreviousPeriod).reduce((s, r) => s + r.tahsilat, 0);
+                      const buDonemTahsilat = karDetay.reduce((s, r) => s + r.tahsilat, 0) - eskiDonemTahsilat;
+                      if (eskiDonemTahsilat <= 0) return null;
+                      return (
+                        <tr style={{background:"#fffbeb"}}>
+                          <td colSpan={9} style={{padding:"6px 10px", fontSize:"0.75rem", color:"#92400e"}}>
+                            💰 Yukarıdaki toplamın <b>{money(buDonemTahsilat)}</b>'si bu dönemin gerçek tahsilatı, <b>{money(eskiDonemTahsilat)}</b>'si ise önceki dönem(ler)de alınmış ön ödemelerin şimdi satışa dönüşüp kâr hesabına yansımasından geliyor.
+                          </td>
+                        </tr>
+                      );
+                    })()}
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
                       <td colSpan={8} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</td>
@@ -4270,11 +4301,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <option value="nakit">Peşin - Nakit alındı</option>
                     </select>
                   </div>
+                  {isSellerRole && (
+                    <div>
+                      <label className="label">Kendi Karım (₺)</label>
+                      <input className="input" type="number" min="0" placeholder="Örn: 200" value={convertSellerProfit} onChange={(e) => setConvertSellerProfit(e.target.value)} />
+                    </div>
+                  )}
                 </div>
                 {message && <p className="text-sm text-red-600 mt-2">{message}</p>}
                 <div className="flex gap-2 mt-4">
                   <button type="button" className="btn" disabled={isLoading("convertToSales")} onClick={() => withLoading("convertToSales", convertToSales)}>{isLoading("convertToSales") ? "..." : "Satışa Dönüştür"}</button>
-                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); }}>Vazgeç</button>
+                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); setConvertSellerProfit(""); }}>Vazgeç</button>
                 </div>
               </div>
             </div>
