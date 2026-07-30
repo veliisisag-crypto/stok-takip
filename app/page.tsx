@@ -89,6 +89,7 @@ type Customer = {
   name: string;
   passive: boolean;
   seller_account_id?: string | null;
+  created_by?: string | null;
 };
 
 type Batch = {
@@ -1068,7 +1069,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newCustomerName.trim();
     if (!name || name.length > 50) return setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
-    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null });
+    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null, created_by: currentUserEmail || null });
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
@@ -3535,6 +3536,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <div className="product-row-left">
                           <div className="product-name">{c.name}</div>
                           <div className="product-meta" style={{color: statusColor, fontWeight: 600}}>{status}</div>
+                          <div className="product-meta">Oluşturan: {c.seller_account_id ? (sellerAccountMap.get(c.seller_account_id)?.name || "Satıcı") : shortUserName(c.created_by)}</div>
                         </div>
                         <div className="product-row-stats">
                           <div className="product-stat-chip">
@@ -4005,10 +4007,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {showMusteriDetay && (() => {
-          const debtList = customers
+          const scopedCustomersList = isSellerRole ? myCustomers : customers;
+          const scopedActiveSalesList = isSellerRole ? myActiveSales : activeSales;
+          const debtList = scopedCustomersList
             .map((c) => {
               const balance = getCustomerBalance(c.id);
-              const unpaidSales = activeSales.filter((s) =>
+              const unpaidSales = scopedActiveSalesList.filter((s) =>
                 s.customer_id === c.id &&
                 s.sale_type === "Normal satış" &&
                 toNum(s.paid_amount) < toNum(s.total)
