@@ -1178,16 +1178,34 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const getSellerSummary = (sellerId: string) => {
     const sellerSales = activeSales.filter((s) => s.seller_account_id === sellerId);
+    const sellerSaleIds = new Set(sellerSales.map((s) => s.id));
     const sellerCustomerIds = new Set(customers.filter((c) => c.seller_account_id === sellerId).map((c) => c.id));
     const totalSatis = sellerSales.reduce((sum, s) => sum + toNum(s.total), 0);
     const totalKarPayi = sellerSales.reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
-    const totalBizeBorc = sellerSales.reduce((sum, s) => sum + (toNum(s.cost) - Number(s.seller_profit || 0)), 0);
+    // Satışın sadece FİİLEN TAHSİL EDİLMİŞ kısmı satıcının elinde olabilir - bu yüzden
+    // "bize borç" ve "gerçekleşen kâr" tam satış tutarı üzerinden değil, her tahsilatın
+    // (payment_allocations) o satışa düşen oranı üzerinden hesaplanır (anlıkKar/karDetay
+    // ile aynı yöntem, satır ~810-880).
+    const saleMap = new Map(sellerSales.map((s) => [s.id, s]));
+    const sellerAllocs = paymentAllocations.filter((a) => sellerSaleIds.has(a.sale_id));
+    let totalBizeBorcOrantili = 0;
+    let gerceklesenKarPayi = 0;
+    for (const alloc of sellerAllocs) {
+      const sale = saleMap.get(alloc.sale_id);
+      if (!sale) continue;
+      const total = toNum(sale.total);
+      if (total <= 0) continue;
+      const oran = alloc.amount / total;
+      const profit = Number(sale.seller_profit || 0);
+      totalBizeBorcOrantili += (toNum(sale.cost) - profit) * oran;
+      gerceklesenKarPayi += profit * oran;
+    }
     const totalTeslimEdilen = sellerSettlements.filter((se) => se.seller_account_id === sellerId).reduce((sum, se) => sum + Number(se.amount || 0), 0);
-    const kalanBorc = Math.max(totalBizeBorc - totalTeslimEdilen, 0);
+    const kalanBorc = Math.max(totalBizeBorcOrantili - totalTeslimEdilen, 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + toNum(p.amount), 0);
     const kasaTutari = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
-    return { totalSatis, totalKarPayi, totalBizeBorc, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, kasaTutari };
+    return { totalSatis, totalKarPayi, gerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, kasaTutari };
   };
 
   const recordSellerSettlement = async (sellerId: string, amount: number, note: string) => {
@@ -3448,8 +3466,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satış</div><b>{money(summary.totalSatis)}</b></div>
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Tahsilat</div><b>{money(summary.totalTahsilat)}</b></div>
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Cari Borcu</div><b>{money(summary.cariBorcu)}</b></div>
-                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı</div><b>{money(summary.totalKarPayi)}</b></div>
-                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Kasa (Nakit+Banka)</div><b>{money(summary.kasaTutari)}</b></div>
+                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı (Toplam)</div><b>{money(summary.totalKarPayi)}</b></div>
+                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Gerçekleşen Kâr</div><b>{money(summary.gerceklesenKarPayi)}</b></div>
+                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satıcı Kasası</div><b>{money(summary.kasaTutari)}</b></div>
                           <div className="rounded-lg bg-amber-50 p-2"><div className="text-xs text-slate-500">Size Kalan Borç</div><b style={{color: summary.kalanBorc > 0 ? "#b45309" : "#16a34a"}}>{money(summary.kalanBorc)}</b></div>
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
