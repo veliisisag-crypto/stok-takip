@@ -265,10 +265,15 @@ const toTR = (isoStr?: string | null, withTime = false) => {
 };
 const toNum = (v: unknown) => Number(v || 0);
 
-function Card({ title, children }: { title?: string; children: ReactNode }) {
+function Card({ title, actions, children }: { title?: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <section className="rounded-2xl border bg-white p-5 shadow-sm">
-      {title ? <h3 className="mb-4 text-lg font-semibold">{title}</h3> : null}
+      {title ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          {actions}
+        </div>
+      ) : null}
       {children}
     </section>
   );
@@ -2201,6 +2206,39 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     XLSX.writeFile(wb, `Net_Kar_Detayi_${today()}.xlsx`);
   };
 
+  const exportPreorderToExcel = () => {
+    const rows: (string | number)[][] = [];
+    rows.push(["Tarih", "Müşteri", "Satıcı", "Ürün", "Adet", "Not", "Ön Ödeme"]);
+
+    const list = (isSellerRole ? myPreorders : preorders).filter((po) => po.status === "bekliyor");
+    [...list]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .forEach((po) => {
+        const items = preorderItems.filter((i) => i.preorder_id === po.id);
+        const customer = customerMap.get(po.customer_id);
+        const advanceTotal = payments
+          .filter((p) => p.preorder_id === po.id && !p.cancelled)
+          .reduce((s, p) => s + Number(p.amount || 0), 0);
+        items.forEach((item) => {
+          rows.push([
+            toTR(po.created_at, true),
+            customer?.name || "-",
+            shortUserName(po.created_by),
+            productMap.get(item.product_id)?.name || "-",
+            item.qty,
+            po.note || "",
+            advanceTotal,
+          ]);
+        });
+      });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 17 }, { wch: 22 }, { wch: 12 }, { wch: 26 }, { wch: 6 }, { wch: 24 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Bekleyen Ön Siparişler");
+    XLSX.writeFile(wb, `Bekleyen_On_Siparisler_${today()}.xlsx`);
+  };
+
   const closePeriod = async () => {
    try {
     const distributableProfit = Math.round(anlıkKar * 100) / 100;
@@ -3764,7 +3802,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             </Card>
 
             {/* Bekleyen Ön Siparişler */}
-            <Card title="Bekleyen Ön Siparişler">
+            <Card
+              title="Bekleyen Ön Siparişler"
+              actions={
+                <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"4px 12px"}} onClick={exportPreorderToExcel}>Excel'e Aktar</button>
+              }
+            >
               {(isSellerRole ? myPreorders : preorders).filter((po) => po.status === "bekliyor").length === 0
                 ? <p className="text-sm text-slate-500">Bekleyen ön sipariş yok.</p>
                 : (isSellerRole ? myPreorders : preorders).filter((po) => po.status === "bekliyor").map((po) => {
