@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailLog, setDetailLog] = useState<AuditLog | null>(null);
   useEffect(() => {
     supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100)
       .then(({ data }) => { setLogs((data || []) as AuditLog[]); setLoading(false); });
@@ -16,17 +17,96 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
       <Card title="İşlem Geçmişi">
         {loading ? <p className="text-sm text-slate-500">Yükleniyor...</p> : (
           <Table
-            headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı"]}
+            headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı", "Detay"]}
             rows={logs.map((log) => [
               toTR(log.created_at, true),
               log.action,
               log.entity_type,
               log.entity_name || "-",
               log.user_email || "-",
+              <button
+                key="detay"
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                onClick={() => setDetailLog(log)}
+              >
+                Detay
+              </button>,
             ])}
           />
         )}
       </Card>
+
+      {detailLog && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setDetailLog(null)}
+        >
+          <div
+            style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>{detailLog.action}</h2>
+              <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setDetailLog(null)}>Kapat</button>
+            </div>
+            <p className="text-xs text-slate-500" style={{ marginBottom: 14 }}>
+              {toTR(detailLog.created_at, true)} · {detailLog.entity_type} · {detailLog.entity_name || "-"} · {detailLog.user_email || "-"}
+            </p>
+            {(() => {
+              const details = (detailLog.details || {}) as Record<string, unknown>;
+              const before = details.before as Record<string, unknown> | undefined;
+              const after = details.after as Record<string, unknown> | undefined;
+
+              if (before && after && typeof before === "object" && typeof after === "object") {
+                const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+                if (!keys.length) return <p className="text-sm text-slate-500">Bu işlem için ek detay kaydı yok.</p>;
+                return (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "1.5px solid #e2e8f0" }}>
+                        <th style={{ textAlign: "left", padding: 8 }}>Alan</th>
+                        <th style={{ textAlign: "left", padding: 8 }}>Önce</th>
+                        <th style={{ textAlign: "left", padding: 8 }}>Sonra</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {keys.map((key) => {
+                        const b = formatLogValue(before[key]);
+                        const a = formatLogValue(after[key]);
+                        const changed = b !== a;
+                        return (
+                          <tr key={key} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: 8, fontWeight: 600, color: "#334155" }}>{logFieldLabel(key)}</td>
+                            <td style={{ padding: 8, color: changed ? "#dc2626" : "#64748b" }}>{b}</td>
+                            <td style={{ padding: 8, color: changed ? "#16a34a" : "#64748b", fontWeight: changed ? 700 : 400 }}>{a}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              }
+
+              const flatKeys = Object.keys(details);
+              if (!flatKeys.length) return <p className="text-sm text-slate-500">Bu işlem için ek detay kaydı yok.</p>;
+              return (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                  <tbody>
+                    {flatKeys.map((key) => (
+                      <tr key={key} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: 8, fontWeight: 600, color: "#334155", width: "40%" }}>{logFieldLabel(key)}</td>
+                        <td style={{ padding: 8, color: "#0f172a" }}>{formatLogValue(details[key])}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -264,6 +344,60 @@ const toTR = (isoStr?: string | null, withTime = false) => {
   return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
 };
 const toNum = (v: unknown) => Number(v || 0);
+
+// Log detay modalında ham alan adlarını (örn. "usd_kuru") okunaklı Türkçe etiketlere çevirir.
+const LOG_FIELD_LABELS: Record<string, string> = {
+  ad: "Ad",
+  yeni_ad: "Ad",
+  name: "Ad",
+  tutar: "Tutar",
+  amount: "Tutar",
+  not: "Not",
+  note: "Not",
+  aciklama: "Açıklama",
+  kasa_tutari: "Kasa Tutarı",
+  usd_fiyat: "USD Fiyat",
+  usd_kuru: "USD Kuru",
+  toptanci: "Toptancı",
+  supplier_id: "Toptancı",
+  code: "Kod",
+  gender_category: "Cinsiyet Kategorisi",
+  passive: "Pasif",
+  pasif: "Pasif",
+  aktif: "Aktif",
+  manual_price: "Manuel Fiyat",
+  bought: "Alınan Adet",
+  buy_price: "Alış Fiyatı",
+  sale_price: "Satış Fiyatı",
+  depo: "Depo",
+  batch_id: "Parti",
+  seller: "Satıcı",
+  sale_type: "Satış Türü",
+  qty: "Adet",
+  total: "Toplam",
+  cost: "Maliyet",
+  paid: "Ödendi mi",
+  paid_amount: "Ödenen Tutar",
+  devir_bakiyesi: "Devir Bakiyesi",
+  urunler: "Ürünler",
+  yontem: "Yöntem",
+  email: "E-posta",
+  items: "Ürün Sayısı",
+  contribution: "Katkı",
+  debt: "Borç",
+  receivable: "Alacak",
+  partner_name: "Ortak",
+  role: "Rol",
+};
+const logFieldLabel = (key: string) => LOG_FIELD_LABELS[key] || key;
+
+// Log detay modalında değerleri okunaklı hale getirir (null -> "-", boolean -> Evet/Hayır, sayı -> tr-TR formatı).
+const formatLogValue = (v: unknown): string => {
+  if (v === null || v === undefined || v === "") return "-";
+  if (typeof v === "boolean") return v ? "Evet" : "Hayır";
+  if (typeof v === "number") return v.toLocaleString("tr-TR");
+  return String(v);
+};
 
 function Card({ title, actions, children }: { title?: string; actions?: ReactNode; children: ReactNode }) {
   return (
@@ -727,6 +861,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  // Bir kaydın güncelleme öncesi (oldObj) ve yeni değerlerini (patch) alıp
+  // logAction'a { before, after } formatında geçirilecek diff objesi üretir.
+  const diffOf = (oldObj: Record<string, unknown> | null | undefined, patch: Record<string, unknown>) => {
+    const before: Record<string, unknown> = {};
+    Object.keys(patch).forEach((key) => {
+      before[key] = oldObj && oldObj[key] !== undefined ? oldObj[key] : null;
+    });
+    return { before, after: patch };
+  };
+
   const batchItemsForProduct = (productId: string) => batchItems.filter((item) => item.product_id === productId);
 
   const getBatchSoldQty = (productId: string, batchId: string) => {
@@ -1046,11 +1190,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.image_url !== undefined) dbPatch.image_url = patch.image_url;
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
     if (patch.manual_price !== undefined) dbPatch.manual_price = patch.manual_price;
+    const oldProduct = products.find((p) => p.id === productId);
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
     // Exclude image_url from log to avoid storing large base64/URL data
     const { image_url: _img, ...logPatch } = dbPatch as Record<string, unknown> & { image_url?: unknown };
-    await logAction("Ürün değiştirildi", "products", products.find((p) => p.id === productId)?.name || productId, logPatch);
+    await logAction("Ürün değiştirildi", "products", oldProduct?.name || productId, diffOf(oldProduct as unknown as Record<string, unknown>, logPatch));
     loadAll();
   };
 
@@ -1091,7 +1236,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const oldName = customers.find((c) => c.id === customerId)?.name || customerId;
     const { error } = await supabase.from("customers").update({ name }).eq("id", customerId);
     if (error) return showError(error);
-    await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name });
+    await logAction("Cari değiştirildi", "customers", oldName, diffOf({ ad: oldName }, { ad: name }));
     loadAll();
   };
 
@@ -1103,7 +1248,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (hasSales || hasPayments) {
       const { error } = await supabase.from("customers").update({ passive: true }).eq("id", customerId);
       if (error) return showError(error);
-      await logAction("Cari pasife alındı", "customers", customer.name);
+      await logAction("Cari pasife alındı", "customers", customer.name, diffOf({ pasif: customer.passive }, { pasif: true }));
       setMessage("Cari hareket gördüğü için silinmedi, pasife alındı.");
       return loadAll();
     }
@@ -1144,7 +1289,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const oldName = batches.find((b) => b.id === batchId)?.name || batchId;
     const { error } = await supabase.from("batches").update({ name: clean }).eq("id", batchId);
     if (error) return showError(error);
-    await logAction("Parti değiştirildi", "batches", oldName, { yeni_ad: clean });
+    await logAction("Parti değiştirildi", "batches", oldName, diffOf({ ad: oldName }, { ad: clean }));
     loadAll();
   };
 
@@ -1178,7 +1323,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("seller_accounts").update({ active: !seller.active }).eq("id", seller.id);
     if (error) return showError(error);
     setSellerAccounts((prev) => prev.map((s) => s.id === seller.id ? { ...s, active: !s.active } : s));
-    await logAction(seller.active ? "Satıcı pasif edildi" : "Satıcı aktif edildi", "seller_accounts", seller.name);
+    await logAction(seller.active ? "Satıcı pasif edildi" : "Satıcı aktif edildi", "seller_accounts", seller.name, diffOf({ aktif: seller.active }, { aktif: !seller.active }));
   };
 
   const getSellerSummary = (sellerId: string) => {
@@ -1224,10 +1369,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const updateBatchSupplier = async (batchId: string, supplierId: string) => {
     const value = supplierId || null;
+    const oldSupplierId = batchMap.get(batchId)?.supplier_id || null;
     const { error } = await supabase.from("batches").update({ supplier_id: value }).eq("id", batchId);
     if (error) return showError(error);
     setBatches((prev) => prev.map((b) => b.id === batchId ? { ...b, supplier_id: value } : b));
-    await logAction("Parti toptancısı güncellendi", "batches", batchMap.get(batchId)?.name || batchId, { toptanci: value ? supplierMap.get(value)?.name : "Belirtilmedi" });
+    await logAction("Parti toptancısı güncellendi", "batches", batchMap.get(batchId)?.name || batchId, diffOf(
+      { toptanci: oldSupplierId ? supplierMap.get(oldSupplierId)?.name : "Belirtilmedi" },
+      { toptanci: value ? supplierMap.get(value)?.name : "Belirtilmedi" }
+    ));
   };
 
   const submitSupplierReturn = async (item: BatchItem) => {
@@ -1401,9 +1550,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.buy_price !== undefined) dbPatch.buy_price = patch.buy_price;
     if (patch.sale_price !== undefined) dbPatch.sale_price = patch.sale_price;
     if (patch.depo !== undefined) dbPatch.depo = patch.depo;
+    const oldItem = batchItems.find((i) => i.id === itemId);
     const { error } = await supabase.from("batch_items").update(dbPatch).eq("id", itemId);
     if (error) return showError(error);
-    await logAction("Parti ürün satırı değiştirildi", "batch_items", itemId, dbPatch);
+    const entityName = oldItem ? `${productMap.get(oldItem.product_id)?.name || oldItem.product_id} / ${batchMap.get(oldItem.batch_id)?.name || oldItem.batch_id}` : itemId;
+    await logAction("Parti ürün satırı değiştirildi", "batch_items", entityName, diffOf(oldItem as unknown as Record<string, unknown>, dbPatch));
     loadAll();
   };
 
@@ -1551,6 +1702,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const updateSale = async (saleId: string, patch: Partial<Sale>) => {
     const dbPatch: Record<string, unknown> = {};
+    const oldSale = sales.find((s) => s.id === saleId);
     if (patch.seller !== undefined) dbPatch.seller = patch.seller;
     if (patch.sale_type !== undefined) dbPatch.sale_type = patch.sale_type;
     if (patch.paid !== undefined) {
@@ -1573,7 +1725,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return showError(err);
       }
     }
-    await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
+    const saleEntityName = oldSale ? `${customerMap.get(oldSale.customer_id)?.name || oldSale.customer_id} - ${productMap.get(oldSale.product_id)?.name || oldSale.product_id}` : saleId;
+    await logAction("Satış değiştirildi", "sales", saleEntityName, diffOf(oldSale as unknown as Record<string, unknown>, dbPatch));
     loadAll();
   };
 
@@ -1775,20 +1928,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const savePaymentNote = async (paymentId: string) => {
     const note = paymentNoteDraft.trim();
+    const oldPayment = payments.find((p) => p.id === paymentId);
     const { error } = await supabase.from("payments").update({ note: note || null }).eq("id", paymentId);
     if (error) return showError(error);
     setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, note: note || null } : p));
-    await logAction("Tahsilat notu güncellendi", "payments", paymentId, { not: note });
+    await logAction("Tahsilat notu güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ not: oldPayment?.note || "" }, { not: note }));
     setEditingPaymentNoteId(null);
     setPaymentNoteDraft("");
   };
 
   const savePaymentAciklama = async (paymentId: string) => {
     const aciklama = paymentAciklamaDraft.trim();
+    const oldPayment = payments.find((p) => p.id === paymentId);
     const { error } = await supabase.from("payments").update({ aciklama: aciklama || null }).eq("id", paymentId);
     if (error) return showError(error);
     setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, aciklama: aciklama || null } : p));
-    await logAction("Tahsilat açıklaması güncellendi", "payments", paymentId, { aciklama });
+    await logAction("Tahsilat açıklaması güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ aciklama: oldPayment?.aciklama || "" }, { aciklama }));
     setEditingPaymentAciklamaId(null);
     setPaymentAciklamaDraft("");
   };
@@ -1797,10 +1952,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const raw = kasaTutariDrafts[paymentId];
     const value = raw === undefined || raw === "" ? null : Number(raw);
     if (value !== null && !Number.isFinite(value)) return setMessage("Geçerli bir tutar girin.");
+    const oldPayment = payments.find((p) => p.id === paymentId);
     const { error } = await supabase.from("payments").update({ kasa_tutari: value }).eq("id", paymentId);
     if (error) return showError(error);
     setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, kasa_tutari: value } : p));
-    await logAction("Tahsilat kasa tutarı güncellendi", "payments", paymentId, { kasa_tutari: value });
+    await logAction("Tahsilat kasa tutarı güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ kasa_tutari: oldPayment?.kasa_tutari ?? null }, { kasa_tutari: value }));
     setEditingKasaId(null);
     setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
   };
@@ -1808,30 +1964,33 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const saveOpeningBalance = async (periodId: string) => {
     const value = Number(openingBalanceDraft);
     if (!Number.isFinite(value)) return setMessage("Geçerli bir tutar girin.");
+    const oldPeriod = periods.find((p) => p.id === periodId);
     const { error } = await supabase.from("periods").update({ devir_bakiyesi: value }).eq("id", periodId);
     if (error) return showError(error);
     setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, devir_bakiyesi: value } : p));
-    await logAction("Devir bakiyesi güncellendi", "periods", periodId, { devir_bakiyesi: value });
+    await logAction("Devir bakiyesi güncellendi", "periods", oldPeriod?.name || periodId, diffOf({ devir_bakiyesi: oldPeriod?.devir_bakiyesi ?? null }, { devir_bakiyesi: value }));
     setEditingOpeningBalance(false);
     setOpeningBalanceDraft("");
   };
 
   const saveOpeningBalanceNote = async (periodId: string) => {
     const noteText = openingBalanceNoteDraft.trim();
+    const oldPeriod = periods.find((p) => p.id === periodId);
     const { error } = await supabase.from("periods").update({ devir_bakiyesi_notu: noteText || null }).eq("id", periodId);
     if (error) return showError(error);
     setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, devir_bakiyesi_notu: noteText || null } : p));
-    await logAction("Devir bakiyesi notu güncellendi", "periods", periodId, { not: noteText });
+    await logAction("Devir bakiyesi notu güncellendi", "periods", oldPeriod?.name || periodId, diffOf({ not: oldPeriod?.devir_bakiyesi_notu || "" }, { not: noteText }));
     setEditingOpeningBalanceNote(false);
     setOpeningBalanceNoteDraft("");
   };
 
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
     if (!newAmount || newAmount <= 0) return setMessage("Tutar 0'dan büyük olmalı.");
+    const oldPayment = payments.find((p) => p.id === paymentId);
     const { error } = await supabase.from("payments").update({ amount: newAmount }).eq("id", paymentId);
     if (error) return showError(error);
     try { await allocatePaymentsForCustomer(customerId); } catch (err) { return showError(err); }
-    await logAction("Ödeme güncellendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: newAmount });
+    await logAction("Ödeme güncellendi", "payments", customerMap.get(customerId)?.name || customerId, diffOf({ tutar: oldPayment?.amount ?? null }, { tutar: newAmount }));
     setEditingPaymentId(null);
     setEditingPaymentAmount("");
     loadAll();
@@ -1852,12 +2011,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!validItems.length) return setMessage("En az bir ürün ekleyin.");
     const customer = customers.find((c) => c.id === preorderForm.customerId);
     if (editingPreorderId) {
+      const oldItems = preorderItems.filter((i) => i.preorder_id === editingPreorderId);
+      const oldItemsDesc = oldItems.map((i) => `${productMap.get(i.product_id)?.name || i.product_id} (${i.qty} adet)`).join(", ") || "-";
+      const newItemsDesc = validItems.map((i) => `${productMap.get(i.productId)?.name || i.productId} (${Number(i.qty)} adet)`).join(", ") || "-";
       const { error } = await supabase.from("preorders").update({ customer_id: preorderForm.customerId, note: preorderForm.note }).eq("id", editingPreorderId);
       if (error) return showError(error);
       await supabase.from("preorder_items").delete().eq("preorder_id", editingPreorderId);
       const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty) })));
       if (itemErr) return showError(itemErr);
-      await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", { items: validItems.length });
+      await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", diffOf({ urunler: oldItemsDesc }, { urunler: newItemsDesc }));
       setEditingPreorderId(null);
     } else {
       const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor", seller_account_id: currentSellerAccount?.id || null }).select().single();
@@ -2086,7 +2248,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const partner = partners.find((p) => p.id === id);
     const { error } = await supabase.from("partner_ledger").update({ [field]: value }).eq("id", id);
     if (error) return showError(error);
-    await logAction("Ortaklık kaydı değiştirildi", "partner_ledger", partner?.partner_name || id, { alan: field, deger: value });
+    await logAction("Ortaklık kaydı değiştirildi", "partner_ledger", partner?.partner_name || id, diffOf(partner as unknown as Record<string, unknown>, { [field]: value }));
     loadAll();
   };
 
@@ -2396,13 +2558,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
       return;
     }
-    const oldName = customers.find((c) => c.id === customerId)?.name || customerId;
+    const oldCustomer = customers.find((c) => c.id === customerId);
     const { error } = await supabase
       .from("customers")
       .update({ name, passive: Boolean(draft.passive) })
       .eq("id", customerId);
     if (error) return showError(error);
-    await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name, passive: Boolean(draft.passive) });
+    await logAction("Cari değiştirildi", "customers", oldCustomer?.name || customerId, diffOf(
+      { ad: oldCustomer?.name || "", pasif: Boolean(oldCustomer?.passive) },
+      { ad: name, pasif: Boolean(draft.passive) }
+    ));
     cancelCustomerEdit(customerId);
     loadAll();
   };
@@ -3030,7 +3195,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                         const { error } = await supabase.from("products").update({ usd_fiyat_tyuksel: value }).eq("id", p.id);
                                         if (error) return showError(error);
                                         setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_tyuksel: value } : pr));
-                                        await logAction("Ürün T-Yüksel USD fiyatı güncellendi", "products", p.name, { usd_fiyat: value });
+                                        await logAction("Ürün T-Yüksel USD fiyatı güncellendi", "products", p.name, diffOf({ usd_fiyat: p.usd_fiyat_tyuksel ?? null }, { usd_fiyat: value }));
                                       }}
                                     />
                                   </div>
@@ -3050,7 +3215,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                         const { error } = await supabase.from("products").update({ usd_fiyat_thasan: value }).eq("id", p.id);
                                         if (error) return showError(error);
                                         setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_thasan: value } : pr));
-                                        await logAction("Ürün T-Hasan USD fiyatı güncellendi", "products", p.name, { usd_fiyat: value });
+                                        await logAction("Ürün T-Hasan USD fiyatı güncellendi", "products", p.name, diffOf({ usd_fiyat: p.usd_fiyat_thasan ?? null }, { usd_fiyat: value }));
                                       }}
                                     />
                                   </div>
@@ -3674,7 +3839,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   onClick={async () => {
                                     const { error } = await supabase.from("customers").update({ passive: false }).eq("id", c.id);
                                     if (error) return showError(error);
-                                    await logAction("Cari aktif edildi", "customers", c.name);
+                                    await logAction("Cari aktif edildi", "customers", c.name, diffOf({ pasif: true }, { pasif: false }));
                                     setMessage("Cari tekrar aktif edildi.");
                                     loadAll();
                                   }}
@@ -4657,7 +4822,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 const { error } = await supabase.from("batches").update({ usd_kuru: value }).eq("id", batch.id);
                                 if (error) return showError(error);
                                 setBatches((prev) => prev.map((b) => b.id === batch.id ? { ...b, usd_kuru: value } : b));
-                                await logAction("Parti USD kuru güncellendi", "batches", batch.name, { usd_kuru: value });
+                                await logAction("Parti USD kuru güncellendi", "batches", batch.name, diffOf({ usd_kuru: batch.usd_kuru ?? null }, { usd_kuru: value }));
                               }}
                             />
                           </td>

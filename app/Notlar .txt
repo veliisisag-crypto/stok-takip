@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "ikon değiştirme"
+git commit -m "log detay eklendi"
 git push
 
 
