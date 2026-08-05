@@ -3683,16 +3683,30 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setSellerSalesDetailId(null)}>Kapat</button>
                     </div>
                     <Table
-                      headers={["Tarih", "Müşteri", "Ürün", "Adet", "Toplam", "Kâr Payı", "Ödendi mi"]}
-                      rows={sellerSales.map((s) => [
-                        toTR(s.created_at, true),
-                        customerMap.get(s.customer_id)?.name || "-",
-                        productMap.get(s.product_id)?.name || "-",
-                        s.qty,
-                        money(s.total),
-                        money(Number(s.seller_profit || 0)),
-                        s.paid ? "Evet" : "Hayır",
-                      ])}
+                      headers={["Tarih", "Müşteri", "Ürün", "Adet", "Toplam", "Kâr Payı", "Tahsilat Durumu"]}
+                      rows={sellerSales.map((s) => {
+                        const allocated = paymentAllocations
+                          .filter((a) => a.sale_id === s.id)
+                          .reduce((sum, a) => sum + Number(a.amount || 0), 0);
+                        const total = toNum(s.total);
+                        let durum: string;
+                        if (total <= 0 || allocated >= total - 0.01) {
+                          durum = "Ödendi";
+                        } else if (allocated > 0.01) {
+                          durum = `Kısmi (${money(allocated)} / ${money(total)})`;
+                        } else {
+                          durum = "Ödenmedi";
+                        }
+                        return [
+                          toTR(s.created_at, true),
+                          customerMap.get(s.customer_id)?.name || "-",
+                          productMap.get(s.product_id)?.name || "-",
+                          s.qty,
+                          money(s.total),
+                          money(Number(s.seller_profit || 0)),
+                          durum,
+                        ];
+                      })}
                     />
                     {sellerSales.length === 0 && <p className="mt-2 text-sm text-slate-500">Bu satıcıya ait satış bulunamadı.</p>}
                   </div>
