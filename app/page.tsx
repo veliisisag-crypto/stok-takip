@@ -747,7 +747,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [sortedCustomers]
   );
   const sortedBatches = useMemo(
-    () => [...batches].sort((a, b) => a.name.localeCompare(b.name, "tr", { numeric: true })),
+    () => [...batches].sort((a, b) => b.name.localeCompare(a.name, "tr", { numeric: true })),
     [batches]
   );
 
@@ -4773,6 +4773,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kasa</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toptancı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kargo</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Diğer</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">Açıklama</th>
@@ -4785,6 +4786,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
                       const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.diger)||0);
+                      // Toptancı = Toplam Maliyet - Kargo - Diğer = Kasa + Veli + Aslı + Mihri
+                      const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0);
                       const ilkMalGirisiTarihi = batchItems
                         .filter((i) => i.batch_id === batch.id)
                         .reduce((min: string | null, i) => (!min || new Date(i.created_at) < new Date(min) ? i.created_at : min), null as string | null);
@@ -4826,7 +4829,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               }}
                             />
                           </td>
-                          {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
+                          {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
+                            <td key={f} className="p-1 border border-slate-200">
+                              <input
+                                className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
+                                type="number"
+                                min="0"
+                                value={row[f] === "0" ? "" : row[f]}
+                                placeholder="0"
+                                onChange={(e) => setRow(f, e.target.value || "0")}
+                              />
+                            </td>
+                          ))}
+                          <td className="p-3 text-right font-semibold border border-slate-200 bg-slate-50">
+                            {toptanci > 0 ? toptanci.toLocaleString("tr-TR") : "-"}
+                          </td>
+                          {(["kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
                                 className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
@@ -4861,7 +4879,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
-                        {(["veli","asli","mihrimah","kasa","kargo","diger"] as const).map((f) => (
+                        {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
+                          <td key={f} className="p-3 text-right border border-slate-300">
+                            {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
+                          </td>
+                        ))}
+                        <td className="p-3 text-right border border-slate-300">
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0), 0).toLocaleString("tr-TR")}
+                        </td>
+                        {(["kargo","diger"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
                             {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
                           </td>
@@ -5076,8 +5102,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         /* Edit Form */
         .product-edit-form { display: flex; flex-direction: column; gap: 14px; }
-        .product-edit-image-row { display: flex; align-items: center; gap: 12px; }
-        .product-img-change-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; font-size: 0.8125rem; font-weight: 600; color: #334155; cursor: pointer; background: white; }
+        .product-edit-image-row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+        .product-img-change-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; font-size: 0.8125rem; font-weight: 600; color: #334155; cursor: pointer; background: white; width: 100%; }
         .product-edit-fields { display: grid; gap: 10px; }
 
         /* Add Button */
