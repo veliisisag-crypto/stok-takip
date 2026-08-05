@@ -4727,36 +4727,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </div>
               )}
 
-              {batchExtraCosts.length > 0 && (
-                <div className="mt-5 overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100">
-                        <th className="p-2 text-left font-semibold border border-slate-200">Parti</th>
-                        <th className="p-2 text-right font-semibold border border-slate-200">Birim Ek Maliyet</th>
-                        <th className="p-2 text-right font-semibold border border-slate-200">Girilen Toplam Tutar</th>
-                        <th className="p-2 text-left font-semibold border border-slate-200">Birlikte Girildiği Partiler</th>
-                        <th className="p-2 border border-slate-200"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...batchExtraCosts].sort((a, b) => (batchMap.get(a.batch_id)?.name || "").localeCompare(batchMap.get(b.batch_id)?.name || "", "tr", { numeric: true })).map((c) => (
-                        <tr key={c.id} className="hover:bg-slate-50">
-                          <td className="p-2 font-semibold border border-slate-200">{batchMap.get(c.batch_id)?.name || c.batch_id}</td>
-                          <td className="p-2 text-right border border-slate-200">{money(c.per_unit_cost)}</td>
-                          <td className="p-2 text-right border border-slate-200">{money(c.total_amount)}</td>
-                          <td className="p-2 border border-slate-200 text-xs text-slate-500">
-                            {(c.batch_group || []).map((id) => batchMap.get(id)?.name || id).join(", ")}
-                          </td>
-                          <td className="p-2 border border-slate-200">
-                            <button type="button" className="btn-danger" style={{ fontSize: "0.7rem", padding: "3px 10px" }} onClick={() => deleteEkMaliyet(c.batch_id)}>Sil</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </Card>
 
             <Card title="Parti Maliyet Kaydı">
@@ -4769,6 +4739,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Parti Açılışı</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Mal Girişi</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">USD Kuru</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Birim Ek Maliyet</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
@@ -4786,13 +4757,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
                       const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.diger)||0);
-                      // Toptancı = Toplam Maliyet - Kargo - Diğer = Kasa + Veli + Aslı + Mihri
-                      const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0);
+                      // Toptancı = Kasa + Veli + Aslı + Mihri - Kargo - Diğer
+                      const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) - (Number(row.kargo)||0) - (Number(row.diger)||0);
+                      const existing = batchCosts.find((c) => c.batch_id === batch.id);
+                      const isDirty = !existing
+                        ? (Number(row.veli)||0) !== 0 || (Number(row.asli)||0) !== 0 || (Number(row.mihrimah)||0) !== 0 || (Number(row.kasa)||0) !== 0 || (Number(row.kargo)||0) !== 0 || (Number(row.diger)||0) !== 0 || (row.aciklama || "") !== ""
+                        : (Number(row.veli)||0) !== Number(existing.veli||0) || (Number(row.asli)||0) !== Number(existing.asli||0) || (Number(row.mihrimah)||0) !== Number(existing.mihrimah||0) || (Number(row.kasa)||0) !== Number(existing.kasa||0) || (Number(row.kargo)||0) !== Number(existing.kargo||0) || (Number(row.diger)||0) !== Number(existing.diger||0) || (row.aciklama || "") !== (existing.aciklama || "");
                       const ilkMalGirisiTarihi = batchItems
                         .filter((i) => i.batch_id === batch.id)
                         .reduce((min: string | null, i) => (!min || new Date(i.created_at) < new Date(min) ? i.created_at : min), null as string | null);
                       const saveCost = async () => {
-                        const existing = batchCosts.find((c) => c.batch_id === batch.id);
                         const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "" };
                         let saveError = null;
                         if (existing) {
@@ -4829,6 +4803,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               }}
                             />
                           </td>
+                          <td className="p-2 border border-slate-200 text-right text-slate-600">
+                            {getEkMaliyet(batch.id) > 0 ? (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                {money(getEkMaliyet(batch.id))}
+                                <button
+                                  type="button"
+                                  title="Ek maliyeti sil"
+                                  onClick={() => deleteEkMaliyet(batch.id)}
+                                  style={{ color: "#dc2626", fontSize: "0.75rem", lineHeight: 1, border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            ) : "-"}
+                          </td>
                           {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
@@ -4842,7 +4831,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </td>
                           ))}
                           <td className="p-3 text-right font-semibold border border-slate-200 bg-slate-50">
-                            {toptanci > 0 ? toptanci.toLocaleString("tr-TR") : "-"}
+                            {(total !== 0 || Number(row.kargo || 0) !== 0) ? toptanci.toLocaleString("tr-TR") : "-"}
                           </td>
                           {(["kargo","diger"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
@@ -4867,7 +4856,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           </td>
                           <td className="p-3 text-right font-bold border border-slate-200 bg-slate-50">{total > 0 ? total.toLocaleString("tr-TR") : "-"}</td>
                           <td className="p-2 border border-slate-200">
-                            <button type="button" className="btn-secondary text-xs px-3 py-1" onClick={saveCost}>Kaydet</button>
+                            {isDirty ? (
+                              <button type="button" className="btn text-xs px-3 py-1" onClick={saveCost}>Kaydet</button>
+                            ) : (
+                              <span
+                                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.75rem", color: "#94a3b8" }}
+                                title="Kaydedildi, değişiklik yok"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg>
+                                Kayıtlı
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -4879,13 +4878,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
+                        <td className="p-3 border border-slate-300"></td>
                         {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
                             {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
                           </td>
                         ))}
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) - Number(c.kargo||0) - Number(c.diger||0), 0).toLocaleString("tr-TR")}
                         </td>
                         {(["kargo","diger"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
