@@ -542,6 +542,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [newSellerName, setNewSellerName] = useState("");
   const [newSellerEmail, setNewSellerEmail] = useState("");
   const [sellerSettlementDrafts, setSellerSettlementDrafts] = useState<Record<string, string>>({});
+  const [openSellerId, setOpenSellerId] = useState<string | null>(null);
+  const [sellerSalesDetailId, setSellerSalesDetailId] = useState<string | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1346,9 +1348,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       gerceklesenKarPayi += profit * oran;
     }
     const totalTeslimEdilen = sellerSettlements.filter((se) => se.seller_account_id === sellerId).reduce((sum, se) => sum + Number(se.amount || 0), 0);
-    const kalanBorc = Math.max(totalBizeBorcOrantili - totalTeslimEdilen, 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + toNum(p.amount), 0);
+    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı
+    const kalanBorc = Math.max(totalTahsilat - gerceklesenKarPayi, 0);
     const kasaTutari = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
     return { totalSatis, totalKarPayi, gerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, kasaTutari };
   };
@@ -3580,11 +3583,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {sellerAccounts.length === 0 ? (
                 <p className="text-sm text-slate-500">Henüz satıcı eklenmedi.</p>
               ) : (
-                <div className="space-y-3">
-                  {sellerAccounts.map((seller) => {
+                <>
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {sellerAccounts.map((seller) => {
+                      const isOpen = openSellerId === seller.id;
+                      return (
+                        <button
+                          type="button"
+                          key={seller.id}
+                          onClick={() => setOpenSellerId(isOpen ? null : seller.id)}
+                          className={isOpen ? "btn" : "btn-secondary"}
+                          style={{ fontSize: "0.85rem", padding: "8px 14px", position: "relative" }}
+                        >
+                          {seller.name}
+                          {!seller.active && <span style={{ marginLeft: 6, fontSize: "0.65rem", opacity: 0.8 }}>(Pasif)</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {openSellerId && (() => {
+                    const seller = sellerAccountMap.get(openSellerId);
+                    if (!seller) return null;
                     const summary = getSellerSummary(seller.id);
                     return (
-                      <div key={seller.id} className="border rounded-xl p-4 bg-white">
+                      <div className="border rounded-xl p-4 bg-white">
                         <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
                           <div>
                             <div className="font-semibold text-slate-800 flex items-center gap-2">
@@ -3628,12 +3651,54 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           </button>
                           <span className="text-xs text-slate-400">Satıcı size nakit/havale teslim ettiğinde buraya tutarı girip kaydet, borcundan düşer.</span>
                         </div>
+                        <div className="mt-3">
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem"}} onClick={() => setSellerSalesDetailId(seller.id)}>
+                            Satış Detayları
+                          </button>
+                        </div>
                       </div>
                     );
-                  })}
-                </div>
+                  })()}
+                </>
               )}
             </Card>
+
+            {sellerSalesDetailId && (() => {
+              const seller = sellerAccountMap.get(sellerSalesDetailId);
+              if (!seller) return null;
+              const sellerSales = [...activeSales]
+                .filter((s) => s.seller_account_id === sellerSalesDetailId)
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              return (
+                <div
+                  style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+                  onClick={() => setSellerSalesDetailId(null)}
+                >
+                  <div
+                    style={{ background: "white", borderRadius: 16, padding: 20, width: "100%", maxWidth: 900, maxHeight: "85vh", overflowY: "auto" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>{seller.name} — Satış Detayları</h2>
+                      <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setSellerSalesDetailId(null)}>Kapat</button>
+                    </div>
+                    <Table
+                      headers={["Tarih", "Müşteri", "Ürün", "Adet", "Toplam", "Kâr Payı", "Ödendi mi"]}
+                      rows={sellerSales.map((s) => [
+                        toTR(s.created_at, true),
+                        customerMap.get(s.customer_id)?.name || "-",
+                        productMap.get(s.product_id)?.name || "-",
+                        s.qty,
+                        money(s.total),
+                        money(Number(s.seller_profit || 0)),
+                        s.paid ? "Evet" : "Hayır",
+                      ])}
+                    />
+                    {sellerSales.length === 0 && <p className="mt-2 text-sm text-slate-500">Bu satıcıya ait satış bulunamadı.</p>}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
