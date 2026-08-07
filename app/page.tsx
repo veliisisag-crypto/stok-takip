@@ -244,6 +244,30 @@ type Payment = {
   cancelled?: boolean;
   created_at: string;
   user_email?: string | null;
+  para_sahibi?: string | null;
+  hesap?: string | null;
+};
+
+type Odeme = {
+  id: string;
+  tip: "toptanci" | "kargo";
+  supplier_id: string | null;
+  batch_id: string | null;
+  tutar: number;
+  aciklama: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+type OdemeKaynak = {
+  id: string;
+  odeme_id: string;
+  kaynak_tipi: "tahsilat" | "devir";
+  para_sahibi: string | null;
+  payment_id: string | null;
+  period_id: string | null;
+  kullanilan_tutar: number;
+  created_at: string;
 };
 
 type PartnerRow = {
@@ -567,6 +591,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [resolvingDifferentId, setResolvingDifferentId] = useState<string | null>(null);
   const [resolveDifferentProductNote, setResolveDifferentProductNote] = useState("");
   const [periods, setPeriods] = useState<Period[]>([]);
+  const [odemeler, setOdemeler] = useState<Odeme[]>([]);
+  const [odemeKaynaklari, setOdemeKaynaklari] = useState<OdemeKaynak[]>([]);
+  const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo">("toptanci");
+  const [odemeSupplierId, setOdemeSupplierId] = useState("");
+  const [odemeBatchId, setOdemeBatchId] = useState("");
+  const [odemeTutar, setOdemeTutar] = useState("");
+  const [odemeKimden, setOdemeKimden] = useState<string[]>([]);
+  const [odemeKimdenSecim, setOdemeKimdenSecim] = useState("");
+  const [editingPaymentRowId, setEditingPaymentRowId] = useState<string | null>(null);
+  const [paymentRowDraft, setPaymentRowDraft] = useState<{ note: string; kasa: string; paraSahibi: string; aciklama: string }>({ note: "", kasa: "", paraSahibi: "", aciklama: "" });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [preorders, setPreorders] = useState<Preorder[]>([]);
   const [preorderItems, setPreorderItems] = useState<PreorderItem[]>([]);
@@ -586,12 +620,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerSearch, setCustomerSearch] = useState("");
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [paymentMethodInputs, setPaymentMethodInputs] = useState<Record<string, string>>({});
-  const [editingPaymentNoteId, setEditingPaymentNoteId] = useState<string | null>(null);
-  const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
-  const [editingPaymentAciklamaId, setEditingPaymentAciklamaId] = useState<string | null>(null);
-  const [paymentAciklamaDraft, setPaymentAciklamaDraft] = useState("");
-  const [kasaTutariDrafts, setKasaTutariDrafts] = useState<Record<string, string>>({});
-  const [editingKasaId, setEditingKasaId] = useState<string | null>(null);
   const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
   const [openingBalanceDraft, setOpeningBalanceDraft] = useState("");
   const [editingOpeningBalanceNote, setEditingOpeningBalanceNote] = useState(false);
@@ -759,7 +787,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, odemelerRes, odemeKaynaklariRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -776,11 +804,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("supplier_returns").select("*").order("created_at", { ascending: false }),
         supabase.from("seller_accounts").select("*").order("name", { ascending: true }),
         supabase.from("seller_settlements").select("*").order("created_at", { ascending: false }),
+        supabase.from("odemeler").select("*").order("created_at", { ascending: false }),
+        supabase.from("odeme_kaynaklari").select("*"),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes]) {
         if (res.error) throw res.error;
       }
+      // odemeler/odeme_kaynaklari satıcı rolünde RLS ile boş döner, hata fırlatmaz - ayrı kontrol
+      if (odemelerRes.error && !isSellerRole) throw odemelerRes.error;
+      if (odemeKaynaklariRes.error && !isSellerRole) throw odemeKaynaklariRes.error;
+      setOdemeler((odemelerRes.data || []) as Odeme[]);
+      setOdemeKaynaklari((odemeKaynaklariRes.data || []) as OdemeKaynak[]);
 
       setProducts((productsRes.data || []) as Product[]);
 
@@ -1836,6 +1871,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const amount = Number(paymentInputs[customerId] || 0);
     if (!amount || amount <= 0) return;
     const method = paymentMethodInputs[customerId] === "nakit" ? "nakit" : "banka";
+
+    // Mükerrer kayıt kontrolü: son 3 dakika içinde bu müşteriye aynı tutarda başka bir ödeme girilmiş mi?
+    const now = Date.now();
+    const yakinZamandaAyniOdeme = payments.some((p) =>
+      p.customer_id === customerId &&
+      !p.cancelled &&
+      Number(p.amount) === amount &&
+      (now - new Date(p.created_at).getTime()) < 3 * 60 * 1000
+    );
+    if (yakinZamandaAyniOdeme) {
+      const devamEt = window.confirm(`Bu müşteriye az önce (son 3 dakika içinde) aynı tutarda (${money(amount)}) bir ödeme zaten eklenmiş görünüyor. Yine de eklemek istediğine emin misin?`);
+      if (!devamEt) return;
+    }
+
     // Toplam satışı aşıyor mu kontrol et
     const totalSales = getCustomerSalesTotal(customerId);
     const totalPaid = getCustomerCollectedTotal(customerId);
@@ -1861,39 +1910,212 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const savePaymentNote = async (paymentId: string) => {
-    const note = paymentNoteDraft.trim();
+  const savePaymentRow = async (paymentId: string) => {
     const oldPayment = payments.find((p) => p.id === paymentId);
-    const { error } = await supabase.from("payments").update({ note: note || null }).eq("id", paymentId);
+    const note = paymentRowDraft.note.trim();
+    const aciklama = paymentRowDraft.aciklama.trim();
+    const kasaRaw = paymentRowDraft.kasa;
+    const kasaValue = kasaRaw === "" ? null : Number(kasaRaw);
+    if (kasaValue !== null && !Number.isFinite(kasaValue)) return setMessage("Geçerli bir kasa tutarı girin.");
+    const paraSahibi = paymentRowDraft.paraSahibi || null;
+
+    const { error } = await supabase.from("payments").update({
+      note: note || null,
+      aciklama: aciklama || null,
+      kasa_tutari: kasaValue,
+      para_sahibi: paraSahibi,
+    }).eq("id", paymentId);
     if (error) return showError(error);
-    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, note: note || null } : p));
-    await logAction("Tahsilat notu güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ not: oldPayment?.note || "" }, { not: note }));
-    setEditingPaymentNoteId(null);
-    setPaymentNoteDraft("");
+
+    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, note: note || null, aciklama: aciklama || null, kasa_tutari: kasaValue, para_sahibi: paraSahibi } : p));
+    await logAction(
+      "Tahsilat düzenlendi",
+      "payments",
+      oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId,
+      diffOf(
+        { not: oldPayment?.note || "", kasa_tutari: oldPayment?.kasa_tutari ?? null, kimde: oldPayment?.para_sahibi || "", aciklama: oldPayment?.aciklama || "" },
+        { not: note, kasa_tutari: kasaValue, kimde: paraSahibi || "", aciklama }
+      )
+    );
+    setEditingPaymentRowId(null);
+    setPaymentRowDraft({ note: "", kasa: "", paraSahibi: "", aciklama: "" });
   };
 
-  const savePaymentAciklama = async (paymentId: string) => {
-    const aciklama = paymentAciklamaDraft.trim();
-    const oldPayment = payments.find((p) => p.id === paymentId);
-    const { error } = await supabase.from("payments").update({ aciklama: aciklama || null }).eq("id", paymentId);
-    if (error) return showError(error);
-    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, aciklama: aciklama || null } : p));
-    await logAction("Tahsilat açıklaması güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ aciklama: oldPayment?.aciklama || "" }, { aciklama }));
-    setEditingPaymentAciklamaId(null);
-    setPaymentAciklamaDraft("");
+  const paraSahibiSecenekleri = useMemo(
+    () => ["Veli", "Aslı", "Mihrimah", ...sellerAccounts.map((s) => s.name)],
+    [sellerAccounts]
+  );
+
+  const kasaHavuzlari = useMemo(() => {
+    const map = new Map<string, { toplam: number; kayitlar: { id: string; tarih: string; createdAt: string; cari: string; kasa: number }[] }>();
+    for (const p of payments) {
+      if (p.cancelled) continue;
+      if (!p.para_sahibi) continue;
+      const kasa = Number(p.kasa_tutari || 0);
+      if (kasa <= 0) continue;
+      const entry = map.get(p.para_sahibi) || { toplam: 0, kayitlar: [] };
+      entry.toplam += kasa;
+      entry.kayitlar.push({ id: p.id, tarih: toTR(p.created_at, true), createdAt: p.created_at, cari: customerMap.get(p.customer_id)?.name || "-", kasa });
+      map.set(p.para_sahibi, entry);
+    }
+    for (const entry of map.values()) {
+      entry.kayitlar.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }
+    return map;
+  }, [payments, customerMap]);
+
+  // Her toptancının (supplier) tüm partilerindeki Toptancı tutarları toplamı
+  const toptanciBorclari = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const batch of batches) {
+      if (!batch.supplier_id) continue;
+      const cost = batchCosts.find((c) => c.batch_id === batch.id);
+      if (!cost) continue;
+      const toptanci = Number(cost.veli || 0) + Number(cost.asli || 0) + Number(cost.mihrimah || 0) + Number(cost.kasa || 0) - Number(cost.kargo || 0) - Number(cost.diger || 0);
+      map.set(batch.supplier_id, (map.get(batch.supplier_id) || 0) + toptanci);
+    }
+    return map;
+  }, [batches, batchCosts]);
+
+  // O toptancıya bugüne kadar Ödemeler ekranından yapılmış ödemeler toplamı
+  const toptanciOdenenler = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const o of odemeler) {
+      if (o.tip !== "toptanci" || !o.supplier_id) continue;
+      map.set(o.supplier_id, (map.get(o.supplier_id) || 0) + Number(o.tutar || 0));
+    }
+    return map;
+  }, [odemeler]);
+
+  const getToptanciKalanBorc = (supplierId: string) =>
+    (toptanciBorclari.get(supplierId) || 0) - (toptanciOdenenler.get(supplierId) || 0);
+
+  const openPeriodForOdeme = useMemo(() => periods.find((p) => !p.closed), [periods]);
+
+  // "Kimden" seçeneği için kullanılabilir bakiye (para_sahibi adı ya da "__devir__" sentinel'i)
+  const getKaynakBakiye = (kaynak: string) => {
+    if (kaynak === "__devir__") return openPeriodForOdeme?.devir_bakiyesi || 0;
+    return kasaHavuzlari.get(kaynak)?.toplam || 0;
   };
 
-  const saveKasaTutari = async (paymentId: string) => {
-    const raw = kasaTutariDrafts[paymentId];
-    const value = raw === undefined || raw === "" ? null : Number(raw);
-    if (value !== null && !Number.isFinite(value)) return setMessage("Geçerli bir tutar girin.");
-    const oldPayment = payments.find((p) => p.id === paymentId);
-    const { error } = await supabase.from("payments").update({ kasa_tutari: value }).eq("id", paymentId);
-    if (error) return showError(error);
-    setPayments((prev) => prev.map((p) => p.id === paymentId ? { ...p, kasa_tutari: value } : p));
-    await logAction("Tahsilat kasa tutarı güncellendi", "payments", oldPayment ? (customerMap.get(oldPayment.customer_id)?.name || paymentId) : paymentId, diffOf({ kasa_tutari: oldPayment?.kasa_tutari ?? null }, { kasa_tutari: value }));
-    setEditingKasaId(null);
-    setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
+  const odemeKimdenToplamKullanilabilir = odemeKimden.reduce((s, k) => s + getKaynakBakiye(k), 0);
+  const odemeHedefTutar = Number(odemeTutar) || 0;
+  const odemeEksik = Math.max(odemeHedefTutar - odemeKimdenToplamKullanilabilir, 0);
+
+  const markToptanciFullyPaid = async (supplierId: string) => {
+    const kalan = getToptanciKalanBorc(supplierId);
+    if (kalan <= 0.5) return setMessage("Zaten borç görünmüyor.");
+    const supplierName = supplierMap.get(supplierId)?.name || supplierId;
+    if (!confirm(`${supplierName} için ${money(kalan)} tutarındaki kalan borç, gerçek bir kasa kaynağından düşülmeden "ödendi" olarak işaretlenecek (bu sistem öncesi zaten ödenmiş kabul edilecek). Onaylıyor musun?`)) return;
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const { error } = await supabase.from("odemeler").insert({
+        tip: "toptanci",
+        supplier_id: supplierId,
+        batch_id: null,
+        tutar: kalan,
+        aciklama: "Geçmiş borç kapatıldı (Ödemeler sistemi öncesi zaten ödenmiş)",
+        created_by: userData.user?.email || "",
+      });
+      if (error) throw error;
+      await logAction("Toptancı geçmiş borcu kapatıldı", "odemeler", supplierName, { tutar: kalan });
+      setMessage(`${supplierName} borcu kapatıldı.`);
+      loadAll();
+    } catch (err) {
+      showError(err);
+    }
+  };
+
+  const submitOdeme = async () => {
+    const tutar = Number(odemeTutar);
+    if (!tutar || tutar <= 0) return setMessage("Geçerli bir tutar girin.");
+    if (odemeTip === "toptanci" && !odemeSupplierId) return setMessage("Toptancı seçmelisin.");
+    if (odemeTip === "kargo" && !odemeBatchId) return setMessage("Hangi parti için olduğunu seçmelisin.");
+    if (odemeKimden.length === 0) return setMessage("En az bir kaynak seçmelisin.");
+    if (odemeEksik > 0.5) return setMessage(`Seçilen kaynaklar yetmiyor, ${money(odemeEksik)} eksik.`);
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const createdBy = userData.user?.email || "";
+
+      const { data: odemeInserted, error: odemeErr } = await supabase.from("odemeler").insert({
+        tip: odemeTip,
+        supplier_id: odemeTip === "toptanci" ? odemeSupplierId : null,
+        batch_id: odemeTip === "kargo" ? odemeBatchId : null,
+        tutar,
+        aciklama: odemeTip === "toptanci" ? (supplierMap.get(odemeSupplierId)?.name || "") : (batchMap.get(odemeBatchId)?.name || ""),
+        created_by: createdBy,
+      }).select();
+      if (odemeErr) throw odemeErr;
+      const odemeId = odemeInserted![0].id as string;
+
+      let kalan = tutar;
+      const kaynakSatirlari: { kaynak_tipi: "tahsilat" | "devir"; para_sahibi: string | null; payment_id: string | null; period_id: string | null; kullanilan_tutar: number }[] = [];
+
+      for (const kaynak of odemeKimden) {
+        if (kalan <= 0.01) break;
+        if (kaynak === "__devir__") {
+          const mevcut = openPeriodForOdeme?.devir_bakiyesi || 0;
+          const kullanilan = Math.min(mevcut, kalan);
+          if (kullanilan <= 0) continue;
+          const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan }).eq("id", openPeriodForOdeme!.id);
+          if (error) throw error;
+          kaynakSatirlari.push({ kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan });
+          kalan -= kullanilan;
+        } else {
+          const havuz = kasaHavuzlari.get(kaynak);
+          if (!havuz) continue;
+          for (const kayit of havuz.kayitlar) {
+            if (kalan <= 0.01) break;
+            const kullanilan = Math.min(kayit.kasa, kalan);
+            if (kullanilan <= 0) continue;
+            const yeniKasa = kayit.kasa - kullanilan;
+            const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa }).eq("id", kayit.id);
+            if (error) throw error;
+            kaynakSatirlari.push({ kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan });
+            kalan -= kullanilan;
+          }
+        }
+      }
+
+      if (kaynakSatirlari.length > 0) {
+        const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert(
+          kaynakSatirlari.map((k) => ({ odeme_id: odemeId, ...k }))
+        );
+        if (kaynakErr) throw kaynakErr;
+      }
+
+      // Kargo ödemesiyse: o partinin Parti Maliyet Kaydı'ndaki Kargo alanını ödenen tutara eşitle
+      // (üzerine eklemiyoruz - Tutar alanı zaten mevcut kargo değeriyle otomatik dolduruluyor,
+      // üzerine eklemek çift sayıma yol açardı)
+      if (odemeTip === "kargo") {
+        const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
+        if (existing) {
+          const { error } = await supabase.from("batch_costs").update({ kargo: tutar }).eq("id", existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: tutar, diger: 0 });
+          if (error) throw error;
+        }
+      }
+
+      const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
+      await logAction(
+        odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : "Kargo ödemesi yapıldı",
+        "odemeler",
+        odemeTip === "toptanci" ? (supplierMap.get(odemeSupplierId)?.name || "") : (batchMap.get(odemeBatchId)?.name || ""),
+        { tutar, kaynak: kaynakOzet }
+      );
+
+      setMessage("Ödeme kaydedildi.");
+      setOdemeTutar("");
+      setOdemeKimden([]);
+      setOdemeSupplierId("");
+      setOdemeBatchId("");
+      loadAll();
+    } catch (err) {
+      showError(err);
+    }
   };
 
   const saveOpeningBalance = async (periodId: string) => {
@@ -1997,6 +2219,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const amount = Number(advanceAmount);
     if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
     const method = advanceMethod === "nakit" ? "nakit" : "banka";
+
+    const now = Date.now();
+    const yakinZamandaAyniOdeme = payments.some((p) =>
+      p.customer_id === advancePaymentModal.customer_id &&
+      !p.cancelled &&
+      Number(p.amount) === amount &&
+      (now - new Date(p.created_at).getTime()) < 3 * 60 * 1000
+    );
+    if (yakinZamandaAyniOdeme) {
+      const devamEt = window.confirm(`Bu müşteriye az önce (son 3 dakika içinde) aynı tutarda (${money(amount)}) bir ödeme zaten eklenmiş görünüyor. Yine de eklemek istediğine emin misin?`);
+      if (!devamEt) return;
+    }
+
     const { error } = await supabase.from("payments").insert({
       customer_id: advancePaymentModal.customer_id,
       amount,
@@ -2224,7 +2459,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const exportTahsilatToExcel = () => {
     const rows: (string | number)[][] = [];
-    rows.push(["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Açıklama"]);
+    rows.push(["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Kimde", "Açıklama"]);
 
     if (!isSellerRole && totals.openingBalance !== 0) {
       rows.push([
@@ -2232,6 +2467,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         "",
         "",
         Number(totals.openingBalance),
+        "",
         totals.openingBalanceNote || "",
       ]);
     }
@@ -2247,6 +2483,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           Number(pay.amount),
           pay.note || "",
           pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? Number(pay.kasa_tutari) : "",
+          pay.para_sahibi || "",
           pay.aciklama || "",
         ]);
       });
@@ -2517,6 +2754,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["customers", "Müşteriler / Cari"],
     ["sales", "Satışlar"],
     ["partners", "Parti Maliyet Kaydı"],
+    ["payments", "Ödemeler"],
     ["sellers", "Satıcılar"],
     ["period", "Dönem Kapanışı"],
     ["audit", "İşlem Geçmişi"],
@@ -3566,19 +3804,162 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {active === "sellers" && (
+        {active === "payments" && !isSellerRole && (
           <div className="space-y-4">
-            <Card title="Satıcı Ekle">
-              <p className="mb-4 text-sm text-slate-500">
-                Buraya eklediğin satıcı, uygulamaya kendi ekranını görebilir (Stok, Ön Sipariş, Satış, Cari, Tahsilat — kendi verisi). Ekledikten sonra Supabase → Authentication'dan aynı e-posta ile bir kullanıcı hesabı oluşturup şifresini satıcıya iletmen gerekiyor.
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <input className="input max-w-xs" placeholder="Satıcı adı" value={newSellerName} onChange={(e) => setNewSellerName(e.target.value)} />
-                <input className="input max-w-xs" placeholder="E-posta (giriş için)" value={newSellerEmail} onChange={(e) => setNewSellerEmail(e.target.value)} />
-                <button type="button" className="btn" onClick={addSellerAccount}>Satıcı Ekle</button>
+            <Card title="Kasa Havuzları">
+              <div className="grid gap-2 text-sm md:grid-cols-3 lg:grid-cols-5">
+                {paraSahibiSecenekleri.map((kisi) => (
+                  <div key={kisi} className="rounded-lg bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">{kisi}</div>
+                    <b>{money(kasaHavuzlari.get(kisi)?.toplam || 0)}</b>
+                  </div>
+                ))}
+                <div className="rounded-lg bg-amber-50 p-3">
+                  <div className="text-xs text-slate-500">Devir Bakiyesi</div>
+                  <b>{money(openPeriodForOdeme?.devir_bakiyesi || 0)}</b>
+                </div>
               </div>
             </Card>
 
+            <Card title="Toptancı Bakiyeleri">
+              <Table
+                headers={["Toptancı", "Kalan Borç", ""]}
+                rows={suppliers.map((s) => {
+                  const kalan = getToptanciKalanBorc(s.id);
+                  return [
+                    s.name,
+                    money(kalan),
+                    <button
+                      key="btn"
+                      type="button"
+                      className="btn-secondary"
+                      style={{fontSize:"0.75rem", padding:"3px 10px"}}
+                      disabled={kalan <= 0.5}
+                      onClick={() => markToptanciFullyPaid(s.id)}
+                    >
+                      Tamamen Ödendi İşaretle
+                    </button>,
+                  ];
+                })}
+              />
+              {suppliers.length === 0 && <p className="mt-2 text-sm text-slate-500">Henüz toptancı yok.</p>}
+            </Card>
+
+            <Card title="Yeni Ödeme">
+              <div className="grid gap-3 md:grid-cols-2 mb-3">
+                <div className="field-label">
+                  Ne için
+                  <select className="input" value={odemeTip} onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo"); setOdemeSupplierId(""); setOdemeBatchId(""); }}>
+                    <option value="toptanci">Toptancıya öde</option>
+                    <option value="kargo">Kargo öde (parti bazlı)</option>
+                  </select>
+                </div>
+                {odemeTip === "toptanci" ? (
+                  <div className="field-label">
+                    Toptancı
+                    <select className="input" value={odemeSupplierId} onChange={(e) => setOdemeSupplierId(e.target.value)}>
+                      <option value="">Seç...</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} — kalan borç {money(getToptanciKalanBorc(s.id))}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="field-label">
+                    Hangi parti için
+                    <select
+                      className="input"
+                      value={odemeBatchId}
+                      onChange={(e) => {
+                        const batchId = e.target.value;
+                        setOdemeBatchId(batchId);
+                        const mevcutKargo = batchCosts.find((c) => c.batch_id === batchId)?.kargo;
+                        setOdemeTutar(mevcutKargo ? String(mevcutKargo) : "");
+                      }}
+                    >
+                      <option value="">Seç...</option>
+                      {sortedBatches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="field-label mb-3" style={{maxWidth: 200}}>
+                Tutar
+                <input className="input" type="number" min="0" value={odemeTutar} onChange={(e) => setOdemeTutar(e.target.value)} placeholder="0" />
+              </div>
+
+              <div className="flex flex-wrap items-end gap-2 mb-2">
+                <div className="field-label" style={{minWidth: 220}}>
+                  Kaynak ekle
+                  <select className="input" value={odemeKimdenSecim} onChange={(e) => setOdemeKimdenSecim(e.target.value)}>
+                    <option value="">Seç...</option>
+                    {paraSahibiSecenekleri.filter((k) => !odemeKimden.includes(k)).map((k) => (
+                      <option key={k} value={k}>{k} — kullanılabilir {money(getKaynakBakiye(k))}</option>
+                    ))}
+                    {!odemeKimden.includes("__devir__") && (
+                      <option value="__devir__">Devir Bakiyesi — kullanılabilir {money(getKaynakBakiye("__devir__"))}</option>
+                    )}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { if (odemeKimdenSecim) { setOdemeKimden([...odemeKimden, odemeKimdenSecim]); setOdemeKimdenSecim(""); } }}
+                >
+                  Kaynak Ekle
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-3">
+                {odemeKimden.map((k) => (
+                  <span key={k} className="rounded px-3 py-1 text-sm" style={{background:"#e0eafc", color:"#1e40af", display:"inline-flex", alignItems:"center", gap:6}}>
+                    {k === "__devir__" ? "Devir Bakiyesi" : k}
+                    <button type="button" onClick={() => setOdemeKimden(odemeKimden.filter((x) => x !== k))} style={{border:"none", background:"none", cursor:"pointer", color:"#1e40af"}}>✕</button>
+                  </span>
+                ))}
+                {odemeKimden.length === 0 && <span className="text-sm text-slate-400">Henüz kaynak eklenmedi</span>}
+              </div>
+
+              {odemeKimden.length > 0 && odemeHedefTutar > 0 && (
+                <p className="text-sm mb-3" style={{color: odemeEksik > 0.5 ? "#dc2626" : "#16a34a"}}>
+                  {odemeEksik > 0.5
+                    ? `Seçilen kaynaklar yetmiyor: ${money(odemeEksik)} eksik, başka kaynak ekle.`
+                    : "Tüm tutar karşılandı."}
+                </p>
+              )}
+
+              <button type="button" className="btn" disabled={odemeEksik > 0.5 || odemeHedefTutar <= 0} onClick={submitOdeme}>
+                Onayla ve Kaydet
+              </button>
+            </Card>
+
+            <Card title="Ödeme Geçmişi">
+              <Table
+                headers={["Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar"]}
+                rows={[...odemeler].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o) => {
+                  const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === o.id);
+                  const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
+                  return [
+                    toTR(o.created_at, true),
+                    o.tip === "toptanci" ? "Toptancı" : "Kargo",
+                    o.tip === "toptanci" ? (o.supplier_id ? supplierMap.get(o.supplier_id)?.name || "-" : "-") : (o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"),
+                    money(o.tutar),
+                    kaynakOzet || "-",
+                  ];
+                })}
+              />
+              {odemeler.length === 0 && <p className="mt-2 text-sm text-slate-500">Henüz ödeme kaydı yok.</p>}
+            </Card>
+          </div>
+        )}
+
+        {active === "sellers" && (
+          <div className="space-y-4">
             <Card title="Satıcılar">
               {sellerAccounts.length === 0 ? (
                 <p className="text-sm text-slate-500">Henüz satıcı eklenmedi.</p>
@@ -3663,6 +4044,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               )}
             </Card>
 
+            <Card title="Satıcı Ekle">
+              <p className="mb-4 text-sm text-slate-500">
+                Buraya eklediğin satıcı, uygulamaya kendi ekranını görebilir (Stok, Ön Sipariş, Satış, Cari, Tahsilat — kendi verisi). Ekledikten sonra Supabase → Authentication'dan aynı e-posta ile bir kullanıcı hesabı oluşturup şifresini satıcıya iletmen gerekiyor.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <input className="input max-w-xs" placeholder="Satıcı adı" value={newSellerName} onChange={(e) => setNewSellerName(e.target.value)} />
+                <input className="input max-w-xs" placeholder="E-posta (giriş için)" value={newSellerEmail} onChange={(e) => setNewSellerEmail(e.target.value)} />
+                <button type="button" className="btn" onClick={addSellerAccount}>Satıcı Ekle</button>
+              </div>
+            </Card>
+
             {sellerSalesDetailId && (() => {
               const seller = sellerAccountMap.get(sellerSalesDetailId);
               if (!seller) return null;
@@ -3690,7 +4082,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           .reduce((sum, a) => sum + Number(a.amount || 0), 0);
                         const total = toNum(s.total);
                         let durum: string;
-                        if (total <= 0 || allocated >= total - 0.01) {
+                        if (s.paid || total <= 0 || allocated >= total - 0.01) {
                           durum = "Ödendi";
                         } else if (allocated > 0.01) {
                           durum = `Kısmi (${money(allocated)} / ${money(total)})`;
@@ -4072,7 +4464,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Not</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kasa</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kimde</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4103,6 +4497,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </div>
                           )}
                         </td>
+                        <td></td>
                         <td style={{padding:"7px 10px", minWidth: 180}}>
                           {editingOpeningBalanceNote ? (
                             <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -4131,11 +4526,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </div>
                           )}
                         </td>
+                        <td></td>
                       </tr>
                     )}
                     {!isSellerRole && totals.pastPendingAdvanceTotal > 0 && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fef9c3"}}>
-                        <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={8}>
+                        <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={10}>
                           💰 Geçmiş dönem(ler)den bekleyen ön ödemeler (henüz satışa dönüşmedi, bu ekranda ayrı satır olarak görünmüyor çünkü eski dönemde kalmış): <b>{money(totals.pastPendingAdvanceTotal)}</b> — satışa dönüştükçe bu tutar otomatik azalır.
                         </td>
                       </tr>
@@ -4155,90 +4551,84 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           {pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : <span style={{color:"#cbd5e1"}}>—</span>}
                         </td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{isPendingAdvance ? <span style={{color:"#cbd5e1"}}>—</span> : money(pay.amount)}</td>
-                        <td style={{padding:"7px 10px", minWidth: 180}}>
-                          {editingPaymentNoteId === pay.id ? (
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                              <input
-                                className="input"
-                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
-                                value={paymentNoteDraft}
-                                onChange={(e) => setPaymentNoteDraft(e.target.value)}
-                                placeholder="Not yaz..."
-                                autoFocus
-                              />
-                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => savePaymentNote(pay.id)}>Kaydet</button>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingPaymentNoteId(null); setPaymentNoteDraft(""); }}>Vazgeç</button>
-                            </div>
+                        <td style={{padding:"7px 10px", minWidth: 140}}>
+                          {editingPaymentRowId === pay.id ? (
+                            <input
+                              className="input"
+                              style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                              value={paymentRowDraft.note}
+                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, note: e.target.value }))}
+                              placeholder="Not..."
+                            />
                           ) : (
-                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                              {pay.note && <span style={{color:"#475569",fontStyle:"italic"}}>{pay.note}</span>}
-                              <button
-                                type="button"
-                                className="btn-secondary"
-                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
-                                onClick={() => { setEditingPaymentNoteId(pay.id); setPaymentNoteDraft(pay.note || ""); }}
-                              >
-                                {pay.note ? "Değiştir" : "Not Ekle"}
-                              </button>
-                            </div>
+                            pay.note ? <span style={{color:"#475569",fontStyle:"italic"}}>{pay.note}</span> : <span style={{color:"#cbd5e1"}}>—</span>
                           )}
                         </td>
-                        <td style={{padding:"7px 10px", minWidth: 130}}>
-                          {editingKasaId === pay.id ? (
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                              <input
-                                className="input"
-                                type="number"
-                                style={{fontSize:"0.78rem",padding:"4px 6px", width: 90}}
-                                placeholder="₺"
-                                value={kasaTutariDrafts[pay.id] ?? ""}
-                                onChange={(e) => setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: e.target.value }))}
-                                autoFocus
-                                onKeyDown={(e) => { if (e.key === "Enter") saveKasaTutari(pay.id); }}
-                              />
-                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveKasaTutari(pay.id)}>Kaydet</button>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingKasaId(null); setKasaTutariDrafts((prev) => { const n = { ...prev }; delete n[pay.id]; return n; }); }}>Vazgeç</button>
-                            </div>
+                        <td style={{padding:"7px 10px", minWidth: 110}}>
+                          {editingPaymentRowId === pay.id ? (
+                            <input
+                              className="input"
+                              type="number"
+                              style={{fontSize:"0.78rem",padding:"4px 6px", width: 90}}
+                              placeholder="₺"
+                              value={paymentRowDraft.kasa}
+                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, kasa: e.target.value }))}
+                            />
                           ) : (
-                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                              <span>{pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? money(pay.kasa_tutari) : <span style={{color:"#cbd5e1"}}>—</span>}</span>
-                              <button
-                                type="button"
-                                className="btn-secondary"
-                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
-                                onClick={() => { setEditingKasaId(pay.id); setKasaTutariDrafts((prev) => ({ ...prev, [pay.id]: pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? String(pay.kasa_tutari) : "" })); }}
-                              >
-                                {pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? "Değiştir" : "Kasa Ekle"}
-                              </button>
-                            </div>
+                            pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? money(pay.kasa_tutari) : <span style={{color:"#cbd5e1"}}>—</span>
                           )}
                         </td>
-                        <td style={{padding:"7px 10px", minWidth: 180}}>
-                          {editingPaymentAciklamaId === pay.id ? (
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                              <input
-                                className="input"
-                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
-                                value={paymentAciklamaDraft}
-                                onChange={(e) => setPaymentAciklamaDraft(e.target.value)}
-                                placeholder="Açıklama yaz..."
-                                autoFocus
-                              />
-                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => savePaymentAciklama(pay.id)}>Kaydet</button>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingPaymentAciklamaId(null); setPaymentAciklamaDraft(""); }}>Vazgeç</button>
+                        <td style={{padding:"7px 10px", minWidth: 110}}>
+                          {editingPaymentRowId === pay.id ? (
+                            <select
+                              className="input"
+                              style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                              value={paymentRowDraft.paraSahibi}
+                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, paraSahibi: e.target.value }))}
+                            >
+                              <option value="">Kimde?</option>
+                              {paraSahibiSecenekleri.map((n) => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          ) : (
+                            pay.para_sahibi ? <span style={{color:"#475569"}}>{pay.para_sahibi}</span> : <span style={{color:"#cbd5e1"}}>—</span>
+                          )}
+                        </td>
+                        <td style={{padding:"7px 10px", minWidth: 160}}>
+                          {editingPaymentRowId === pay.id ? (
+                            <input
+                              className="input"
+                              style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                              value={paymentRowDraft.aciklama}
+                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, aciklama: e.target.value }))}
+                              placeholder="Açıklama..."
+                            />
+                          ) : (
+                            pay.aciklama ? <span style={{color:"#475569",fontStyle:"italic"}}>{pay.aciklama}</span> : <span style={{color:"#cbd5e1"}}>—</span>
+                          )}
+                        </td>
+                        <td style={{padding:"7px 10px", minWidth: 110}}>
+                          {editingPaymentRowId === pay.id ? (
+                            <div style={{display:"flex",gap:6}}>
+                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => savePaymentRow(pay.id)}>Kaydet</button>
+                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => setEditingPaymentRowId(null)}>Vazgeç</button>
                             </div>
                           ) : (
-                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                              {pay.aciklama && <span style={{color:"#475569",fontStyle:"italic"}}>{pay.aciklama}</span>}
-                              <button
-                                type="button"
-                                className="btn-secondary"
-                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
-                                onClick={() => { setEditingPaymentAciklamaId(pay.id); setPaymentAciklamaDraft(pay.aciklama || ""); }}
-                              >
-                                {pay.aciklama ? "Değiştir" : "Açıklama Ekle"}
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                              onClick={() => {
+                                setEditingPaymentRowId(pay.id);
+                                setPaymentRowDraft({
+                                  note: pay.note || "",
+                                  kasa: pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? String(pay.kasa_tutari) : "",
+                                  paraSahibi: pay.para_sahibi || "",
+                                  aciklama: pay.aciklama || "",
+                                });
+                              }}
+                            >
+                              Düzenle
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -4251,6 +4641,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
                       <td></td>
                       <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
+                      <td></td>
+                      <td></td>
                       <td></td>
                     </tr>
                   </tfoot>

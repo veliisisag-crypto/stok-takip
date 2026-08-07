@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "log detay eklendi"
+git commit -m "satıcılar alanı 2"
 git push
 
 
@@ -13,3 +13,9 @@ Samsun2026+	  eso
 Samsun56++        dilek
 Samsun55**	  hasret
 
+
+pg_dump "postgresql://postgres:Kx9#mP2$vL7@nQwR@cfkfaxgtqoswybazrwlx.supabase.co:5432/postgres" \
+  --no-owner --no-privileges -F c -f stok-takip_backup_$(date +%Y%m%d_%H%M).dump
+
+pg_dump "postgresql://postgres:[ŞİFREN]@db.cfkfaxgtqoswybazrwlx.supabase.co:5432/postgres" \
+  --no-owner --no-privileges -F c -f redline_backup_$(date +%Y%m%d_%H%M).dump
