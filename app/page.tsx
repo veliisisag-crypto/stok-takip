@@ -2459,7 +2459,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const exportTahsilatToExcel = () => {
     const rows: (string | number)[][] = [];
-    rows.push(["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Kimde", "Açıklama"]);
+    const headers = ["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Kimde"];
+    if (!isSellerRole) headers.push("Açıklama");
+    rows.push(headers);
 
     if (!isSellerRole && totals.openingBalance !== 0) {
       rows.push([
@@ -2475,7 +2477,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [...totals.recentPayments]
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .forEach((pay) => {
-        rows.push([
+        const row: (string | number)[] = [
           toTR(pay.created_at, true),
           customerMap.get(pay.customer_id)?.name || "-",
           pay.user_email?.split("@")[0] || "-",
@@ -2484,8 +2486,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           pay.note || "",
           pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? Number(pay.kasa_tutari) : "",
           pay.para_sahibi || "",
-          pay.aciklama || "",
-        ]);
+        ];
+        if (!isSellerRole) row.push(pay.aciklama || "");
+        rows.push(row);
       });
 
     const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
@@ -4465,7 +4468,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Not</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kasa</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kimde</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>
+                      {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>}
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}></th>
                     </tr>
                   </thead>
@@ -4593,19 +4596,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             pay.para_sahibi ? <span style={{color:"#475569"}}>{pay.para_sahibi}</span> : <span style={{color:"#cbd5e1"}}>—</span>
                           )}
                         </td>
-                        <td style={{padding:"7px 10px", minWidth: 160}}>
-                          {editingPaymentRowId === pay.id ? (
-                            <input
-                              className="input"
-                              style={{fontSize:"0.78rem",padding:"4px 6px"}}
-                              value={paymentRowDraft.aciklama}
-                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, aciklama: e.target.value }))}
-                              placeholder="Açıklama..."
-                            />
-                          ) : (
-                            pay.aciklama ? <span style={{color:"#475569",fontStyle:"italic"}}>{pay.aciklama}</span> : <span style={{color:"#cbd5e1"}}>—</span>
-                          )}
-                        </td>
+                        {!isSellerRole && (
+                          <td style={{padding:"7px 10px", minWidth: 160}}>
+                            {editingPaymentRowId === pay.id ? (
+                              <input
+                                className="input"
+                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                                value={paymentRowDraft.aciklama}
+                                onChange={(e) => setPaymentRowDraft((d) => ({ ...d, aciklama: e.target.value }))}
+                                placeholder="Açıklama..."
+                              />
+                            ) : (
+                              pay.aciklama ? <span style={{color:"#475569",fontStyle:"italic"}}>{pay.aciklama}</span> : <span style={{color:"#cbd5e1"}}>—</span>
+                            )}
+                          </td>
+                        )}
                         <td style={{padding:"7px 10px", minWidth: 110}}>
                           {editingPaymentRowId === pay.id ? (
                             <div style={{display:"flex",gap:6}}>
@@ -4642,7 +4647,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <td></td>
                       <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
                       <td></td>
-                      <td></td>
+                      {!isSellerRole && <td></td>}
                       <td></td>
                     </tr>
                   </tfoot>
