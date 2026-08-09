@@ -250,7 +250,7 @@ type Payment = {
 
 type Odeme = {
   id: string;
-  tip: "toptanci" | "kargo";
+  tip: "toptanci" | "kargo" | "diger";
   supplier_id: string | null;
   batch_id: string | null;
   tutar: number;
@@ -596,7 +596,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [soldQtyByProduct, setSoldQtyByProduct] = useState<Record<string, number>>({});
   const [soldQtyByBatchItem, setSoldQtyByBatchItem] = useState<Record<string, number>>({});
   const [soldQtyByProductBatch, setSoldQtyByProductBatch] = useState<Record<string, number>>({});
-  const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo">("toptanci");
+  const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo" | "diger">("toptanci");
   const [odemeSupplierId, setOdemeSupplierId] = useState("");
   const [odemeBatchId, setOdemeBatchId] = useState("");
   const [odemeTutar, setOdemeTutar] = useState("");
@@ -876,7 +876,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           aciklama: c.aciklama || "",
         };
       }
-      setCostInputs((prev) => ({ ...inputs, ...prev }));
+      // Veritabanındaki taze veri önceliklidir (örn. Ödemeler ekranından Kargo alanına yazılan güncelleme
+      // burada da görünsün diye) - sadece DB'de hiç kaydı olmayan (henüz hiç kaydedilmemiş, yeni girilen)
+      // partiler için yerel taslak korunur.
+      setCostInputs((prev) => ({ ...prev, ...inputs }));
     } catch (err) {
       showError(err);
     } finally {
@@ -2002,7 +2005,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (!batch.supplier_id) continue;
       const cost = batchCosts.find((c) => c.batch_id === batch.id);
       if (!cost) continue;
-      const toptanci = Number(cost.veli || 0) + Number(cost.asli || 0) + Number(cost.mihrimah || 0) + Number(cost.kasa || 0) - Number(cost.kargo || 0) - Number(cost.diger || 0);
+      // Kargo ve Diğer artık ayrı, gerçek masraflar (Kasa'ya gömülmüyor) - Toptancı bunları içermez
+      const toptanci = Number(cost.veli || 0) + Number(cost.asli || 0) + Number(cost.mihrimah || 0) + Number(cost.kasa || 0);
       map.set(batch.supplier_id, (map.get(batch.supplier_id) || 0) + toptanci);
     }
     return map;
@@ -2061,9 +2065,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const odeme = odemeler.find((o) => o.id === odemeId);
     if (!odeme) return;
     const entityName = odeme.tip === "toptanci"
-      ? (supplierMap.get(odeme.supplier_id || "")?.name || "")
+      ? `${supplierMap.get(odeme.supplier_id || "")?.name || ""} — ${batchMap.get(odeme.batch_id || "")?.name || ""}`
       : (batchMap.get(odeme.batch_id || "")?.name || "");
-    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek.`)) return;
+    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek, Parti Maliyet Kaydı'ndaki ilgili alan da bu kadar azaltılacak.`)) return;
 
     try {
       const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === odemeId);
@@ -2077,6 +2081,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const period = periods.find((p) => p.id === k.period_id);
           const yeniDevir = Number(period?.devir_bakiyesi || 0) + Number(k.kullanilan_tutar || 0);
           const { error } = await supabase.from("periods").update({ devir_bakiyesi: yeniDevir }).eq("id", k.period_id);
+          if (error) throw error;
+        }
+      }
+
+      // Parti Maliyet Kaydı'ndaki ilgili alanı (kasa/kargo/diger) bu ödeme tutarı kadar geri azalt
+      if (odeme.batch_id) {
+        const alanAdi: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+        const existing = batchCosts.find((c) => c.batch_id === odeme.batch_id);
+        if (existing) {
+          const yeniDeger = Math.max(0, Number(existing[alanAdi] || 0) - Number(odeme.tutar || 0));
+          const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
           if (error) throw error;
         }
       }
@@ -2097,20 +2112,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const tutar = Number(odemeTutar);
     if (!tutar || tutar <= 0) return setMessage("Geçerli bir tutar girin.");
     if (odemeTip === "toptanci" && !odemeSupplierId) return setMessage("Toptancı seçmelisin.");
-    if (odemeTip === "kargo" && !odemeBatchId) return setMessage("Hangi parti için olduğunu seçmelisin.");
+    if ((odemeTip === "kargo" || odemeTip === "diger" || odemeTip === "toptanci") && !odemeBatchId) return setMessage("Hangi parti için olduğunu seçmelisin.");
     if (odemeKimden.length === 0) return setMessage("En az bir kaynak seçmelisin.");
     if (odemeEksik > 0.5) return setMessage(`Seçilen kaynaklar yetmiyor, ${money(odemeEksik)} eksik.`);
 
     try {
       const { data: userData } = await supabase.auth.getUser();
       const createdBy = userData.user?.email || "";
+      const batchName = batchMap.get(odemeBatchId)?.name || "";
 
       const { data: odemeInserted, error: odemeErr } = await supabase.from("odemeler").insert({
         tip: odemeTip,
         supplier_id: odemeTip === "toptanci" ? odemeSupplierId : null,
-        batch_id: odemeTip === "kargo" ? odemeBatchId : null,
+        batch_id: odemeBatchId,
         tutar,
-        aciklama: odemeTip === "toptanci" ? (supplierMap.get(odemeSupplierId)?.name || "") : (batchMap.get(odemeBatchId)?.name || ""),
+        aciklama: odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : batchName,
         created_by: createdBy,
       }).select();
       if (odemeErr) throw odemeErr;
@@ -2152,25 +2168,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         if (kaynakErr) throw kaynakErr;
       }
 
-      // Kargo ödemesiyse: o partinin Parti Maliyet Kaydı'ndaki Kargo alanını ödenen tutara eşitle
-      // (üzerine eklemiyoruz - Tutar alanı zaten mevcut kargo değeriyle otomatik dolduruluyor,
-      // üzerine eklemek çift sayıma yol açardı)
-      if (odemeTip === "kargo") {
-        const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
-        if (existing) {
-          const { error } = await supabase.from("batch_costs").update({ kargo: tutar }).eq("id", existing.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: tutar, diger: 0 });
-          if (error) throw error;
-        }
+      // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
+      // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
+      // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
+      const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
+      const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
+      if (existing) {
+        const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
+        const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
+        if (error) throw error;
       }
 
       const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
+      const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : "Diğer masraf ödendi";
       await logAction(
-        odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : "Kargo ödemesi yapıldı",
+        islemAdi,
         "odemeler",
-        odemeTip === "toptanci" ? (supplierMap.get(odemeSupplierId)?.name || "") : (batchMap.get(odemeBatchId)?.name || ""),
+        odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : batchName,
         { tutar, kaynak: kaynakOzet }
       );
 
@@ -3917,15 +3934,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div className="grid gap-3 md:grid-cols-2 mb-3">
                 <div className="field-label">
                   Ne için
-                  <select className="input" value={odemeTip} onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo"); setOdemeSupplierId(""); setOdemeBatchId(""); }}>
-                    <option value="toptanci">Toptancıya öde</option>
+                  <select
+                    className="input"
+                    value={odemeTip}
+                    onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo" | "diger"); setOdemeSupplierId(""); setOdemeBatchId(""); setOdemeTutar(""); }}
+                  >
+                    <option value="toptanci">Toptancıya öde (parti bazlı)</option>
                     <option value="kargo">Kargo öde (parti bazlı)</option>
+                    <option value="diger">Diğer masraf öde (parti bazlı)</option>
                   </select>
                 </div>
-                {odemeTip === "toptanci" ? (
+                {odemeTip === "toptanci" && (
                   <div className="field-label">
                     Toptancı
-                    <select className="input" value={odemeSupplierId} onChange={(e) => setOdemeSupplierId(e.target.value)}>
+                    <select
+                      className="input"
+                      value={odemeSupplierId}
+                      onChange={(e) => { setOdemeSupplierId(e.target.value); setOdemeBatchId(""); }}
+                    >
                       <option value="">Seç...</option>
                       {suppliers.map((s) => (
                         <option key={s.id} value={s.id}>
@@ -3934,27 +3960,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ))}
                     </select>
                   </div>
-                ) : (
-                  <div className="field-label">
-                    Hangi parti için
-                    <select
-                      className="input"
-                      value={odemeBatchId}
-                      onChange={(e) => {
-                        const batchId = e.target.value;
-                        setOdemeBatchId(batchId);
-                        const mevcutKargo = batchCosts.find((c) => c.batch_id === batchId)?.kargo;
-                        setOdemeTutar(mevcutKargo ? String(mevcutKargo) : "");
-                      }}
-                    >
-                      <option value="">Seç...</option>
-                      {sortedBatches.map((b) => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
-                      ))}
-                    </select>
-                  </div>
                 )}
               </div>
+
+              {(odemeTip !== "toptanci" || odemeSupplierId) && (
+                <div className="field-label mb-3" style={{maxWidth: 300}}>
+                  Hangi parti için
+                  <select
+                    className="input"
+                    value={odemeBatchId}
+                    onChange={(e) => setOdemeBatchId(e.target.value)}
+                  >
+                    <option value="">Seç...</option>
+                    {(odemeTip === "toptanci" ? sortedBatches.filter((b) => b.supplier_id === odemeSupplierId) : sortedBatches).map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  {odemeTip === "toptanci" && sortedBatches.filter((b) => b.supplier_id === odemeSupplierId).length === 0 && (
+                    <p className="text-xs text-slate-400 mt-1">Bu toptancıya bağlı parti bulunamadı.</p>
+                  )}
+                </div>
+              )}
 
               <div className="field-label mb-3" style={{maxWidth: 200}}>
                 Tutar
@@ -4014,8 +4040,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
                   return [
                     toTR(o.created_at, true),
-                    o.tip === "toptanci" ? "Toptancı" : "Kargo",
-                    o.tip === "toptanci" ? (o.supplier_id ? supplierMap.get(o.supplier_id)?.name || "-" : "-") : (o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"),
+                    o.tip === "toptanci" ? "Toptancı" : o.tip === "kargo" ? "Kargo" : "Diğer",
+                    o.tip === "toptanci"
+                      ? `${o.supplier_id ? supplierMap.get(o.supplier_id)?.name || "-" : "-"} — ${o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"}`
+                      : (o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"),
                     money(o.tutar),
                     kaynakOzet || "-",
                     <button
@@ -5141,10 +5169,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Mal Girişi</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">USD Kuru</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Birim Ek Maliyet</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Veli</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Aslı</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Mihri</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Kasa</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Veli (şahsi)</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Aslı (şahsi)</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Mihri (şahsi)</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200">Kasa'dan</th>
                       <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toptancı</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kargo</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Diğer</th>
@@ -5157,13 +5185,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.map((batch) => {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
-                      const total = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) + (Number(row.diger)||0);
-                      // Toptancı = Kasa + Veli + Aslı + Mihri - Kargo - Diğer
-                      const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0) - (Number(row.kargo)||0) - (Number(row.diger)||0);
+                      // Toptancı = Veli(şahsi) + Aslı(şahsi) + Mihri(şahsi) + Kasa payı (Ödemeler'den gelir)
+                      const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0);
+                      // Kasa'dan = ortak kasadan çıkan HER ŞEY (şahsi katkılar hariç): Kasa payı + Kargo + Diğer
+                      const kasaDan = (Number(row.kasa)||0) + (Number(row.kargo)||0) + (Number(row.diger)||0);
+                      // Toplam Maliyet = Toptancı + Kargo + Diğer (yani partiye harcanan her şey)
+                      const total = toptanci + (Number(row.kargo)||0) + (Number(row.diger)||0);
                       const existing = batchCosts.find((c) => c.batch_id === batch.id);
                       const isDirty = !existing
-                        ? (Number(row.veli)||0) !== 0 || (Number(row.asli)||0) !== 0 || (Number(row.mihrimah)||0) !== 0 || (Number(row.kasa)||0) !== 0 || (Number(row.kargo)||0) !== 0 || (Number(row.diger)||0) !== 0 || (row.aciklama || "") !== ""
-                        : (Number(row.veli)||0) !== Number(existing.veli||0) || (Number(row.asli)||0) !== Number(existing.asli||0) || (Number(row.mihrimah)||0) !== Number(existing.mihrimah||0) || (Number(row.kasa)||0) !== Number(existing.kasa||0) || (Number(row.kargo)||0) !== Number(existing.kargo||0) || (Number(row.diger)||0) !== Number(existing.diger||0) || (row.aciklama || "") !== (existing.aciklama || "");
+                        ? (Number(row.veli)||0) !== 0 || (Number(row.asli)||0) !== 0 || (Number(row.mihrimah)||0) !== 0 || (row.aciklama || "") !== ""
+                        : (Number(row.veli)||0) !== Number(existing.veli||0) || (Number(row.asli)||0) !== Number(existing.asli||0) || (Number(row.mihrimah)||0) !== Number(existing.mihrimah||0) || (row.aciklama || "") !== (existing.aciklama || "");
                       const ilkMalGirisiTarihi = batchItems
                         .filter((i) => i.batch_id === batch.id)
                         .reduce((min: string | null, i) => (!min || new Date(i.created_at) < new Date(min) ? i.created_at : min), null as string | null);
@@ -5207,7 +5238,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td className="p-2 border border-slate-200 text-right text-slate-600">
                             {getEkMaliyet(batch.id) > 0 ? `${getEkMaliyet(batch.id).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺` : "-"}
                           </td>
-                          {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
+                          {(["veli","asli","mihrimah"] as const).map((f) => (
                             <td key={f} className="p-1 border border-slate-200">
                               <input
                                 className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
@@ -5219,19 +5250,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               />
                             </td>
                           ))}
+                          <td className="p-3 text-right border border-slate-200 text-slate-600" title="Ödemeler ekranından otomatik dolar">
+                            {kasaDan > 0 ? kasaDan.toLocaleString("tr-TR") : "-"}
+                          </td>
                           <td className="p-3 text-right font-semibold border border-slate-200 bg-slate-50">
-                            {(total !== 0 || Number(row.kargo || 0) !== 0) ? toptanci.toLocaleString("tr-TR") : "-"}
+                            {total !== 0 ? toptanci.toLocaleString("tr-TR") : "-"}
                           </td>
                           {(["kargo","diger"] as const).map((f) => (
-                            <td key={f} className="p-1 border border-slate-200">
-                              <input
-                                className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
-                                type="number"
-                                min="0"
-                                value={row[f] === "0" ? "" : row[f]}
-                                placeholder="0"
-                                onChange={(e) => setRow(f, e.target.value || "0")}
-                              />
+                            <td key={f} className="p-3 text-right border border-slate-200 text-slate-600" title="Ödemeler ekranından otomatik dolar">
+                              {Number(row[f]||0) > 0 ? Number(row[f]).toLocaleString("tr-TR") : "-"}
                             </td>
                           ))}
                           <td className="p-1 border border-slate-200">
@@ -5268,13 +5295,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 border border-slate-300"></td>
-                        {(["veli","asli","mihrimah","kasa"] as const).map((f) => (
+                        {(["veli","asli","mihrimah"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
                             {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
                           </td>
                         ))}
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) - Number(c.kargo||0) - Number(c.diger||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.kasa||0) + Number(c.kargo||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
+                        </td>
+                        <td className="p-3 text-right border border-slate-300">
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0), 0).toLocaleString("tr-TR")}
                         </td>
                         {(["kargo","diger"] as const).map((f) => (
                           <td key={f} className="p-3 text-right border border-slate-300">
@@ -5283,7 +5313,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         ))}
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
                         </td>
                         <td className="border border-slate-300"></td>
                       </tr>
