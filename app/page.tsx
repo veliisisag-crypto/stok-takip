@@ -3904,6 +3904,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <b>{money(openPeriodForOdeme?.devir_bakiyesi || 0)}</b>
                 </div>
               </div>
+              <div className="mt-3 pt-3" style={{borderTop:"1px solid #e2e8f0"}}>
+                <span className="text-sm font-semibold text-slate-700">
+                  Kasa Havuzları - Toplam = {money(
+                    paraSahibiSecenekleri.reduce((s, kisi) => s + (kasaHavuzlari.get(kisi)?.toplam || 0), 0)
+                    + (openPeriodForOdeme?.devir_bakiyesi || 0)
+                  )}
+                </span>
+              </div>
             </Card>
 
             <Card title="Toptancı Bakiyeleri">
@@ -4562,15 +4570,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Tarih</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Cari</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Ekleyen</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Yöntem</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kasa</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Para Kimde</th>
-                      {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>}
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}></th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tarih</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Cari</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ekleyen</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Yöntem</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tutar</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Kasa</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Para Kimde</th>
+                      {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Açıklama</th>}
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}></th>
                     </tr>
                   </thead>
                   <tbody>
