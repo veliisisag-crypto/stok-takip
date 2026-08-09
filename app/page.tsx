@@ -593,6 +593,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [odemeler, setOdemeler] = useState<Odeme[]>([]);
   const [odemeKaynaklari, setOdemeKaynaklari] = useState<OdemeKaynak[]>([]);
+  const [soldQtyByProduct, setSoldQtyByProduct] = useState<Record<string, number>>({});
+  const [soldQtyByBatchItem, setSoldQtyByBatchItem] = useState<Record<string, number>>({});
+  const [soldQtyByProductBatch, setSoldQtyByProductBatch] = useState<Record<string, number>>({});
   const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo">("toptanci");
   const [odemeSupplierId, setOdemeSupplierId] = useState("");
   const [odemeBatchId, setOdemeBatchId] = useState("");
@@ -787,7 +790,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, odemelerRes, odemeKaynaklariRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -806,6 +809,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("seller_settlements").select("*").order("created_at", { ascending: false }),
         supabase.from("odemeler").select("*").order("created_at", { ascending: false }),
         supabase.from("odeme_kaynaklari").select("*"),
+        supabase.rpc("get_sold_qty_by_product"),
+        supabase.rpc("get_sold_qty_by_batch_item"),
+        supabase.rpc("get_sold_qty_by_product_batch"),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes]) {
@@ -816,6 +822,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (odemeKaynaklariRes.error && !isSellerRole) throw odemeKaynaklariRes.error;
       setOdemeler((odemelerRes.data || []) as Odeme[]);
       setOdemeKaynaklari((odemeKaynaklariRes.data || []) as OdemeKaynak[]);
+
+      // RLS nedeniyle satıcı oturumunda "sales" tablosu kendi satışlarıyla sınırlı olduğu için,
+      // stok hesaplaması bu RPC'lerden gelen (RLS'i bypass eden, sadece agregat) rakamları kullanır.
+      if (soldByProductRes.error) console.warn("get_sold_qty_by_product hata", soldByProductRes.error);
+      if (soldByBatchItemRes.error) console.warn("get_sold_qty_by_batch_item hata", soldByBatchItemRes.error);
+      if (soldByProductBatchRes.error) console.warn("get_sold_qty_by_product_batch hata", soldByProductBatchRes.error);
+      const soldByProductMap: Record<string, number> = {};
+      for (const row of (soldByProductRes.data || []) as { product_id: string; toplam_satilan: number }[]) {
+        soldByProductMap[row.product_id] = Number(row.toplam_satilan || 0);
+      }
+      setSoldQtyByProduct(soldByProductMap);
+      const soldByBatchItemMap: Record<string, number> = {};
+      for (const row of (soldByBatchItemRes.data || []) as { batch_item_id: string; toplam_satilan: number }[]) {
+        soldByBatchItemMap[row.batch_item_id] = Number(row.toplam_satilan || 0);
+      }
+      setSoldQtyByBatchItem(soldByBatchItemMap);
+      const soldByProductBatchMap: Record<string, number> = {};
+      for (const row of (soldByProductBatchRes.data || []) as { product_id: string; batch_id: string; toplam_satilan: number }[]) {
+        soldByProductBatchMap[`${row.product_id}__${row.batch_id}`] = Number(row.toplam_satilan || 0);
+      }
+      setSoldQtyByProductBatch(soldByProductBatchMap);
 
       setProducts((productsRes.data || []) as Product[]);
 
@@ -907,14 +934,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const getBatchSoldQtyForItem = (item: BatchItem) => {
-    // First try exact match by batch_item_id (new sales)
-    const byItemId = activeSales.filter((s) => s.batch_item_id === item.id).reduce((sum, s) => sum + s.qty, 0);
-    // Also count sales without batch_item_id (old sales) using old batch_id method
-    const oldSales = activeSales.filter((s) => !s.batch_item_id && s.product_id === item.product_id && s.batch_id === item.batch_id);
-    if (oldSales.length === 0) return byItemId;
-    // For old sales, distribute among siblings proportionally (greedy by bought desc)
+    // RLS nedeniyle "sales" state'i satıcı oturumunda kendi satışlarıyla sınırlı;
+    // bu yüzden RPC'den gelen (tüm satıcıları kapsayan) agregat rakamları kullanıyoruz.
+    // Yeni satışlar (batch_item_id ile etiketli):
+    const byItemId = soldQtyByBatchItem[item.id] || 0;
+    // Eski satışlar (batch_item_id'siz, ürün+parti ile eşleşen):
+    const oldTotal = soldQtyByProductBatch[`${item.product_id}__${item.batch_id}`] || 0;
+    if (oldTotal === 0) return byItemId;
+    // Split depo (aynı ürün+parti için birden fazla satır) varsa eski satışları
+    // en yüksek "bought" değerine sahip satırdan başlayarak dağıt (greedy).
     const siblings = batchItems.filter((i) => i.product_id === item.product_id && i.batch_id === item.batch_id);
-    const oldTotal = oldSales.reduce((sum, s) => sum + s.qty, 0);
     if (siblings.length <= 1) return byItemId + oldTotal;
     const sorted = [...siblings].sort((a, b) => b.bought - a.bought);
     let remaining = oldTotal;
@@ -927,7 +956,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const getProductTotalBought = (productId: string) => batchItemsForProduct(productId).reduce((sum, item) => sum + item.bought, 0);
-  const getProductSoldQty = (productId: string) => activeSales.filter((sale) => sale.product_id === productId).reduce((sum, sale) => sum + sale.qty, 0);
+  // RLS nedeniyle satıcı oturumunda "sales" state'i sadece kendi satışlarını içerir;
+  // stok hesabı bu yüzden RPC'den gelen (tüm satıcıları kapsayan agregat) rakamı kullanır.
+  const getProductSoldQty = (productId: string) => soldQtyByProduct[productId] || 0;
   const getProductStock = (productId: string) => getProductTotalBought(productId) - getProductSoldQty(productId);
   const getCustomerSalesTotal = (customerId: string) =>
     activeSales
@@ -2026,6 +2057,42 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const deleteOdeme = async (odemeId: string) => {
+    const odeme = odemeler.find((o) => o.id === odemeId);
+    if (!odeme) return;
+    const entityName = odeme.tip === "toptanci"
+      ? (supplierMap.get(odeme.supplier_id || "")?.name || "")
+      : (batchMap.get(odeme.batch_id || "")?.name || "");
+    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek.`)) return;
+
+    try {
+      const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === odemeId);
+      for (const k of kaynaklar) {
+        if (k.kaynak_tipi === "tahsilat" && k.payment_id) {
+          const payment = payments.find((p) => p.id === k.payment_id);
+          const yeniKasa = Number(payment?.kasa_tutari || 0) + Number(k.kullanilan_tutar || 0);
+          const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa }).eq("id", k.payment_id);
+          if (error) throw error;
+        } else if (k.kaynak_tipi === "devir" && k.period_id) {
+          const period = periods.find((p) => p.id === k.period_id);
+          const yeniDevir = Number(period?.devir_bakiyesi || 0) + Number(k.kullanilan_tutar || 0);
+          const { error } = await supabase.from("periods").update({ devir_bakiyesi: yeniDevir }).eq("id", k.period_id);
+          if (error) throw error;
+        }
+      }
+
+      // odeme_kaynaklari satırları "on delete cascade" ile otomatik silinir
+      const { error } = await supabase.from("odemeler").delete().eq("id", odemeId);
+      if (error) throw error;
+
+      await logAction("Ödeme kaydı silindi", "odemeler", entityName, { tutar: odeme.tutar });
+      setMessage("Ödeme kaydı silindi, kullanılan kaynaklar iade edildi.");
+      loadAll();
+    } catch (err) {
+      showError(err);
+    }
+  };
+
   const submitOdeme = async () => {
     const tutar = Number(odemeTutar);
     if (!tutar || tutar <= 0) return setMessage("Geçerli bir tutar girin.");
@@ -2459,14 +2526,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const exportTahsilatToExcel = () => {
     const rows: (string | number)[][] = [];
-    const headers = ["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Not", "Kasa", "Kimde"];
+    const headers = ["Tarih", "Cari", "Ekleyen", "Yöntem", "Tutar", "Kasa", "Para Kimde"];
     if (!isSellerRole) headers.push("Açıklama");
     rows.push(headers);
 
     if (!isSellerRole && totals.openingBalance !== 0) {
       rows.push([
         "Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)", "", "", "",
-        "",
         "",
         Number(totals.openingBalance),
         "",
@@ -2483,7 +2549,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           pay.user_email?.split("@")[0] || "-",
           pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : "-",
           Number(pay.amount),
-          pay.note || "",
           pay.kasa_tutari !== null && pay.kasa_tutari !== undefined ? Number(pay.kasa_tutari) : "",
           pay.para_sahibi || "",
         ];
@@ -2492,10 +2557,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       });
 
     const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
-    rows.push(["Toplam", "", "", "", Number(totals.grossCash), "", kasaToplam, ""]);
+    rows.push(["Toplam", "", "", "", Number(totals.grossCash), kasaToplam, ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 17 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 34 }];
+    ws["!cols"] = [{ wch: 17 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 12 }, { wch: 12 }, { wch: 34 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Tahsilatlar");
     XLSX.writeFile(wb, `Donem_Tahsilatlari_${today()}.xlsx`);
@@ -3943,7 +4008,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             <Card title="Ödeme Geçmişi">
               <Table
-                headers={["Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar"]}
+                headers={["Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar", ""]}
                 rows={[...odemeler].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o) => {
                   const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === o.id);
                   const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
@@ -3953,6 +4018,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     o.tip === "toptanci" ? (o.supplier_id ? supplierMap.get(o.supplier_id)?.name || "-" : "-") : (o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"),
                     money(o.tutar),
                     kaynakOzet || "-",
+                    <button
+                      key="sil"
+                      type="button"
+                      className="btn-danger"
+                      style={{fontSize:"0.7rem", padding:"3px 10px"}}
+                      onClick={() => deleteOdeme(o.id)}
+                    >
+                      Sil
+                    </button>,
                   ];
                 })}
               />
@@ -4465,9 +4539,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Ekleyen</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Yöntem</th>
                       <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Not</th>
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kasa</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Kimde</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Para Kimde</th>
                       {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Açıklama</th>}
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}></th>
                     </tr>
@@ -4477,7 +4550,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fffbeb"}}>
                         <td style={{padding:"7px 10px", color:"#92400e", fontWeight:600}} colSpan={4}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",color:"#cbd5e1"}}>—</td>
-                        <td></td>
                         <td style={{padding:"7px 10px",fontWeight:700, color:"#92400e"}}>
                           {editingOpeningBalance ? (
                             <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -4534,7 +4606,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     )}
                     {!isSellerRole && totals.pastPendingAdvanceTotal > 0 && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fef9c3"}}>
-                        <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={10}>
+                        <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={9}>
                           💰 Geçmiş dönem(ler)den bekleyen ön ödemeler (henüz satışa dönüşmedi, bu ekranda ayrı satır olarak görünmüyor çünkü eski dönemde kalmış): <b>{money(totals.pastPendingAdvanceTotal)}</b> — satışa dönüştükçe bu tutar otomatik azalır.
                         </td>
                       </tr>
@@ -4554,19 +4626,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           {pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : <span style={{color:"#cbd5e1"}}>—</span>}
                         </td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{isPendingAdvance ? <span style={{color:"#cbd5e1"}}>—</span> : money(pay.amount)}</td>
-                        <td style={{padding:"7px 10px", minWidth: 140}}>
-                          {editingPaymentRowId === pay.id ? (
-                            <input
-                              className="input"
-                              style={{fontSize:"0.78rem",padding:"4px 6px"}}
-                              value={paymentRowDraft.note}
-                              onChange={(e) => setPaymentRowDraft((d) => ({ ...d, note: e.target.value }))}
-                              placeholder="Not..."
-                            />
-                          ) : (
-                            pay.note ? <span style={{color:"#475569",fontStyle:"italic"}}>{pay.note}</span> : <span style={{color:"#cbd5e1"}}>—</span>
-                          )}
-                        </td>
                         <td style={{padding:"7px 10px", minWidth: 110}}>
                           {editingPaymentRowId === pay.id ? (
                             <input
@@ -4644,7 +4703,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
                       <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
-                      <td></td>
                       <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
                       <td></td>
                       {!isSellerRole && <td></td>}
