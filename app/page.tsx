@@ -250,6 +250,7 @@ type Payment = {
 
 type Odeme = {
   id: string;
+  sira_no: number;
   tip: "toptanci" | "kargo" | "diger";
   supplier_id: string | null;
   batch_id: string | null;
@@ -2061,26 +2062,39 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  // Bir açıklama/not metninden, ödeme eklerken otomatik eklenen "12/124 TL" gibi tek bir
+  // fragmanı temizler; virgülle ayrılmış diğer notlara dokunmaz.
+  const removeNoteFragment = (fullText: string, fragment: string) => {
+    return fullText
+      .split(",")
+      .map((p) => p.trim())
+      .filter((p) => p !== fragment.trim())
+      .join(", ");
+  };
+
   const deleteOdeme = async (odemeId: string) => {
     const odeme = odemeler.find((o) => o.id === odemeId);
     if (!odeme) return;
     const entityName = odeme.tip === "toptanci"
       ? `${supplierMap.get(odeme.supplier_id || "")?.name || ""} — ${batchMap.get(odeme.batch_id || "")?.name || ""}`
       : (batchMap.get(odeme.batch_id || "")?.name || "");
-    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek, Parti Maliyet Kaydı'ndaki ilgili alan da bu kadar azaltılacak.`)) return;
+    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek, oradaki "${odeme.sira_no}/..." notu da temizlenecek, Parti Maliyet Kaydı'ndaki ilgili alan da bu kadar azaltılacak.`)) return;
 
     try {
       const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === odemeId);
       for (const k of kaynaklar) {
+        const fragment = `${odeme.sira_no}/${Math.round(Number(k.kullanilan_tutar || 0))} TL`;
         if (k.kaynak_tipi === "tahsilat" && k.payment_id) {
           const payment = payments.find((p) => p.id === k.payment_id);
           const yeniKasa = Number(payment?.kasa_tutari || 0) + Number(k.kullanilan_tutar || 0);
-          const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa }).eq("id", k.payment_id);
+          const yeniAciklama = removeNoteFragment(payment?.aciklama || "", fragment);
+          const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama || null }).eq("id", k.payment_id);
           if (error) throw error;
         } else if (k.kaynak_tipi === "devir" && k.period_id) {
           const period = periods.find((p) => p.id === k.period_id);
           const yeniDevir = Number(period?.devir_bakiyesi || 0) + Number(k.kullanilan_tutar || 0);
-          const { error } = await supabase.from("periods").update({ devir_bakiyesi: yeniDevir }).eq("id", k.period_id);
+          const yeniNot = removeNoteFragment(period?.devir_bakiyesi_notu || "", fragment);
+          const { error } = await supabase.from("periods").update({ devir_bakiyesi: yeniDevir, devir_bakiyesi_notu: yeniNot || null }).eq("id", k.period_id);
           if (error) throw error;
         }
       }
@@ -2131,6 +2145,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }).select();
       if (odemeErr) throw odemeErr;
       const odemeId = odemeInserted![0].id as string;
+      const odemeSiraNo = odemeInserted![0].sira_no as number;
 
       let kalan = tutar;
       const kaynakSatirlari: { kaynak_tipi: "tahsilat" | "devir"; para_sahibi: string | null; payment_id: string | null; period_id: string | null; kullanilan_tutar: number }[] = [];
@@ -2141,7 +2156,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const mevcut = openPeriodForOdeme?.devir_bakiyesi || 0;
           const kullanilan = Math.min(mevcut, kalan);
           if (kullanilan <= 0) continue;
-          const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan }).eq("id", openPeriodForOdeme!.id);
+          const eskiNot = openPeriodForOdeme?.devir_bakiyesi_notu || "";
+          const yeniNot = `${eskiNot ? eskiNot + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
+          const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan, devir_bakiyesi_notu: yeniNot }).eq("id", openPeriodForOdeme!.id);
           if (error) throw error;
           kaynakSatirlari.push({ kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan });
           kalan -= kullanilan;
@@ -2153,7 +2170,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             const kullanilan = Math.min(kayit.kasa, kalan);
             if (kullanilan <= 0) continue;
             const yeniKasa = kayit.kasa - kullanilan;
-            const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa }).eq("id", kayit.id);
+            const eskiAciklama = payments.find((p) => p.id === kayit.id)?.aciklama || "";
+            const yeniAciklama = `${eskiAciklama ? eskiAciklama + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
+            const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama }).eq("id", kayit.id);
             if (error) throw error;
             kaynakSatirlari.push({ kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan });
             kalan -= kullanilan;
@@ -4042,11 +4061,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             <Card title="Ödeme Geçmişi">
               <Table
-                headers={["Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar", ""]}
+                headers={["#", "Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar", ""]}
                 rows={[...odemeler].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o) => {
                   const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === o.id);
                   const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
                   return [
+                    o.sira_no,
                     toTR(o.created_at, true),
                     o.tip === "toptanci" ? "Toptancı" : o.tip === "kargo" ? "Kargo" : "Diğer",
                     o.tip === "toptanci"
