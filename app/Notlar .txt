@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "parti maliyet düzenlemeleri"
+git commit -m "ödemeler düzenlemeleri"
 git push
 
 

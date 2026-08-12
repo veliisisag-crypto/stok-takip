@@ -217,7 +217,7 @@ type Sale = {
   product_id: string;
   batch_id: string;
   batch_item_id?: string | null;
-  seller: Seller;
+  seller: Seller | null;
   sale_type: SaleType;
   qty: number;
   total: number;
@@ -1611,7 +1611,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         product_id: product.id,
         batch_id: item.batch_id,
         batch_item_id: item.id,
-        seller: saleForm.seller,
+        seller: isSellerRole ? null : saleForm.seller,
         sale_type: saleForm.saleType,
         qty: take,
         total: totalPrice,
@@ -2360,7 +2360,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!price) return setMessage("Fiyat girin.");
     const product = productMap.get(item.product_id);
     if (!product) return;
-    const seller: Seller = currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı";
+    const seller: Seller | null = isSellerRole ? null : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
     const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
     const totalAvailable = depoBatchItems.reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
     if (totalAvailable < item.qty) return setMessage(`${product.name} için yeterli stok yok. Mevcut: ${totalAvailable}, gereken: ${item.qty}.`);
