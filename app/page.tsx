@@ -550,14 +550,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [active, setActive] = useState("dashboard");
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState("");
+  const [forcedErrorMessage, setForcedErrorMessage] = useState(false);
 
   useEffect(() => {
-    if (!message) return;
-    const t = setTimeout(() => setMessage(""), 6000);
+    if (!message) { setForcedErrorMessage(false); return; }
+    const t = setTimeout(() => { setMessage(""); setForcedErrorMessage(false); }, 6000);
     return () => clearTimeout(t);
   }, [message]);
 
   const getMessageTone = (msg: string): "error" | "success" => {
+    if (forcedErrorMessage) return "error";
     const negative = ["yetersiz", "hata", "zorunlu", "olamaz", "olmalı", "silinmedi", "seçin", "girin", "eklemeli", "bulunamadı", "reddedildi", "geçerli", "yok"];
     const lower = msg.toLowerCase();
     return negative.some((w) => lower.includes(w)) ? "error" : "success";
@@ -782,6 +784,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       : typeof error === "object" && error !== null && "message" in error
       ? String((error as {message: unknown}).message)
       : JSON.stringify(error);
+    setForcedErrorMessage(true);
     setMessage(msg);
   };
 
@@ -3141,7 +3144,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           >
             <span style={{ fontSize: "1.1rem" }}>⚠️</span>
             <span className="flex-1">{message}</span>
-            <button type="button" onClick={() => setMessage("")} style={{ fontWeight: 700, fontSize: "1rem", lineHeight: 1, opacity: 0.6 }}>
+            <button type="button" onClick={() => { setMessage(""); setForcedErrorMessage(false); }} style={{ fontWeight: 700, fontSize: "1rem", lineHeight: 1, opacity: 0.6 }}>
               ✕
             </button>
           </div>
