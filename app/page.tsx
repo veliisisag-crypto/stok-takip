@@ -227,6 +227,7 @@ type Sale = {
   payment_method?: "nakit" | "banka" | null;
   seller_account_id?: string | null;
   seller_profit?: number | null;
+  note?: string | null;
   cancelled: boolean;
   created_at: string;
 };
@@ -624,6 +625,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerSearch, setCustomerSearch] = useState("");
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [paymentMethodInputs, setPaymentMethodInputs] = useState<Record<string, string>>({});
+  const [paymentParaSahibiInputs, setPaymentParaSahibiInputs] = useState<Record<string, string>>({});
   const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
   const [openingBalanceDraft, setOpeningBalanceDraft] = useState("");
   const [editingOpeningBalanceNote, setEditingOpeningBalanceNote] = useState(false);
@@ -633,6 +635,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [viewingSaleNote, setViewingSaleNote] = useState<Sale | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>("");
   const [showKarDetay, setShowKarDetay] = useState(false);
@@ -648,7 +651,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [saleStatusFilter, setSaleStatusFilter] = useState<string>("Tümü");
   const [splitModal, setSplitModal] = useState<{item: BatchItem; newDepo: string} | null>(null);
   const [splitQty, setSplitQty] = useState<string>("");
-  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; cost: string; seller: Seller; sale_type: SaleType; paid: boolean }>>({});
+  const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; cost: string; seller: Seller; sale_type: SaleType; paid: boolean; note: string }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
@@ -663,7 +666,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -1143,7 +1146,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const recentMovements = useMemo(() => {
     const scopedActiveSales = isSellerRole ? myActiveSales : activeSales;
     const scopedActivePayments = isSellerRole ? myActivePayments : activePayments;
-    const shortUser = (email?: string, seller?: string) => {
+    const shortUser = (email?: string, seller?: string | null) => {
       if (seller === "Aslı" || seller === "Mihrimah") return seller === "Mihrimah" ? "Mihri" : "Aslı";
       if (!email) return "-";
       if (email.includes("asli")) return "Aslı";
@@ -1580,6 +1583,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const product = products.find((p) => p.id === saleForm.productId);
     const qty = Number(saleForm.qty || 0);
     if (!customer || !product || qty <= 0) return setMessage("Cari, ürün ve adet zorunlu.");
+    if ((saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") && !saleForm.note.trim()) {
+      return setMessage("Hibe / Fire-Bozuk satışlarda açıklama girmek zorunlusun.");
+    }
     // Depo bazlı stok kontrolü
     const depoStock = batchItemsForProduct(product.id)
       .filter((i) => i.depo === saleForm.depo)
@@ -1621,6 +1627,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         payment_method: (saleForm.paid === "banka" || saleForm.paid === "nakit") ? saleForm.paid : null,
         seller_account_id: currentSellerAccount?.id || null,
         seller_profit: isSellerRole ? rowSellerProfit : null,
+        note: (saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") ? saleForm.note.trim() : null,
         cancelled: false,
       });
       remainingQty -= take;
@@ -1669,7 +1676,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
-    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "" }));
+    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "" }));
     setMessage("Satış kaydedildi.");
     loadAll();
     } finally {
@@ -1720,6 +1727,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.qty !== undefined) dbPatch.qty = patch.qty;
     if (patch.total !== undefined) dbPatch.total = patch.total;
     if (patch.cost !== undefined) dbPatch.cost = patch.cost;
+    if (patch.note !== undefined) dbPatch.note = patch.note;
     const { error } = await supabase.from("sales").update(dbPatch).eq("id", saleId);
     if (error) return showError(error);
     const updatedSale = sales.find((sale) => sale.id === saleId);
@@ -1738,7 +1746,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const startSaleEdit = (sale: Sale) => {
     setSaleDrafts((prev) => ({
       ...prev,
-      [sale.id]: { qty: String(sale.qty), total: String(sale.total), cost: String(sale.cost), seller: sale.seller, sale_type: sale.sale_type, paid: sale.paid },
+      [sale.id]: { qty: String(sale.qty), total: String(sale.total), cost: String(sale.cost), seller: sale.seller || "Aslı", sale_type: sale.sale_type, paid: sale.paid, note: sale.note || "" },
     }));
     setEditingSaleId(sale.id);
   };
@@ -1771,6 +1779,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return;
       }
     }
+    if ((draft.sale_type === "Hibe" || draft.sale_type === "Fire/Bozuk") && !draft.note.trim()) {
+      setMessage("Hibe / Fire-Bozuk satışlarda açıklama girmek zorunlusun.");
+      return;
+    }
     await updateSale(saleId, {
       qty: newQty,
       total: Number(draft.total || 0),
@@ -1778,6 +1790,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       seller: draft.seller,
       sale_type: draft.sale_type,
       paid: draft.paid,
+      note: draft.note.trim() || null,
     });
     setEditingSaleId(null);
     const next = { ...saleDrafts };
@@ -1906,6 +1919,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const amount = Number(paymentInputs[customerId] || 0);
     if (!amount || amount <= 0) return;
     const method = paymentMethodInputs[customerId] === "nakit" ? "nakit" : "banka";
+    const paraSahibi = paymentParaSahibiInputs[customerId] || "";
+    if (!paraSahibi) { setMessage("Para kimde? alanını seçmelisin."); return; }
 
     // Mükerrer kayıt kontrolü: son 3 dakika içinde bu müşteriye aynı tutarda başka bir ödeme girilmiş mi?
     const now = Date.now();
@@ -1930,15 +1945,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount, seller_account_id: currentSellerAccount?.id || null });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount, para_sahibi: paraSahibi, seller_account_id: currentSellerAccount?.id || null });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
     } catch (err) {
       return showError(err);
     }
-    await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount, yontem: method === "nakit" ? "Nakit" : "Banka" });
+    await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount, yontem: method === "nakit" ? "Nakit" : "Banka", kimde: paraSahibi });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
+    setPaymentParaSahibiInputs({ ...paymentParaSahibiInputs, [customerId]: "" });
     loadAll();
     } finally {
       setPaymentLoading(null);
@@ -4362,6 +4378,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   <option value="banka">Tahsilat banka alındı</option>
                                   <option value="nakit">Tahsilat nakit alındı</option>
                                 </select>
+                                <select className="input" style={{maxWidth: 160}} value={paymentParaSahibiInputs[c.id] || ""} onChange={(e) => setPaymentParaSahibiInputs({ ...paymentParaSahibiInputs, [c.id]: e.target.value })}>
+                                  <option value="">Para kimde? *</option>
+                                  {paraSahibiSecenekleri.map((kisi) => <option key={kisi} value={kisi}>{kisi}</option>)}
+                                </select>
                                 <button type="button" className="product-btn product-btn--secondary" disabled={paymentLoading === c.id} onClick={() => addCustomerPayment(c.id)}>{paymentLoading === c.id ? "..." : "Ödeme Ekle"}</button>
                               </div>
                               <button type="button" className="product-btn product-btn--secondary" onClick={() => startCustomerEdit(c)}>
@@ -5131,6 +5151,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <option value="nakit">Ödeme nakit alındı</option>
                   </select>
                 )}
+                {(saleForm.saleType === "Fire/Bozuk" || saleForm.saleType === "Hibe") && (
+                  <input className="input" placeholder="Açıklama (zorunlu) *" value={saleForm.note} onChange={(e) => setSaleForm({ ...saleForm, note: e.target.value })} style={{minWidth: 220}} />
+                )}
                 <button type="button" className="btn" onClick={addSaleFromForm} disabled={saleLoading} style={{opacity: saleLoading ? 0.6 : 1, pointerEvents: saleLoading ? "none" : "auto", cursor: saleLoading ? "not-allowed" : "pointer"}}>{saleLoading ? "Kaydediliyor..." : "Satışı Kaydet"}</button>
               </div>
             </Card>
@@ -5153,11 +5176,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   ...(!isSellerRole ? [salesTh("seller","Satıcı")] : []),
                   salesTh("sale_type","Tip"), salesTh("qty","Adet"), salesTh("total","Tutar"),
                   ...(!isSellerRole ? [salesTh("cost","Maliyet"), salesTh("profit","Kâr/Zarar")] : []),
-                  salesTh("status","Durum"), "İşlem"
+                  salesTh("status","Durum"), "Not", "İşlem"
                 ]}
                 rows={sortedSales.map((sale) => {
                   const isEditing = editingSaleId === sale.id;
                   const draft = saleDrafts[sale.id];
+                  const draftRequiresNote = isEditing && (draft.sale_type === "Hibe" || draft.sale_type === "Fire/Bozuk");
                   return [
                     toTR(sale.created_at),
                     customerMap.get(sale.customer_id)?.name || "-",
@@ -5175,11 +5199,38 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     ] : []),
                     isEditing ? <select key="paid" className="input" value={draft.paid ? "true" : "false"} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], paid: e.target.value === "true" } }))}><option value="false">Cari borç</option><option value="true">Ödendi</option></select> : getSaleStatus(sale),
                     isEditing
+                      ? (draftRequiresNote
+                          ? <input key="note" className="input" style={{width:150}} placeholder="Açıklama (zorunlu) *" value={draft.note} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], note: e.target.value } }))} />
+                          : <span key="note" style={{color:"#cbd5e1"}}>—</span>)
+                      : (sale.note
+                          ? <button key="note" type="button" className="btn-secondary" style={{fontSize:"0.75rem", padding:"3px 10px"}} onClick={() => setViewingSaleNote(sale)}>Not</button>
+                          : <span key="note" style={{color:"#cbd5e1"}}>—</span>),
+                    isEditing
                       ? <div key="actions" className="flex gap-2"><button type="button" className="btn" disabled={isLoading(`sale-save-${sale.id}`)} onClick={() => withLoading(`sale-save-${sale.id}`, () => saveSaleEdit(sale.id))}>{isLoading(`sale-save-${sale.id}`) ? "..." : "Kaydet"}</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
                       : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" disabled={deletingId === sale.id} onClick={() => deleteSale(sale.id)}>{deletingId === sale.id ? "..." : "Sil"}</button></div>,
                   ];
                 })}
               />
+              {viewingSaleNote && (
+                <div
+                  style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+                  onClick={() => setViewingSaleNote(null)}
+                >
+                  <div
+                    style={{ background: "white", borderRadius: 16, padding: 20, width: "100%", maxWidth: 420 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <h2 style={{ fontSize: "1rem", fontWeight: 700 }}>
+                        {customerMap.get(viewingSaleNote.customer_id)?.name || "-"} — {productMap.get(viewingSaleNote.product_id)?.name || "-"}
+                      </h2>
+                      <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setViewingSaleNote(null)}>Kapat</button>
+                    </div>
+                    <p style={{ fontSize: "0.8rem", color: "#64748b", marginBottom: 10 }}>{viewingSaleNote.sale_type}</p>
+                    <p style={{ fontSize: "0.9rem", color: "#334155", whiteSpace: "pre-wrap" }}>{viewingSaleNote.note}</p>
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -5195,7 +5246,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-left font-semibold border border-slate-200">Parti</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Parti Açılışı</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">İlk Mal Girişi</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">USD Kuru</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200" style={{minWidth: 120}}>USD Kuru</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Birim Ek Maliyet</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Veli (şahsi)</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Aslı (şahsi)</th>
@@ -5246,7 +5297,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td className="p-3 font-semibold border border-slate-200">{batch.name}</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{batch.created_at ? new Date(batch.created_at).toLocaleDateString("tr-TR") : "-"}</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{ilkMalGirisiTarihi ? new Date(ilkMalGirisiTarihi).toLocaleDateString("tr-TR") : "-"}</td>
-                          <td className="p-1 border border-slate-200">
+                          <td className="p-1 border border-slate-200" style={{minWidth: 120}}>
                             <input
                               className="w-full text-right p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded"
                               type="number"
