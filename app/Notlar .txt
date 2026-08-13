@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "ödemeler düzenlemeleri"
+git commit -m "ek düzenlemeler 2"
 git push
 
 
@@ -10,7 +10,7 @@ Rq6*dM1^sG5@kCpJ  mihrimah@stok-takip.com
 Tz4!bN8&jF3%hYeW  aslı@stok-takip.com
 Kx9#mP2$vL7@nQwR  veli@stok-takip.com
 Samsun2026+	  eso@stok-takip.com	
-Samsun56++        dilek
+Samsun56++        sevilay
 Samsun55**	  hasret@stok-takip.com
 
 

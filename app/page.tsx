@@ -1398,6 +1398,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction(seller.active ? "Satıcı pasif edildi" : "Satıcı aktif edildi", "seller_accounts", seller.name, diffOf({ aktif: seller.active }, { aktif: !seller.active }));
   };
 
+  const deleteSellerAccount = async (seller: SellerAccount) => {
+    const hasSales = sales.some((s) => s.seller_account_id === seller.id);
+    const hasPayments = payments.some((p) => p.seller_account_id === seller.id);
+    const hasCustomers = customers.some((c) => c.seller_account_id === seller.id);
+    const hasPreorders = preorders.some((p) => p.seller_account_id === seller.id);
+    const hasSettlements = sellerSettlements.some((s) => s.seller_account_id === seller.id);
+    if (hasSales || hasPayments || hasCustomers || hasPreorders || hasSettlements) {
+      setMessage(`${seller.name} adına satış/tahsilat/cari/ön sipariş kaydı var, silinemiyor. "Pasif Et" kullanabilirsin.`);
+      return;
+    }
+    if (!confirm(`${seller.name} satıcısı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return;
+    const { error } = await supabase.from("seller_accounts").delete().eq("id", seller.id);
+    if (error) return showError(error);
+    setSellerAccounts((prev) => prev.filter((s) => s.id !== seller.id));
+    await logAction("Satıcı silindi", "seller_accounts", seller.name);
+    setMessage(`${seller.name} silindi.`);
+    if (openSellerId === seller.id) setOpenSellerId(null);
+  };
+
   const getSellerSummary = (sellerId: string) => {
     const sellerSales = activeSales.filter((s) => s.seller_account_id === sellerId);
     const sellerSaleIds = new Set(sellerSales.map((s) => s.id));
@@ -4389,9 +4408,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </div>
                             <div className="text-xs text-slate-500">{seller.email}</div>
                           </div>
-                          <button type="button" className="btn-secondary" style={{fontSize:"0.75rem"}} onClick={() => toggleSellerActive(seller)}>
-                            {seller.active ? "Pasif Et" : "Aktif Et"}
-                          </button>
+                          <div className="flex gap-2">
+                            <button type="button" className="btn-secondary" style={{fontSize:"0.75rem"}} onClick={() => toggleSellerActive(seller)}>
+                              {seller.active ? "Pasif Et" : "Aktif Et"}
+                            </button>
+                            <button type="button" className="btn-danger" style={{fontSize:"0.75rem"}} onClick={() => deleteSellerAccount(seller)}>
+                              Sil
+                            </button>
+                          </div>
                         </div>
                         <div className="grid gap-2 text-sm md:grid-cols-3 lg:grid-cols-6">
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satış</div><b>{money(summary.totalSatis)}</b></div>
