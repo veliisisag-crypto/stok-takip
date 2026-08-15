@@ -670,7 +670,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showPartiDetayModal, setShowPartiDetayModal] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -1610,6 +1610,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if ((saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") && !saleForm.note.trim()) {
       return setMessage("Hibe / Fire-Bozuk satışlarda açıklama girmek zorunlusun.");
     }
+    if ((saleForm.paid === "banka" || saleForm.paid === "nakit") && !saleForm.paraSahibi) {
+      return setMessage("Para kimde? alanını seçmelisin.");
+    }
     // Depo bazlı stok kontrolü
     const depoStock = batchItemsForProduct(product.id)
       .filter((i) => i.depo === saleForm.depo)
@@ -1667,7 +1670,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, seller_account_id: currentSellerAccount?.id || null })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, para_sahibi: saleForm.paraSahibi, seller_account_id: currentSellerAccount?.id || null })
           .select()
           .single();
         if (payErr) {
@@ -1700,7 +1703,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
-    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "" }));
+    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "", paraSahibi: "" }));
     setMessage("Satış kaydedildi.");
     loadAll();
     } finally {
@@ -5419,6 +5422,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <option value="false">Cari borç olarak yaz</option>
                     <option value="banka">Ödeme banka alındı</option>
                     <option value="nakit">Ödeme nakit alındı</option>
+                  </select>
+                )}
+                {(saleForm.paid === "banka" || saleForm.paid === "nakit") && (
+                  <select className="input" value={saleForm.paraSahibi} onChange={(e) => setSaleForm({ ...saleForm, paraSahibi: e.target.value })}>
+                    <option value="">Para kimde? *</option>
+                    {paraSahibiSecenekleri.map((kisi) => <option key={kisi} value={kisi}>{kisi}</option>)}
                   </select>
                 )}
                 {(saleForm.saleType === "Fire/Bozuk" || saleForm.saleType === "Hibe") && (
