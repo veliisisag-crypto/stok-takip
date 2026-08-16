@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 
@@ -314,6 +314,7 @@ type Period = {
   donem_kari?: number | null;
   devir_bakiyesi?: number | null;
   devir_bakiyesi_notu?: string | null;
+  seller_distributions?: { seller_id: string; name: string; amount: number }[] | null;
   closed: boolean;
   created_at: string;
   closed_at: string | null;
@@ -648,6 +649,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [saleLoading, setSaleLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
+  const [expandedSellerDistPeriodId, setExpandedSellerDistPeriodId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
   const [saleStatusFilter, setSaleStatusFilter] = useState<string>("Tümü");
@@ -1061,6 +1063,38 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       return toplam + alloc.amount - (realCost + ekMaliyet) * oran;
     }, 0);
   }, [paymentAllocations, activeSales, batchCosts, batchBoughtTotal, periods]);
+
+  // Her satıcının SADECE son kapanıştan bu yana gerçekleşen kâr payı (anlıkKar ile aynı "sinceDate" mantığı)
+  const sellerRealizedProfitSinceClose = useMemo(() => {
+    const lastClosed = periods
+      .filter((p) => p.closed && p.closed_at)
+      .sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
+    const sinceDate = lastClosed ? new Date(lastClosed.closed_at!) : new Date(0);
+    const recentAllocs = paymentAllocations.filter((a) => new Date(a.created_at) > sinceDate);
+    const saleMap = new Map(activeSales.map((s) => [s.id, s]));
+    const map = new Map<string, number>();
+    for (const alloc of recentAllocs) {
+      const sale = saleMap.get(alloc.sale_id);
+      if (!sale || !sale.seller_account_id) continue;
+      const total = toNum(sale.total);
+      if (total <= 0) continue;
+      const oran = alloc.amount / total;
+      const profit = Number(sale.seller_profit || 0);
+      map.set(sale.seller_account_id, (map.get(sale.seller_account_id) || 0) + profit * oran);
+    }
+    return map;
+  }, [paymentAllocations, activeSales, periods]);
+
+  const sellerRealizedProfitTotalSinceClose = useMemo(
+    () => Array.from(sellerRealizedProfitSinceClose.values()).reduce((s, v) => s + v, 0),
+    [sellerRealizedProfitSinceClose]
+  );
+
+  // Dönem kapanışında dağıtılacak toplam kâr = şirket kârı (anlıkKar) + satıcıların bu dönem gerçekleşen kâr payları
+  const donemKapanisKari = useMemo(
+    () => anlıkKar + sellerRealizedProfitTotalSinceClose,
+    [anlıkKar, sellerRealizedProfitTotalSinceClose]
+  );
 
   const karDetay = useMemo(() => {
     const lastClosed = periods
@@ -2071,6 +2105,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const openPeriodForOdeme = useMemo(() => periods.find((p) => !p.closed), [periods]);
 
+  // Ödemeler ekranındaki "Kasa Havuzları - Toplam" ile birebir aynı hesap - Dönem Kapanışı'nda da kullanılır
+  const toplamKasaHavuzu = useMemo(
+    () => paraSahibiSecenekleri.reduce((s, kisi) => s + (kasaHavuzlari.get(kisi)?.toplam || 0), 0) + (openPeriodForOdeme?.devir_bakiyesi || 0),
+    [paraSahibiSecenekleri, kasaHavuzlari, openPeriodForOdeme]
+  );
+
   // "Kimden" seçeneği için kullanılabilir bakiye (para_sahibi adı ya da "__devir__" sentinel'i)
   const getKaynakBakiye = (kaynak: string) => {
     if (kaynak === "__devir__") return openPeriodForOdeme?.devir_bakiyesi || 0;
@@ -2722,7 +2762,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const closePeriod = async () => {
    try {
-    const distributableProfit = Math.round(anlıkKar * 100) / 100;
+    const distributableProfit = Math.round(donemKapanisKari * 100) / 100;
     if (!Number.isFinite(distributableProfit)) {
       window.alert("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
       setMessage("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
@@ -2746,6 +2786,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     // Kasada fiilen olan para ile dağıtılan kar arasındaki fark (dağıtılmayan/devreden kasa)
     const devirBakiyesi = Math.round((Number(totals.cash || 0) - distributableProfit) * 100) / 100;
 
+    // Bu dönemde satıcıların ne kadar kâr payı gerçekleştirdiğinin anlık görüntüsü (Dönem Geçmişi'nde "Satıcılar" kolonu için)
+    const sellerDistributions = sellerAccounts
+      .map((s) => ({ seller_id: s.id, name: s.name, amount: Math.round((sellerRealizedProfitSinceClose.get(s.id) || 0) * 100) / 100 }))
+      .filter((s) => s.amount > 0);
+
     const openPeriod = periods.find((p) => !p.closed);
     const periodPayload = {
       closed: true,
@@ -2755,6 +2800,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       mihrimah_distribution: half,
       donem_kari: distributableProfit,
       devir_bakiyesi: devirBakiyesi,
+      seller_distributions: sellerDistributions,
     };
 
     if (openPeriod) {
@@ -2779,7 +2825,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       window.alert(`Dönem kapatma başarısız oldu:\n${firstError.message || firstError}`);
       return showError(firstError);
     }
-    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi });
+    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi, satici_dagilimi: sellerDistributions });
     window.alert(`Dönem kapatıldı.\n${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
     setMessage(`Dönem kapatıldı; ${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
     loadAll();
@@ -4209,10 +4255,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
               <div className="mt-3 pt-3" style={{borderTop:"1px solid #e2e8f0"}}>
                 <span className="text-sm font-semibold text-slate-700">
-                  Kasa Havuzları - Toplam = {money(
-                    paraSahibiSecenekleri.reduce((s, kisi) => s + (kasaHavuzlari.get(kisi)?.toplam || 0), 0)
-                    + (openPeriodForOdeme?.devir_bakiyesi || 0)
-                  )}
+                  Kasa Havuzları - Toplam = {money(toplamKasaHavuzu)}
                 </span>
               </div>
             </Card>
@@ -5517,17 +5560,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         {active === "period" && (
           <div className="space-y-4">
             <Card title="Dönem Kapanışı">
-              <p className="mb-5 text-slate-500">Dağıtım, Kar tablosunun (Net Kar Detayı) dip toplamına göre eşit yapılır; borcu olan ortağın payı önce borcundan düşülür.</p>
+              <p className="mb-5 text-slate-500">Dağıtım, Kar tablosunun (Net Kar Detayı) dip toplamına + satıcıların bu dönem gerçekleşen kâr paylarına göre yapılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
                 <div className="rounded-xl bg-slate-100 p-4">Toplam tahsilat<br /><b>{money(totals.grossCash)}</b></div>
                 {totals.refundIncome > 0 && (
                   <div className="rounded-xl bg-amber-50 border border-amber-300 p-4">Bunun içinde toptancı iadesi<br /><b>{money(totals.refundIncome)}</b></div>
                 )}
-                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(totals.cash)}</b></div>
-                <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(anlıkKar)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(anlıkKar / 2)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(toplamKasaHavuzu)}</b></div>
+                <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(donemKapanisKari)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(donemKapanisKari / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(donemKapanisKari / 2)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Müşteri cari<br /><b>{money(totals.customerDebt)}</b></div>
+                {sellerAccounts.map((s) => {
+                  const tutar = sellerRealizedProfitSinceClose.get(s.id) || 0;
+                  if (tutar <= 0) return null;
+                  return (
+                    <div key={s.id} className="rounded-xl bg-sky-50 border border-sky-200 p-4">{s.name} payı (gerçekleşen kâr)<br /><b>{money(tutar)}</b></div>
+                  );
+                })}
               </div>
               <button type="button" className="btn" disabled={isLoading("closePeriod")} onClick={() => withLoading("closePeriod", closePeriod)}>{isLoading("closePeriod") ? "Kapatılıyor..." : "Dönemi Kapat ve Mahsuplaştır"}</button>
             </Card>
@@ -5538,21 +5588,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <thead>
                         <tr style={{background:"#f8fafc", borderBottom:"1.5px solid #e2e8f0"}}>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Dönem</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Ürün Maliyeti</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Diğer Maliyetler</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Dönem Karı</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Toplam Tahsilat</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Net Ödeme</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihri Net Ödeme</th>
+                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Satıcılar</th>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Durum</th>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Kapanış</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {periods.map((p) => (
-                          <tr key={p.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                        {periods.map((p) => {
+                          const sellerDist = p.seller_distributions || [];
+                          const sellerDistTotal = sellerDist.reduce((s, d) => s + Number(d.amount || 0), 0);
+                          const isExpanded = expandedSellerDistPeriodId === p.id;
+                          return (
+                          <Fragment key={p.id}>
+                          <tr style={{borderBottom:"1px solid #f1f5f9"}}>
                             <td style={{padding:"10px 12px"}}>{p.name}</td>
-                            {(["urun_maliyeti","diger_maliyetler","donem_kari"] as const).map((field) => (
+                            {(["donem_kari"] as const).map((field) => (
                               <td key={field} style={{padding:"10px 12px", textAlign:"right"}}>
                                 {editingNetOdemeId === `${p.id}-${field}` ? (
                                   <div style={{display:"flex", gap:4, justifyContent:"flex-end", alignItems:"center"}}>
@@ -5593,10 +5647,37 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 )}
                               </td>
                             ))}
+                            <td style={{padding:"10px 12px", textAlign:"right"}}>
+                              {sellerDist.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="btn-secondary"
+                                  style={{fontSize:"0.75rem", padding:"3px 10px"}}
+                                  onClick={() => setExpandedSellerDistPeriodId(isExpanded ? null : p.id)}
+                                >
+                                  {money(sellerDistTotal)} {isExpanded ? "▲" : "▼"}
+                                </button>
+                              ) : "—"}
+                            </td>
                             <td style={{padding:"10px 12px"}}>{p.closed ? "Kapalı" : "Açık"}</td>
                             <td style={{padding:"10px 12px"}}>{p.closed_at ? new Date(p.closed_at).toLocaleDateString("tr-TR") : "-"}</td>
                           </tr>
-                        ))}
+                          {isExpanded && sellerDist.length > 0 && (
+                            <tr style={{borderBottom:"1px solid #f1f5f9", background:"#f8fafc"}}>
+                              <td colSpan={8} style={{padding:"10px 12px"}}>
+                                <div style={{display:"flex", flexWrap:"wrap", gap:8}}>
+                                  {sellerDist.map((d) => (
+                                    <span key={d.seller_id} className="rounded-lg bg-white border px-3 py-1.5 text-sm">
+                                      <b>{d.name}</b>: {money(d.amount)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
