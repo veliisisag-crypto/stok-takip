@@ -1151,6 +1151,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const openingBalanceNote = lastClosedPeriod?.devir_bakiyesi_notu || "";
     const sinceDate = lastClosedAt ? new Date(lastClosedAt) : new Date(0);
     const recentPayments = scopedActivePayments.filter((p) => new Date(p.created_at) > sinceDate);
+    // Son kapanıştan ÖNCE girilmiş ama kasa bakiyesi hâlâ harcanmamış (devir bakiyesine kaynak) tahsilatlar -
+    // bunlar artık "bu dönem" listesinde değil ama parası hâlâ orada duruyor, ayrı renkte gösterilecek.
+    const carriedOverPayments = scopedActivePayments.filter((p) => new Date(p.created_at) <= sinceDate && Number(p.kasa_tutari || 0) > 0);
     const isPendingAdvance = (p: Payment) => {
       if (!p.preorder_id) return false;
       const po = preorderMap.get(p.preorder_id);
@@ -1172,7 +1175,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const cash = Math.max(grossCash - distributedCash, 0);
     const revenue = cash + customerDebt + distributedCash;
     const profit = scopedActiveSales.reduce((sum, item) => sum + (item.total - item.cost), 0);
-    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal, pastPendingAdvanceTotal };
+    return { revenue, profit, customerDebt, stockValue, totalStock, grossCash, distributedCash, cash, recentPayments, carriedOverPayments, refundIncome, openingBalance, openingBalancePeriodId, openingBalanceNote, pendingAdvanceTotal, pastPendingAdvanceTotal };
   }, [products, customers, myCustomers, batchItems, activeSales, myActiveSales, activePayments, myActivePayments, periods, supplierReturns, preorderMap, isSellerRole]);
 
 
@@ -2659,12 +2662,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       ]);
     }
 
-    [...totals.recentPayments]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .forEach((pay) => {
+    [
+      ...totals.carriedOverPayments.map((p) => ({ pay: p, isCarriedOver: true })),
+      ...totals.recentPayments.map((p) => ({ pay: p, isCarriedOver: false })),
+    ]
+      .sort((a, b) => new Date(b.pay.created_at).getTime() - new Date(a.pay.created_at).getTime())
+      .forEach(({ pay, isCarriedOver }) => {
         const row: (string | number)[] = [
           toTR(pay.created_at, true),
-          customerMap.get(pay.customer_id)?.name || "-",
+          (customerMap.get(pay.customer_id)?.name || "-") + (isCarriedOver ? " (Devir)" : ""),
           pay.user_email?.split("@")[0] || "-",
           pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : "-",
           Number(pay.amount),
@@ -2675,7 +2681,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         rows.push(row);
       });
 
-    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
+    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0);
     rows.push(["Toplam", "", "", "", Number(totals.grossCash), kasaToplam, ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -4349,9 +4355,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {paraSahibiSecenekleri.filter((k) => !odemeKimden.includes(k)).map((k) => (
                       <option key={k} value={k}>{k} — kullanılabilir {money(getKaynakBakiye(k))}</option>
                     ))}
-                    {!odemeKimden.includes("__devir__") && (
-                      <option value="__devir__">Devir Bakiyesi — kullanılabilir {money(getKaynakBakiye("__devir__"))}</option>
-                    )}
                   </select>
                 </div>
                 <button
@@ -4917,7 +4920,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                 <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
                 <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{totals.recentPayments.length} ödeme · Toplam: <strong>{money(totals.grossCash)}</strong></span>
+                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{totals.recentPayments.length + totals.carriedOverPayments.length} ödeme · Toplam: <strong>{money(totals.grossCash)}</strong></span>
                   <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportTahsilatToExcel}>Excel'e Aktar</button>
                   <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
                 </div>
@@ -5003,15 +5006,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </td>
                       </tr>
                     )}
-                    {totals.recentPayments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => {
+                    {[
+                      ...totals.carriedOverPayments.map((p) => ({ pay: p, isCarriedOver: true })),
+                      ...totals.recentPayments.map((p) => ({ pay: p, isCarriedOver: false })),
+                    ]
+                      .sort((a, b) => new Date(b.pay.created_at).getTime() - new Date(a.pay.created_at).getTime())
+                      .map(({ pay, isCarriedOver }) => {
                       const linkedPreorder = pay.preorder_id ? preorderMap.get(pay.preorder_id) : null;
                       const isPendingAdvance = !!linkedPreorder && linkedPreorder.status === "bekliyor";
                       return (
-                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9", background: isPendingAdvance ? "#fffbeb" : undefined}}>
+                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9", background: isPendingAdvance ? "#fffbeb" : isCarriedOver ? "#f5f3ff" : undefined}}>
                         <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
                         <td style={{padding:"7px 10px"}}>
                           {customerMap.get(pay.customer_id)?.name || "-"}
                           {isPendingAdvance && <span style={{marginLeft:6, fontSize:"0.7rem", fontWeight:700, color:"#92400e"}}>💰 Ön Ödeme</span>}
+                          {isCarriedOver && <span style={{marginLeft:6, fontSize:"0.7rem", fontWeight:700, color:"#6d28d9"}}>🔄 Devir</span>}
                         </td>
                         <td style={{padding:"7px 10px",color:"#64748b"}}>{pay.user_email?.split("@")[0] || "-"}</td>
                         <td style={{padding:"7px 10px"}}>
@@ -5095,7 +5104,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
                       <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
                       <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
-                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
+                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
                       <td></td>
                       {!isSellerRole && <td></td>}
                       <td></td>
@@ -5557,7 +5566,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {active === "period" && (
+        {active === "period" && !isSellerRole && (
           <div className="space-y-4">
             <Card title="Dönem Kapanışı">
               <p className="mb-5 text-slate-500">Dağıtım, Kar tablosunun (Net Kar Detayı) dip toplamına + satıcıların bu dönem gerçekleşen kâr paylarına göre yapılır; borcu olan ortağın payı önce borcundan düşülür.</p>
