@@ -2108,10 +2108,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const openPeriodForOdeme = useMemo(() => periods.find((p) => !p.closed), [periods]);
 
-  // Ödemeler ekranındaki "Kasa Havuzları - Toplam" ile birebir aynı hesap - Dönem Kapanışı'nda da kullanılır
+  // Üç ekranda da (Dönem Kapanışı "Kasadaki para", Dönem Tahsilatları "Kasa", Ödemeler "Kasa Havuzları - Toplam")
+  // aynı rakamı göstermek için tek kaynak: bu dönemin taze tahsilatları + önceki dönemden devir bakiyesi (lump).
   const toplamKasaHavuzu = useMemo(
-    () => paraSahibiSecenekleri.reduce((s, kisi) => s + (kasaHavuzlari.get(kisi)?.toplam || 0), 0) + (openPeriodForOdeme?.devir_bakiyesi || 0),
-    [paraSahibiSecenekleri, kasaHavuzlari, openPeriodForOdeme]
+    () => totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance),
+    [totals, isSellerRole]
   );
 
   // "Kimden" seçeneği için kullanılabilir bakiye (para_sahibi adı ya da "__devir__" sentinel'i)
@@ -2678,7 +2679,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         rows.push(row);
       });
 
-    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
+    const kasaToplam = toplamKasaHavuzu;
     rows.push(["Toplam", "", "", "", Number(totals.grossCash), kasaToplam, ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -4993,7 +4994,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
                       <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={4}>Toplamı ({totals.recentPayments.length} ödeme)</td>
                       <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.grossCash)}</td>
-                      <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(toplamKasaHavuzu)}</td>
                       <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
                       {!isSellerRole && <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>}
                       <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
@@ -5552,7 +5553,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {totals.refundIncome > 0 && (
                   <div className="rounded-xl bg-amber-50 border border-amber-300 p-4">Bunun içinde toptancı iadesi<br /><b>{money(totals.refundIncome)}</b></div>
                 )}
-                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(totals.cash)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(toplamKasaHavuzu)}</b></div>
                 <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(donemKapanisKari)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(anlıkKar / 2)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
