@@ -2681,7 +2681,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         rows.push(row);
       });
 
-    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0);
+    const kasaToplam = totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance);
     rows.push(["Toplam", "", "", "", Number(totals.grossCash), kasaToplam, ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -2769,7 +2769,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const closePeriod = async () => {
    try {
     const distributableProfit = Math.round(donemKapanisKari * 100) / 100;
-    if (!Number.isFinite(distributableProfit)) {
+    // Aslı/Mihrimah arasında bölüşülecek pay SADECE şirket kârından (satıcıların kendi kâr payı hariç)
+    const companyProfit = Math.round(anlıkKar * 100) / 100;
+    if (!Number.isFinite(distributableProfit) || !Number.isFinite(companyProfit)) {
       window.alert("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
       setMessage("Kar hesabında geçersiz bir değer var (NaN), dönem kapatılamadı. Lütfen ek maliyet ve satış kayıtlarını kontrol edin.");
       return;
@@ -2780,7 +2782,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       return;
     }
 
-    const half = distributableProfit / 2;
+    const half = Math.max(companyProfit, 0) / 2;
     const closedAt = new Date().toISOString();
     const asli = partners.find((p) => p.partner_name === "Aslı");
     const mihrimah = partners.find((p) => p.partner_name === "Mihrimah");
@@ -2832,8 +2834,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       return showError(firstError);
     }
     await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi, satici_dagilimi: sellerDistributions });
-    window.alert(`Dönem kapatıldı.\n${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
-    setMessage(`Dönem kapatıldı; ${money(distributableProfit)} kar Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
+    window.alert(`Dönem kapatıldı.\nToplam tanınan kâr: ${money(distributableProfit)} (şirket: ${money(companyProfit)}, satıcılar: ${money(distributableProfit - companyProfit)}).\nŞirket kârı Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
+    setMessage(`Dönem kapatıldı; şirket kârı (${money(companyProfit)}) Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
     loadAll();
    } catch (err: unknown) {
      const msg = err instanceof Error ? err.message : String(err);
@@ -4944,7 +4946,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
                       <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={4}>Toplamı ({totals.recentPayments.length + totals.carriedOverPayments.length} ödeme)</td>
                       <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.grossCash)}</td>
-                      <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
                       <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
                       {!isSellerRole && <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>}
                       <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
@@ -5572,10 +5574,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {totals.refundIncome > 0 && (
                   <div className="rounded-xl bg-amber-50 border border-amber-300 p-4">Bunun içinde toptancı iadesi<br /><b>{money(totals.refundIncome)}</b></div>
                 )}
-                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(toplamKasaHavuzu)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(totals.cash)}</b></div>
                 <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(donemKapanisKari)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(donemKapanisKari / 2)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(donemKapanisKari / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(anlıkKar / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
                 <div className="rounded-xl bg-slate-100 p-4">Müşteri cari<br /><b>{money(totals.customerDebt)}</b></div>
                 {sellerAccounts.map((s) => {
                   const tutar = sellerRealizedProfitSinceClose.get(s.id) || 0;
