@@ -4925,35 +4925,29 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
                   </div>
                 </div>
-                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Ödeme sayısı</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{totals.recentPayments.length + totals.carriedOverPayments.length}</div>
-                  </div>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam tutar</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(totals.grossCash)}</div>
-                  </div>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Kasa toplamı</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</div>
-                  </div>
-                </div>
               </div>
               <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tarih</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Cari</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ekleyen</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Yöntem</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tutar</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Kasa</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Para Kimde</th>
-                      {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Açıklama</th>}
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}></th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Tarih</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Cari</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Ekleyen</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Yöntem</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Tutar</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Kasa</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Para Kimde</th>
+                      {!isSellerRole && <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Açıklama</th>}
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}></th>
+                    </tr>
+                    <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
+                      <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={4}>Toplamı ({totals.recentPayments.length + totals.carriedOverPayments.length} ödeme)</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.grossCash)}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
+                      <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
+                      {!isSellerRole && <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>}
+                      <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
                     </tr>
                   </thead>
                   <tbody>
@@ -5147,28 +5141,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Müşteri Borcu Detayı</h2>
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowMusteriDetay(false)}>Kapat</button>
                   </div>
-                  <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
-                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Müşteri sayısı</div>
-                      <div style={{fontSize:"1rem",fontWeight:700}}>{debtList.length}</div>
-                    </div>
-                    <div style={{background:"#fef2f2",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam borç</div>
-                      <div style={{fontSize:"1rem",fontWeight:700,color:"#dc2626"}}>{money(total)}</div>
-                    </div>
-                  </div>
                 </div>
                 <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tarih</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Müşteri</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ürün</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ad.</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tutar</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ödenen</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Kalan</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Tarih</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Müşteri</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Ürün</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Ad.</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Tutar</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Ödenen</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>Kalan</th>
+                    </tr>
+                    <tr style={{background:"#fef2f2",borderBottom:"1.5px solid #fecaca"}}>
+                      <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#fef2f2",zIndex:2}} colSpan={3}>Toplamı ({debtList.length} müşteri)</td>
+                      <td style={{position:"sticky",top:33,background:"#fef2f2",zIndex:2}}></td>
+                      <td style={{position:"sticky",top:33,background:"#fef2f2",zIndex:2}}></td>
+                      <td style={{position:"sticky",top:33,background:"#fef2f2",zIndex:2}}></td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:"#dc2626",position:"sticky",top:33,background:"#fef2f2",zIndex:2}}>{money(total)}</td>
                     </tr>
                   </thead>
                   <tbody>
@@ -5223,7 +5214,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           });
           const stokTh = (col: string, label: string) => (
             <th key={col} onClick={() => setStokSort((p) => ({col, dir: p.col === col && p.dir === "asc" ? "desc" : "asc"}))}
-              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
+              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>
               {label}{stokSort.col === col ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}
             </th>
           );
@@ -5236,16 +5227,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Mevcut Stok Detayı</h2>
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowStokDetay(false)}>Kapat</button>
                   </div>
-                  <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
-                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Kalem sayısı</div>
-                      <div style={{fontSize:"1rem",fontWeight:700}}>{sorted.length}</div>
-                    </div>
-                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
-                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam adet</div>
-                      <div style={{fontSize:"1rem",fontWeight:700}}>{genelToplam}</div>
-                    </div>
-                  </div>
                 </div>
                 <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
                 <div style={{overflowX:"auto"}}>
@@ -5257,6 +5238,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         {stokTh("tur","Tür")}
                         {stokTh("toplam","Stok")}
                         {stokTh("alis","Alış Fiyatı")}
+                      </tr>
+                      <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
+                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={3}>Toplamı ({sorted.length} kalem)</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{genelToplam}</td>
+                        <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
                       </tr>
                     </thead>
                     <tbody>
@@ -5289,28 +5275,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowKarDetay(false)}>Kapat</button>
                   </div>
                 </div>
-                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:12}}>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Satır sayısı</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{karDetay.length}</div>
-                  </div>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam tahsilat</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</div>
-                  </div>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam maliyet</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</div>
-                  </div>
-                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Ek maliyet</div>
-                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</div>
-                  </div>
-                  <div style={{background: anlıkKar<0?"#fef2f2":"#f0fdf4",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
-                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam net kâr</div>
-                    <div style={{fontSize:"1rem",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</div>
-                  </div>
-                </div>
                 {(() => {
                   const eskiDonemTahsilat = karDetay.filter((r) => r.fromPreviousPeriod).reduce((s, r) => s + r.tahsilat, 0);
                   const buDonemTahsilat = karDetay.reduce((s, r) => s + r.tahsilat, 0) - eskiDonemTahsilat;
@@ -5328,8 +5292,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
                       {["Tarih","Cari","Ürün","Ad.","Satış","Tahsilat","Maliyet","Ek Maliyet","Kar"].map((h) => (
-                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"||h==="Tarih"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>{h}</th>
+                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"||h==="Tarih"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>{h}</th>
                       ))}
+                    </tr>
+                    <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
+                      <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={5}>Toplamı</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a",position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(anlıkKar)}</td>
                     </tr>
                   </thead>
                   <tbody>
