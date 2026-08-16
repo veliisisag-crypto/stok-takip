@@ -4916,15 +4916,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {showTahsilatDetay && (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowTahsilatDetay(false)}>
-            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:1180,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-                <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
-                <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{totals.recentPayments.length + totals.carriedOverPayments.length} ödeme · Toplam: <strong>{money(totals.grossCash)}</strong></span>
-                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportTahsilatToExcel}>Excel'e Aktar</button>
-                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
+            <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:1180,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
+              <div style={{flexShrink:0,padding:"24px 24px 0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Dönem Tahsilatları Detayı</h2>
+                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportTahsilatToExcel}>Excel'e Aktar</button>
+                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Ödeme sayısı</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{totals.recentPayments.length + totals.carriedOverPayments.length}</div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam tutar</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(totals.grossCash)}</div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Kasa toplamı</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</div>
+                  </div>
                 </div>
               </div>
+              <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
@@ -5100,17 +5116,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       );
                     })}
                   </tbody>
-                  <tfoot>
-                    <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={4} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{money(totals.grossCash)}</td>
-                      <td style={{padding:"8px 10px",fontWeight:700}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + totals.carriedOverPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0))}</td>
-                      <td></td>
-                      {!isSellerRole && <td></td>}
-                      <td></td>
-                    </tr>
-                  </tfoot>
                 </table>
+              </div>
               </div>
             </div>
           </div>
@@ -5134,24 +5141,34 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const total = debtList.reduce((s, c) => s + c.balance, 0);
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowMusteriDetay(false)}>
-              <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:800,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-                  <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Müşteri Borcu Detayı</h2>
-                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                    <span style={{fontSize:"0.85rem",color:"#64748b"}}>{debtList.length} müşteri · Toplam: <strong>{money(total)}</strong></span>
+              <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:800,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
+                <div style={{flexShrink:0,padding:"24px 24px 0"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                    <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Müşteri Borcu Detayı</h2>
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowMusteriDetay(false)}>Kapat</button>
                   </div>
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
+                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Müşteri sayısı</div>
+                      <div style={{fontSize:"1rem",fontWeight:700}}>{debtList.length}</div>
+                    </div>
+                    <div style={{background:"#fef2f2",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam borç</div>
+                      <div style={{fontSize:"1rem",fontWeight:700,color:"#dc2626"}}>{money(total)}</div>
+                    </div>
+                  </div>
                 </div>
+                <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Tarih</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Müşteri</th>
-                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b"}}>Ürün</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Ad.</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Tutar</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Ödenen</th>
-                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b"}}>Kalan</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tarih</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Müşteri</th>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ürün</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ad.</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Tutar</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Ödenen</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>Kalan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5171,13 +5188,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={6} style={{padding:"8px 10px",fontWeight:600}}>Toplam Borç</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#dc2626"}}>{money(total)}</td>
-                    </tr>
-                  </tfoot>
                 </table>
+                </div>
               </div>
             </div>
           );
@@ -5211,21 +5223,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           });
           const stokTh = (col: string, label: string) => (
             <th key={col} onClick={() => setStokSort((p) => ({col, dir: p.col === col && p.dir === "asc" ? "desc" : "asc"}))}
-              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none"}}>
+              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
               {label}{stokSort.col === col ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}
             </th>
           );
           const genelToplam = sorted.reduce((s, r) => s + r.toplam, 0);
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowStokDetay(false)}>
-              <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:900,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
-                  <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Mevcut Stok Detayı</h2>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    <span style={{fontSize:"0.85rem",color:"#64748b"}}>{sorted.length} kalem · <strong>{genelToplam}</strong> adet</span>
+              <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:900,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
+                <div style={{flexShrink:0,padding:"24px 24px 0"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                    <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Mevcut Stok Detayı</h2>
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowStokDetay(false)}>Kapat</button>
                   </div>
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
+                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Kalem sayısı</div>
+                      <div style={{fontSize:"1rem",fontWeight:700}}>{sorted.length}</div>
+                    </div>
+                    <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:130}}>
+                      <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam adet</div>
+                      <div style={{fontSize:"1rem",fontWeight:700}}>{genelToplam}</div>
+                    </div>
+                  </div>
                 </div>
+                <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
                 <div style={{overflowX:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                     <thead>
@@ -5248,14 +5270,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </tr>
                       ))}
                     </tbody>
-                    <tfoot>
-                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                        <td colSpan={3} style={{padding:"8px 10px",fontWeight:600}}>Toplam</td>
-                        <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700}}>{genelToplam}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
                   </table>
+                </div>
                 </div>
               </div>
             </div>
@@ -5264,21 +5280,55 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {showKarDetay && (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowKarDetay(false)}>
-            <div style={{background:"white",borderRadius:16,padding:24,width:"100%",maxWidth:900,maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-                <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Net Kar Detayı</h2>
-                <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                  <span style={{fontSize:"0.85rem",color:"#64748b"}}>{karDetay.length} satır · Toplam: <strong>{money(anlıkKar)}</strong></span>
-                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportKarDetayToExcel}>Excel'e Aktar</button>
-                  <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowKarDetay(false)}>Kapat</button>
+            <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:900,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
+              <div style={{flexShrink:0,padding:"24px 24px 0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Net Kar Detayı</h2>
+                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={exportKarDetayToExcel}>Excel'e Aktar</button>
+                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowKarDetay(false)}>Kapat</button>
+                  </div>
                 </div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:12}}>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Satır sayısı</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{karDetay.length}</div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam tahsilat</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam maliyet</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Ek maliyet</div>
+                    <div style={{fontSize:"1rem",fontWeight:700}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</div>
+                  </div>
+                  <div style={{background: anlıkKar<0?"#fef2f2":"#f0fdf4",borderRadius:12,padding:"10px 14px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:"0.75rem",color:"#94a3b8"}}>Toplam net kâr</div>
+                    <div style={{fontSize:"1rem",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</div>
+                  </div>
+                </div>
+                {(() => {
+                  const eskiDonemTahsilat = karDetay.filter((r) => r.fromPreviousPeriod).reduce((s, r) => s + r.tahsilat, 0);
+                  const buDonemTahsilat = karDetay.reduce((s, r) => s + r.tahsilat, 0) - eskiDonemTahsilat;
+                  if (eskiDonemTahsilat <= 0) return null;
+                  return (
+                    <div style={{background:"#fffbeb", borderRadius:12, padding:"8px 12px", marginBottom:12, fontSize:"0.75rem", color:"#92400e"}}>
+                      💰 Yukarıdaki toplamın <b>{money(buDonemTahsilat)}</b>'si bu dönemin gerçek tahsilatı, <b>{money(eskiDonemTahsilat)}</b>'si ise önceki dönem(ler)de alınmış ön ödemelerin şimdi satışa dönüşüp kâr hesabına yansımasından geliyor.
+                    </div>
+                  );
+                })()}
               </div>
+              <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
                       {["Tarih","Cari","Ürün","Ad.","Satış","Tahsilat","Maliyet","Ek Maliyet","Kar"].map((h) => (
-                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"||h==="Tarih"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap"}}>{h}</th>
+                        <th key={h} style={{padding:"8px 10px",textAlign:h==="Cari"||h==="Ürün"||h==="Tarih"?"left":"right",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -5300,32 +5350,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    <tr style={{borderTop:"1.5px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={5} style={{padding:"8px 10px",fontWeight:600,color:"#64748b"}}>Toplam Tahsilat</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.tahsilat, 0))}</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.maliyet, 0))}</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}>{money(karDetay.reduce((s,r) => s + r.ekMaliyet, 0))}</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600}}></td>
-                    </tr>
-                    {(() => {
-                      const eskiDonemTahsilat = karDetay.filter((r) => r.fromPreviousPeriod).reduce((s, r) => s + r.tahsilat, 0);
-                      const buDonemTahsilat = karDetay.reduce((s, r) => s + r.tahsilat, 0) - eskiDonemTahsilat;
-                      if (eskiDonemTahsilat <= 0) return null;
-                      return (
-                        <tr style={{background:"#fffbeb"}}>
-                          <td colSpan={9} style={{padding:"6px 10px", fontSize:"0.75rem", color:"#92400e"}}>
-                            💰 Yukarıdaki toplamın <b>{money(buDonemTahsilat)}</b>'si bu dönemin gerçek tahsilatı, <b>{money(eskiDonemTahsilat)}</b>'si ise önceki dönem(ler)de alınmış ön ödemelerin şimdi satışa dönüşüp kâr hesabına yansımasından geliyor.
-                          </td>
-                        </tr>
-                      );
-                    })()}
-                    <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                      <td colSpan={8} style={{padding:"8px 10px",fontWeight:600}}>Toplam Net Kar</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:anlıkKar<0?"#dc2626":"#16a34a"}}>{money(anlıkKar)}</td>
-                    </tr>
-                  </tfoot>
                 </table>
+              </div>
               </div>
             </div>
           </div>
