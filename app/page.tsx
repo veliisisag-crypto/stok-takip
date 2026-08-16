@@ -2662,15 +2662,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       ]);
     }
 
-    [
-      ...totals.carriedOverPayments.map((p) => ({ pay: p, isCarriedOver: true })),
-      ...totals.recentPayments.map((p) => ({ pay: p, isCarriedOver: false })),
-    ]
-      .sort((a, b) => new Date(b.pay.created_at).getTime() - new Date(a.pay.created_at).getTime())
-      .forEach(({ pay, isCarriedOver }) => {
+    [...totals.recentPayments]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .forEach((pay) => {
         const row: (string | number)[] = [
           toTR(pay.created_at, true),
-          (customerMap.get(pay.customer_id)?.name || "-") + (isCarriedOver ? " (Devir)" : ""),
+          customerMap.get(pay.customer_id)?.name || "-",
           pay.user_email?.split("@")[0] || "-",
           pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : "-",
           Number(pay.amount),
@@ -4927,9 +4924,59 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowTahsilatDetay(false)}>Kapat</button>
                   </div>
                 </div>
+                {!isSellerRole && totals.openingBalancePeriodId && (
+                  <div style={{background:"#fffbeb", borderRadius:12, padding:"10px 14px", marginBottom:16, display:"flex", flexWrap:"wrap", gap:16, alignItems:"center", fontSize:"0.8rem"}}>
+                    <span style={{color:"#92400e", fontWeight:600}}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</span>
+                    {editingOpeningBalance ? (
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input
+                          className="input"
+                          type="number"
+                          style={{fontSize:"0.78rem",padding:"4px 6px", width: 100}}
+                          value={openingBalanceDraft}
+                          onChange={(e) => setOpeningBalanceDraft(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === "Enter") saveOpeningBalance(totals.openingBalancePeriodId!); }}
+                        />
+                        <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalance(totals.openingBalancePeriodId!)}>Kaydet</button>
+                        <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(false); setOpeningBalanceDraft(""); }}>Vazgeç</button>
+                      </div>
+                    ) : (
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{fontWeight:700, color:"#92400e"}}>{money(totals.openingBalance)}</span>
+                        <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(true); setOpeningBalanceDraft(String(totals.openingBalance)); }}>Değiştir</button>
+                      </div>
+                    )}
+                    {editingOpeningBalanceNote ? (
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input
+                          className="input"
+                          style={{fontSize:"0.78rem",padding:"4px 6px"}}
+                          value={openingBalanceNoteDraft}
+                          onChange={(e) => setOpeningBalanceNoteDraft(e.target.value)}
+                          placeholder="Örn: 1500 TL bundan 12.parti alımına gitti"
+                          autoFocus
+                        />
+                        <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalanceNote(totals.openingBalancePeriodId!)}>Kaydet</button>
+                        <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalanceNote(false); setOpeningBalanceNoteDraft(""); }}>Vazgeç</button>
+                      </div>
+                    ) : (
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        {totals.openingBalanceNote && <span style={{color:"#92400e",fontStyle:"italic"}}>{totals.openingBalanceNote}</span>}
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{fontSize:"0.7rem",padding:"3px 8px"}}
+                          onClick={() => { setEditingOpeningBalanceNote(true); setOpeningBalanceNoteDraft(totals.openingBalanceNote || ""); }}
+                        >
+                          {totals.openingBalanceNote ? "Değiştir" : "Not Ekle"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
-              <div style={{overflowX:"auto"}}>
+              <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
@@ -4944,7 +4991,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}></th>
                     </tr>
                     <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
-                      <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={4}>Toplamı ({totals.recentPayments.length + totals.carriedOverPayments.length} ödeme)</td>
+                      <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={4}>Toplamı ({totals.recentPayments.length} ödeme)</td>
                       <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.grossCash)}</td>
                       <td style={{padding:"7px 10px",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance))}</td>
                       <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
@@ -4953,64 +5000,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {!isSellerRole && totals.openingBalancePeriodId && (
-                      <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fffbeb"}}>
-                        <td style={{padding:"7px 10px", color:"#92400e", fontWeight:600}} colSpan={4}>Dönem Başlangıç Kasa Bakiyesi (önceki dönemden devir)</td>
-                        <td style={{padding:"7px 10px",textAlign:"right",color:"#cbd5e1"}}>—</td>
-                        <td style={{padding:"7px 10px",fontWeight:700, color:"#92400e"}}>
-                          {editingOpeningBalance ? (
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                              <input
-                                className="input"
-                                type="number"
-                                style={{fontSize:"0.78rem",padding:"4px 6px", width: 100}}
-                                value={openingBalanceDraft}
-                                onChange={(e) => setOpeningBalanceDraft(e.target.value)}
-                                autoFocus
-                                onKeyDown={(e) => { if (e.key === "Enter") saveOpeningBalance(totals.openingBalancePeriodId!); }}
-                              />
-                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalance(totals.openingBalancePeriodId!)}>Kaydet</button>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(false); setOpeningBalanceDraft(""); }}>Vazgeç</button>
-                            </div>
-                          ) : (
-                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                              <span>{money(totals.openingBalance)}</span>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalance(true); setOpeningBalanceDraft(String(totals.openingBalance)); }}>Değiştir</button>
-                            </div>
-                          )}
-                        </td>
-                        <td></td>
-                        <td style={{padding:"7px 10px", minWidth: 180}}>
-                          {editingOpeningBalanceNote ? (
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                              <input
-                                className="input"
-                                style={{fontSize:"0.78rem",padding:"4px 6px"}}
-                                value={openingBalanceNoteDraft}
-                                onChange={(e) => setOpeningBalanceNoteDraft(e.target.value)}
-                                placeholder="Örn: 1500 TL bundan 12.parti alımına gitti"
-                                autoFocus
-                              />
-                              <button type="button" className="btn" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => saveOpeningBalanceNote(totals.openingBalancePeriodId!)}>Kaydet</button>
-                              <button type="button" className="btn-secondary" style={{fontSize:"0.7rem",padding:"3px 8px"}} onClick={() => { setEditingOpeningBalanceNote(false); setOpeningBalanceNoteDraft(""); }}>Vazgeç</button>
-                            </div>
-                          ) : (
-                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                              {totals.openingBalanceNote && <span style={{color:"#92400e",fontStyle:"italic"}}>{totals.openingBalanceNote}</span>}
-                              <button
-                                type="button"
-                                className="btn-secondary"
-                                style={{fontSize:"0.7rem",padding:"3px 8px"}}
-                                onClick={() => { setEditingOpeningBalanceNote(true); setOpeningBalanceNoteDraft(totals.openingBalanceNote || ""); }}
-                              >
-                                {totals.openingBalanceNote ? "Değiştir" : "Not Ekle"}
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                        <td></td>
-                      </tr>
-                    )}
                     {!isSellerRole && totals.pastPendingAdvanceTotal > 0 && (
                       <tr style={{borderBottom:"1px solid #f1f5f9", background:"#fef9c3"}}>
                         <td style={{padding:"7px 10px", color:"#854d0e", fontWeight:600}} colSpan={9}>
@@ -5018,21 +5007,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         </td>
                       </tr>
                     )}
-                    {[
-                      ...totals.carriedOverPayments.map((p) => ({ pay: p, isCarriedOver: true })),
-                      ...totals.recentPayments.map((p) => ({ pay: p, isCarriedOver: false })),
-                    ]
-                      .sort((a, b) => new Date(b.pay.created_at).getTime() - new Date(a.pay.created_at).getTime())
-                      .map(({ pay, isCarriedOver }) => {
+                    {totals.recentPayments.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((pay) => {
                       const linkedPreorder = pay.preorder_id ? preorderMap.get(pay.preorder_id) : null;
                       const isPendingAdvance = !!linkedPreorder && linkedPreorder.status === "bekliyor";
                       return (
-                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9", background: isPendingAdvance ? "#fffbeb" : isCarriedOver ? "#f5f3ff" : undefined}}>
+                      <tr key={pay.id} style={{borderBottom:"1px solid #f1f5f9", background: isPendingAdvance ? "#fffbeb" : undefined}}>
                         <td style={{padding:"7px 10px"}}>{toTR(pay.created_at, true)}</td>
                         <td style={{padding:"7px 10px"}}>
                           {customerMap.get(pay.customer_id)?.name || "-"}
                           {isPendingAdvance && <span style={{marginLeft:6, fontSize:"0.7rem", fontWeight:700, color:"#92400e"}}>💰 Ön Ödeme</span>}
-                          {isCarriedOver && <span style={{marginLeft:6, fontSize:"0.7rem", fontWeight:700, color:"#6d28d9"}}>🔄 Devir</span>}
                         </td>
                         <td style={{padding:"7px 10px",color:"#64748b"}}>{pay.user_email?.split("@")[0] || "-"}</td>
                         <td style={{padding:"7px 10px"}}>
@@ -5113,7 +5096,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     })}
                   </tbody>
                 </table>
-              </div>
               </div>
             </div>
           </div>
@@ -5230,8 +5212,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowStokDetay(false)}>Kapat</button>
                   </div>
                 </div>
-                <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
-                <div style={{overflowX:"auto"}}>
+                <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                     <thead>
                       <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
@@ -5244,7 +5225,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
                         <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={3}>Toplamı ({sorted.length} kalem)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{genelToplam}</td>
-                        <td style={{position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}></td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(sorted.reduce((s, r) => s + r.alisF * r.toplam, 0))}</td>
                       </tr>
                     </thead>
                     <tbody>
@@ -5259,7 +5240,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ))}
                     </tbody>
                   </table>
-                </div>
                 </div>
               </div>
             </div>
@@ -5288,8 +5268,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })()}
               </div>
-              <div style={{overflowY:"auto",padding:"0 24px 24px",flex:1}}>
-              <div style={{overflowX:"auto"}}>
+              <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                   <thead>
                     <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
@@ -5324,7 +5303,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     ))}
                   </tbody>
                 </table>
-              </div>
               </div>
             </div>
           </div>
