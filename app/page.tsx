@@ -270,9 +270,10 @@ type Payment = {
 type Odeme = {
   id: string;
   sira_no: number;
-  tip: "toptanci" | "kargo" | "diger";
+  tip: "toptanci" | "kargo" | "diger" | "kar_payi";
   supplier_id: string | null;
   batch_id: string | null;
+  recipient_name: string | null;
   tutar: number;
   aciklama: string | null;
   created_by: string | null;
@@ -619,9 +620,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [soldQtyByProduct, setSoldQtyByProduct] = useState<Record<string, number>>({});
   const [soldQtyByBatchItem, setSoldQtyByBatchItem] = useState<Record<string, number>>({});
   const [soldQtyByProductBatch, setSoldQtyByProductBatch] = useState<Record<string, number>>({});
-  const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo" | "diger">("toptanci");
+  const [odemeTip, setOdemeTip] = useState<"toptanci" | "kargo" | "diger" | "kar_payi">("toptanci");
   const [odemeSupplierId, setOdemeSupplierId] = useState("");
   const [odemeBatchId, setOdemeBatchId] = useState("");
+  const [odemeKarPayiAlici, setOdemeKarPayiAlici] = useState("");
   const [odemeTutar, setOdemeTutar] = useState("");
   const [odemeKimden, setOdemeKimden] = useState<string[]>([]);
   const [odemeKimdenSecim, setOdemeKimdenSecim] = useState("");
@@ -2182,6 +2184,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!odeme) return;
     const entityName = odeme.tip === "toptanci"
       ? `${supplierMap.get(odeme.supplier_id || "")?.name || ""} — ${batchMap.get(odeme.batch_id || "")?.name || ""}`
+      : odeme.tip === "kar_payi"
+      ? (odeme.recipient_name || "-")
       : (batchMap.get(odeme.batch_id || "")?.name || "");
     if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek, oradaki "${odeme.sira_no}/..." notu da temizlenecek, Parti Maliyet Kaydı'ndaki ilgili alan da bu kadar azaltılacak.`)) return;
 
@@ -2232,6 +2236,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!tutar || tutar <= 0) return setMessage("Geçerli bir tutar girin.");
     if (odemeTip === "toptanci" && !odemeSupplierId) return setMessage("Toptancı seçmelisin.");
     if ((odemeTip === "kargo" || odemeTip === "diger" || odemeTip === "toptanci") && !odemeBatchId) return setMessage("Hangi parti için olduğunu seçmelisin.");
+    if (odemeTip === "kar_payi" && !odemeKarPayiAlici) return setMessage("Kâr payının kime ödendiğini seçmelisin.");
     if (odemeKimden.length === 0) return setMessage("En az bir kaynak seçmelisin.");
     if (odemeEksik > 0.5) return setMessage(`Seçilen kaynaklar yetmiyor, ${money(odemeEksik)} eksik.`);
 
@@ -2243,9 +2248,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { data: odemeInserted, error: odemeErr } = await supabase.from("odemeler").insert({
         tip: odemeTip,
         supplier_id: odemeTip === "toptanci" ? odemeSupplierId : null,
-        batch_id: odemeBatchId,
+        batch_id: odemeTip === "kar_payi" ? null : odemeBatchId,
+        recipient_name: odemeTip === "kar_payi" ? odemeKarPayiAlici : null,
         tutar,
-        aciklama: odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : batchName,
+        aciklama: odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : odemeTip === "kar_payi" ? odemeKarPayiAlici : batchName,
         created_by: createdBy,
       }).select();
       if (odemeErr) throw odemeErr;
@@ -2295,23 +2301,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
       // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
       // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
-      const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
-      const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
-      if (existing) {
-        const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
-        const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
-        if (error) throw error;
+      // Kâr Payı ödemesi hiçbir partiye bağlı değil, bu adım sadece diğer 3 tip için geçerli.
+      if (odemeTip !== "kar_payi") {
+        const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
+        const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
+        if (existing) {
+          const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
+          const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
+          if (error) throw error;
+        }
       }
 
       const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
-      const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : "Diğer masraf ödendi";
+      const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : odemeTip === "kar_payi" ? "Kâr payı ödendi" : "Diğer masraf ödendi";
       await logAction(
         islemAdi,
         "odemeler",
-        odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : batchName,
+        odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : odemeTip === "kar_payi" ? odemeKarPayiAlici : batchName,
         { tutar, kaynak: kaynakOzet }
       );
 
@@ -2320,6 +2329,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setOdemeKimden([]);
       setOdemeSupplierId("");
       setOdemeBatchId("");
+      setOdemeKarPayiAlici("");
       loadAll();
     } catch (err) {
       showError(err);
@@ -2807,8 +2817,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (asli) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(asli.debt - half, 0), profit_share: asli.profit_share + half }).eq("id", asli.id));
     if (mihrimah) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(mihrimah.debt - half, 0), profit_share: mihrimah.profit_share + half }).eq("id", mihrimah.id));
 
-    // Kasada fiilen olan para ile dağıtılan kar arasındaki fark (dağıtılmayan/devreden kasa)
-    const devirBakiyesi = Math.round((Number(totals.cash || 0) - distributableProfit) * 100) / 100;
+    // Kasada fiilen olan para (Kasa Havuzları Toplamı) ile dağıtılan kar arasındaki fark (dağıtılmayan/devreden kasa)
+    const devirBakiyesi = Math.round((toplamKasaHavuzu - distributableProfit) * 100) / 100;
 
     // Bu dönemde satıcıların ne kadar kâr payı gerçekleştirdiğinin anlık görüntüsü (Dönem Geçmişi'nde "Satıcılar" kolonu için)
     const sellerDistributions = sellerAccounts
@@ -4315,11 +4325,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <select
                     className="input"
                     value={odemeTip}
-                    onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo" | "diger"); setOdemeSupplierId(""); setOdemeBatchId(""); setOdemeTutar(""); }}
+                    onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo" | "diger" | "kar_payi"); setOdemeSupplierId(""); setOdemeBatchId(""); setOdemeKarPayiAlici(""); setOdemeTutar(""); }}
                   >
                     <option value="toptanci">Toptancıya öde (parti bazlı)</option>
                     <option value="kargo">Kargo öde (parti bazlı)</option>
                     <option value="diger">Diğer masraf öde (parti bazlı)</option>
+                    <option value="kar_payi">Kâr payı öde (ortak / satıcı)</option>
                   </select>
                 </div>
                 {odemeTip === "toptanci" && (
@@ -4339,9 +4350,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </select>
                   </div>
                 )}
+                {odemeTip === "kar_payi" && (
+                  <div className="field-label">
+                    Kime
+                    <select
+                      className="input"
+                      value={odemeKarPayiAlici}
+                      onChange={(e) => setOdemeKarPayiAlici(e.target.value)}
+                    >
+                      <option value="">Seç...</option>
+                      <option value="Aslı">Aslı (ortak)</option>
+                      <option value="Mihrimah">Mihrimah (ortak)</option>
+                      {sellerAccounts.map((s) => (
+                        <option key={s.id} value={s.name}>{s.name} (satıcı)</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
-              {(odemeTip !== "toptanci" || odemeSupplierId) && (
+              {odemeTip !== "kar_payi" && (odemeTip !== "toptanci" || odemeSupplierId) && (
                 <div className="field-label mb-3" style={{maxWidth: 300}}>
                   Hangi parti için
                   <select
@@ -4416,9 +4444,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   return [
                     o.sira_no,
                     toTR(o.created_at, true),
-                    o.tip === "toptanci" ? "Toptancı" : o.tip === "kargo" ? "Kargo" : "Diğer",
+                    o.tip === "toptanci" ? "Toptancı" : o.tip === "kargo" ? "Kargo" : o.tip === "kar_payi" ? "Kâr Payı" : "Diğer",
                     o.tip === "toptanci"
                       ? `${o.supplier_id ? supplierMap.get(o.supplier_id)?.name || "-" : "-"} — ${o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"}`
+                      : o.tip === "kar_payi"
+                      ? (o.recipient_name || "-")
                       : (o.batch_id ? batchMap.get(o.batch_id)?.name || "-" : "-"),
                     money(o.tutar),
                     kaynakOzet || "-",
