@@ -4,6 +4,24 @@ import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 
+// Supabase/PostgREST varsayılan olarak tek istekte sınırlı sayıda satır döndürür.
+// Kayıt sayısı arttıkça (500+, 1000+ vb.) sabit bir .limit() eski kayıtları sessizce
+// gizleyebiliyor. Bu fonksiyon .range() ile sayfa sayfa çekip TÜM satırları getirir.
+async function fetchAllRows<T>(table: string, orderCol: string, ascending: boolean): Promise<{ data: T[] | null; error: unknown }> {
+  const pageSize = 1000;
+  let allRows: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from(table).select("*").order(orderCol, { ascending }).range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    if (!data || data.length === 0) break;
+    allRows = allRows.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: allRows, error: null };
+}
+
 function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -806,8 +824,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
-        supabase.from("sales").select("*").order("created_at", { ascending: false }).limit(500),
-        supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500),
+        fetchAllRows<Sale>("sales", "created_at", false),
+        fetchAllRows<Payment>("payments", "created_at", false),
         supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
         supabase.from("periods").select("*").order("created_at", { ascending: false }),
         supabase.from("batch_costs").select("*"),
