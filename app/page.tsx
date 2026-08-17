@@ -2129,10 +2129,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const openPeriodForOdeme = useMemo(() => periods.find((p) => !p.closed), [periods]);
 
   // Üç ekranda da (Dönem Kapanışı "Kasadaki para", Dönem Tahsilatları "Kasa", Ödemeler "Kasa Havuzları - Toplam")
-  // aynı rakamı göstermek için tek kaynak: bu dönemin taze tahsilatları + önceki dönemden devir bakiyesi (lump).
+  // aynı rakamı göstermek için tek kaynak: kişi bazlı kasa havuzlarının (Veli/Aslı/Mihrimah/satıcılar) O ANKİ
+  // CANLI toplamı. Devreden para artık ayrı/soyut bir rakam değil, fiilen bir kişinin havuzunun içinde
+  // durduğu için ayrıca eklenmiyor (eklenirse çift sayım olur). Ödemeler yapıldıkça bu toplam otomatik düşer.
   const toplamKasaHavuzu = useMemo(
-    () => totals.recentPayments.reduce((s, p) => s + Number(p.kasa_tutari || 0), 0) + (isSellerRole ? 0 : totals.openingBalance),
-    [totals, isSellerRole]
+    () => paraSahibiSecenekleri.reduce((s, kisi) => s + (kasaHavuzlari.get(kisi)?.toplam || 0), 0),
+    [paraSahibiSecenekleri, kasaHavuzlari]
   );
 
   // "Kimden" seçeneği için kullanılabilir bakiye (para_sahibi adı ya da "__devir__" sentinel'i)
