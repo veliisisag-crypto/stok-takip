@@ -151,6 +151,17 @@ type SellerSettlement = {
   created_by: string | null;
 };
 
+// Satıcıdan ortağa yapılan iç transfer - müşteri tahsilatlarından tamamen ayrı bir kayıt.
+type SellerTransfer = {
+  id: string;
+  seller_account_id: string;
+  amount: number;
+  alici: string;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
 type PreorderItem = {
   id: string;
   preorder_id: string;
@@ -587,11 +598,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   const [sellerAccounts, setSellerAccounts] = useState<SellerAccount[]>([]);
   const [sellerSettlements, setSellerSettlements] = useState<SellerSettlement[]>([]);
+  const [sellerTransfers, setSellerTransfers] = useState<SellerTransfer[]>([]);
   const [newSellerName, setNewSellerName] = useState("");
   const [newSellerEmail, setNewSellerEmail] = useState("");
-  const [sellerSettlementDrafts, setSellerSettlementDrafts] = useState<Record<string, string>>({});
+  const [sellerTransferDetailId, setSellerTransferDetailId] = useState<string | null>(null);
+  const [transferAmount, setTransferAmount] = useState<string>("");
+  const [transferAlici, setTransferAlici] = useState<string>("");
   const [openSellerId, setOpenSellerId] = useState<string | null>(null);
   const [sellerSalesDetailId, setSellerSalesDetailId] = useState<string | null>(null);
+  const [sellerPaymentsDetailId, setSellerPaymentsDetailId] = useState<string | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -821,7 +836,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
         supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
@@ -838,6 +853,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("supplier_returns").select("*").order("created_at", { ascending: false }),
         supabase.from("seller_accounts").select("*").order("name", { ascending: true }),
         supabase.from("seller_settlements").select("*").order("created_at", { ascending: false }),
+        supabase.from("seller_transfers").select("*").order("created_at", { ascending: false }),
         supabase.from("odemeler").select("*").order("created_at", { ascending: false }),
         supabase.from("odeme_kaynaklari").select("*"),
         supabase.rpc("get_sold_qty_by_product"),
@@ -845,7 +861,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.rpc("get_sold_qty_by_product_batch"),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes]) {
         if (res.error) throw res.error;
       }
       // odemeler/odeme_kaynaklari satıcı rolünde RLS ile boş döner, hata fırlatmaz - ayrı kontrol
@@ -894,6 +910,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSupplierReturns((supplierReturnsRes.data || []) as SupplierReturn[]);
       setSellerAccounts(loadedSellers);
       setSellerSettlements((sellerSettlementsRes.data || []) as SellerSettlement[]);
+      setSellerTransfers((sellerTransfersRes.data || []) as SellerTransfer[]);
       // Initialize costInputs from loaded data - merge with existing to not lose unsaved changes
       const inputs: Record<string, Record<string, string>> = {};
       for (const c of (batchCostsRes.data || []) as BatchCost[]) {
@@ -1511,24 +1528,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       totalBizeBorcOrantili += (toNum(sale.cost) - profit) * oran;
       gerceklesenKarPayi += profit * oran;
     }
-    const totalTeslimEdilen = sellerSettlements.filter((se) => se.seller_account_id === sellerId && new Date(se.created_at) > sinceDate).reduce((sum, se) => sum + Number(se.amount || 0), 0);
+    const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
-    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı (ikisi de son kapanıştan bu yana)
-    const kalanBorc = Math.max(totalTahsilat - gerceklesenKarPayi, 0);
-    // Satıcı Kasası - kişi bazlı Kasa Havuzları ile aynı mantık: HER ZAMAN canlı/güncel, dönem
-    // kapanışıyla sıfırlanmaz (gerçek para orada durduğu sürece görünmeye devam eder).
-    const kasaTutari = activePayments.filter((p) => p.seller_account_id === sellerId).reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
-    return { totalSatis, totalKarPayi, gerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, kasaTutari };
+    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı - (satıcının size zaten transfer ettiği tutar), ikisi de son kapanıştan bu yana.
+    // Eksi çıkabilir: satıcı kendi kâr payı dahil HER ŞEYİ size verdiyse, eksi değer "siz ona borçlusunuz" anlamına gelir
+    // (dönem kapanışında kâr payı öde mekanizmasıyla ona geri ödenir).
+    const kalanBorc = totalTahsilat - gerceklesenKarPayi - totalTeslimEdilen;
+    return { totalSatis, totalKarPayi, gerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat };
   };
 
-  const recordSellerSettlement = async (sellerId: string, amount: number, note: string) => {
+  // Satıcıdan ortağa/Veli'ye yapılan iç transfer - bir müşteri tahsilatı DEĞİL, bu yüzden
+  // "payments" tablosuna hiç dokunmuyor, kendi ayrı tablosunda (seller_transfers) tutuluyor.
+  const recordSellerTransfer = async (sellerId: string, amount: number, alici: string, note: string) => {
     if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
-    const { error } = await supabase.from("seller_settlements").insert({ seller_account_id: sellerId, amount, note: note || null, created_by: currentUserEmail });
-    if (error) return showError(error);
-    await logAction("Satıcı teslimatı kaydedildi", "seller_settlements", sellerAccountMap.get(sellerId)?.name || sellerId, { tutar: amount });
-    setMessage(`${money(amount)} teslimat kaydedildi.`);
-    loadAll();
+    if (!alici) return setMessage("Parayı kimin teslim aldığını seçmelisin.");
+    try {
+      const { error } = await supabase.from("seller_transfers").insert({ seller_account_id: sellerId, amount, alici, note: note || null, created_by: currentUserEmail });
+      if (error) throw error;
+      const sellerName = sellerAccountMap.get(sellerId)?.name || "";
+      await logAction("Satıcı → Ortak transferi yapıldı", "seller_transfers", sellerName, { tutar: amount, alici });
+      setMessage(`${money(amount)} transfer kaydedildi.`);
+      loadAll();
+    } catch (err) {
+      showError(err);
+    }
   };
 
   const updateBatchSupplier = async (batchId: string, supplierId: string) => {
@@ -4537,34 +4561,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Cari Borcu</div><b>{money(summary.cariBorcu)}</b></div>
                           <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı (Toplam)</div><b>{money(summary.totalKarPayi)}</b></div>
                           <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Gerçekleşen Kâr</div><b>{money(summary.gerceklesenKarPayi)}</b></div>
-                          <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satıcı Kasası</div><b>{money(summary.kasaTutari)}</b></div>
-                          <div className="rounded-lg bg-amber-50 p-2"><div className="text-xs text-slate-500">Size Kalan Borç</div><b style={{color: summary.kalanBorc > 0 ? "#b45309" : "#16a34a"}}>{money(summary.kalanBorc)}</b></div>
+                          <div className="rounded-lg p-2" style={{background: summary.kalanBorc < 0 ? "#eff6ff" : "#fffbeb"}}>
+                            <div className="text-xs text-slate-500">Size Kalan Borç</div>
+                            <b style={{color: summary.kalanBorc > 0 ? "#b45309" : summary.kalanBorc < 0 ? "#2563eb" : "#16a34a"}}>
+                              {summary.kalanBorc < 0 ? `Siz ona borçlusunuz: ${money(Math.abs(summary.kalanBorc))}` : money(summary.kalanBorc)}
+                            </b>
+                          </div>
                         </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <input
-                            className="input"
-                            style={{width: 140}}
-                            type="number"
-                            placeholder="Teslim alınan ₺"
-                            value={sellerSettlementDrafts[seller.id] || ""}
-                            onChange={(e) => setSellerSettlementDrafts({ ...sellerSettlementDrafts, [seller.id]: e.target.value })}
-                          />
-                          <button
-                            type="button"
-                            className="btn"
-                            style={{fontSize:"0.8rem"}}
-                            onClick={() => {
-                              recordSellerSettlement(seller.id, Number(sellerSettlementDrafts[seller.id] || 0), "");
-                              setSellerSettlementDrafts({ ...sellerSettlementDrafts, [seller.id]: "" });
-                            }}
-                          >
-                            Teslimat Kaydet
-                          </button>
-                          <span className="text-xs text-slate-400">Satıcı size nakit/havale teslim ettiğinde buraya tutarı girip kaydet, borcundan düşer.</span>
-                        </div>
-                        <div className="mt-3">
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" className="btn-secondary" style={{fontSize:"0.8rem"}} onClick={() => setSellerSalesDetailId(seller.id)}>
                             Satış Detayları
+                          </button>
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem"}} onClick={() => setSellerPaymentsDetailId(seller.id)}>
+                            Tahsilat Detayları
+                          </button>
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem"}} onClick={() => setSellerTransferDetailId(seller.id)}>
+                            Transfer Detayları
                           </button>
                         </div>
                       </div>
@@ -4635,8 +4647,133 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </div>
               );
             })()}
+
+            {sellerPaymentsDetailId && (() => {
+              const seller = sellerAccountMap.get(sellerPaymentsDetailId);
+              if (!seller) return null;
+              const sellerPayments = [...activePayments]
+                .filter((p) => p.seller_account_id === sellerPaymentsDetailId)
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              return (
+                <div
+                  style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+                  onClick={() => setSellerPaymentsDetailId(null)}
+                >
+                  <div
+                    style={{ background: "white", borderRadius: 16, padding: 20, width: "100%", maxWidth: 900, maxHeight: "85vh", overflowY: "auto" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>{seller.name} — Tahsilat Detayları</h2>
+                      <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setSellerPaymentsDetailId(null)}>Kapat</button>
+                    </div>
+                    <Table
+                      headers={["Tarih", "Müşteri", "Yöntem", "Tutar", "Kasa", "Para Kimde", "Açıklama"]}
+                      rows={sellerPayments.map((p) => [
+                        toTR(p.created_at, true),
+                        p.customer_id ? (customerMap.get(p.customer_id)?.name || "-") : "-",
+                        p.payment_method === "nakit" ? "Nakit" : p.payment_method === "banka" ? "Banka" : "-",
+                        money(p.amount),
+                        p.kasa_tutari !== null && p.kasa_tutari !== undefined ? money(p.kasa_tutari) : "-",
+                        p.para_sahibi || "-",
+                        p.aciklama || "-",
+                      ])}
+                    />
+                    {sellerPayments.length === 0 && <p className="mt-2 text-sm text-slate-500">Bu satıcıya ait tahsilat bulunamadı.</p>}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
+
+        {sellerTransferDetailId && (() => {
+          const seller = sellerAccountMap.get(sellerTransferDetailId);
+          if (!seller) return null;
+          const summary = getSellerSummary(sellerTransferDetailId);
+          const transfers = [...sellerTransfers]
+            .filter((t) => t.seller_account_id === sellerTransferDetailId)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return (
+            <div
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+              onClick={() => setSellerTransferDetailId(null)}
+            >
+              <div
+                style={{ background: "white", borderRadius: 16, padding: 20, width: "100%", maxWidth: 700, maxHeight: "85vh", overflowY: "auto" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>{seller.name} — Transfer Detayları</h2>
+                  <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setSellerTransferDetailId(null)}>Kapat</button>
+                </div>
+                <p className="mb-4 text-sm text-slate-500">
+                  Bu satıcı topladığı parayı size ya da diğer ortağa fiilen teslim ettiğinde burada kaydet.
+                  Bu bir müşteri tahsilatı değil, iç bir transferdir — Ödemeler/Tahsilat ekranlarındaki listelere karışmaz.
+                </p>
+                <div className="grid gap-3 md:grid-cols-3 mb-4">
+                  <div className="field-label">
+                    Tutar
+                    <input className="input" type="number" min="0" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="field-label">
+                    Kime teslim etti
+                    <select className="input" value={transferAlici} onChange={(e) => setTransferAlici(e.target.value)}>
+                      <option value="">Seç...</option>
+                      <option value="Veli">Veli</option>
+                      <option value="Aslı">Aslı</option>
+                      <option value="Mihrimah">Mihrimah</option>
+                    </select>
+                  </div>
+                  <div className="field-label" style={{justifyContent:"flex-end"}}>
+                    <span style={{opacity:0}}>.</span>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={async () => {
+                        await recordSellerTransfer(sellerTransferDetailId, Number(transferAmount || 0), transferAlici, "");
+                        setTransferAmount("");
+                        setTransferAlici("");
+                      }}
+                    >
+                      Transferi Kaydet
+                    </button>
+                  </div>
+                </div>
+                <p className="mb-3 text-sm" style={{color: summary.kalanBorc < 0 ? "#2563eb" : "#64748b"}}>
+                  {summary.kalanBorc < 0
+                    ? `Şu an siz bu satıcıya ${money(Math.abs(summary.kalanBorc))} borçlusunuz.`
+                    : `Şu an bu satıcı size ${money(summary.kalanBorc)} borçlu.`}
+                </p>
+                <Table
+                  headers={["Tarih", "Kime", "Tutar", ""]}
+                  rows={transfers.map((t) => [
+                    toTR(t.created_at, true),
+                    t.alici,
+                    money(t.amount),
+                    <button
+                      key="sil"
+                      type="button"
+                      className="btn-danger"
+                      style={{fontSize:"0.7rem", padding:"3px 10px"}}
+                      onClick={async () => {
+                        if (!confirm(`${money(t.amount)} tutarındaki bu transfer kaydı silinsin mi?`)) return;
+                        const { error } = await supabase.from("seller_transfers").delete().eq("id", t.id);
+                        if (error) return showError(error);
+                        await logAction("Satıcı → Ortak transferi silindi", "seller_transfers", seller.name, { tutar: t.amount, alici: t.alici });
+                        setMessage("Transfer kaydı silindi.");
+                        loadAll();
+                      }}
+                    >
+                      Sil
+                    </button>,
+                  ])}
+                />
+                {transfers.length === 0 && <p className="mt-2 text-sm text-slate-500">Henüz transfer kaydı yok.</p>}
+              </div>
+            </div>
+          );
+        })()}
 
         {active === "customers" && (
           <div className="space-y-0">
@@ -5709,7 +5846,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               ) : "—"}
                             </td>
                             <td style={{padding:"10px 12px"}}>{p.closed ? "Kapalı" : "Açık"}</td>
-                            <td style={{padding:"10px 12px"}}>{p.closed_at ? new Date(p.closed_at).toLocaleDateString("tr-TR") : "-"}</td>
+                            <td style={{padding:"10px 12px"}}>{p.closed_at ? new Date(p.closed_at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-"}</td>
                           </tr>
                           {isExpanded && sellerDist.length > 0 && (
                             <tr style={{borderBottom:"1px solid #f1f5f9", background:"#f8fafc"}}>
