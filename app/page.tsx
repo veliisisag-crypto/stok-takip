@@ -3619,10 +3619,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 {!isSellerRole && (
                                 <div className="product-info-chips product-info-chips--sm">
                                   <div className="product-info-chip product-info-chip--sm">
-                                    <div className="product-info-chip-label">T-Yüksel ($)</div>
+                                    <div className="product-info-chip-label">T-Yüksel</div>
                                     <input
                                       className="input"
-                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      style={{ width: "100%", minWidth: 0, boxSizing: "border-box", fontSize: "0.85rem", padding: "3px 6px" }}
                                       type="number"
                                       step="0.01"
                                       min="0"
@@ -3639,10 +3639,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     />
                                   </div>
                                   <div className="product-info-chip product-info-chip--sm">
-                                    <div className="product-info-chip-label">T-Hasan ($)</div>
+                                    <div className="product-info-chip-label">T-Hasan</div>
                                     <input
                                       className="input"
-                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      style={{ width: "100%", minWidth: 0, boxSizing: "border-box", fontSize: "0.85rem", padding: "3px 6px" }}
                                       type="number"
                                       step="0.01"
                                       min="0"
@@ -3659,10 +3659,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     />
                                   </div>
                                   <div className="product-info-chip product-info-chip--sm">
-                                    <div className="product-info-chip-label">T-Amir ($)</div>
+                                    <div className="product-info-chip-label">T-Amir</div>
                                     <input
                                       className="input"
-                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      style={{ width: "100%", minWidth: 0, boxSizing: "border-box", fontSize: "0.85rem", padding: "3px 6px" }}
                                       type="number"
                                       step="0.01"
                                       min="0"
@@ -5952,7 +5952,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-img-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #94a3b8; font-size: 0.7rem; }
 
         .product-info-chips { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .product-info-chips--sm { grid-template-columns: 1fr 1fr; gap: 6px; }
+        .product-info-chips--sm { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
         .product-info-chip { background: white; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; }
         .product-info-chip--sm { padding: 7px 10px; border-radius: 10px; }
         .product-info-chip-label { font-size: 0.65rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
@@ -5978,7 +5978,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           .product-info-row { flex-direction: column; }
           .product-img-box { width: 100%; height: 180px; }
           .product-info-chips { grid-template-columns: 1fr; }
-          .product-info-chips--sm { grid-template-columns: 1fr 1fr; }
+          .product-info-chips--sm { grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
           .product-batch-table { overflow-x: auto; }
           .product-batch-thead, .product-batch-row { min-width: 400px; }
           .product-row { flex-wrap: wrap; padding: 12px; }
