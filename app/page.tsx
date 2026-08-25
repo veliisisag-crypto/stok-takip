@@ -188,6 +188,7 @@ type Product = {
   image_url: string | null;
   usd_fiyat_tyuksel?: number | null;
   usd_fiyat_thasan?: number | null;
+  usd_fiyat_tamir?: number | null;
   manual_price?: number | null;
 
   passive: boolean;
@@ -752,6 +753,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!supplier) return null;
     if (supplier.name === "T-Yüksel") return product.usd_fiyat_tyuksel ?? null;
     if (supplier.name === "T-Hasan") return product.usd_fiyat_thasan ?? null;
+    if (supplier.name === "T-Amir") return product.usd_fiyat_tamir ?? null;
     return null;
   };
 
@@ -837,7 +839,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,manual_price").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,usd_fiyat_tamir,manual_price").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -3653,6 +3655,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                         if (error) return showError(error);
                                         setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_thasan: value } : pr));
                                         await logAction("Ürün T-Hasan USD fiyatı güncellendi", "products", p.name, diffOf({ usd_fiyat: p.usd_fiyat_thasan ?? null }, { usd_fiyat: value }));
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="product-info-chip product-info-chip--sm">
+                                    <div className="product-info-chip-label">T-Amir ($)</div>
+                                    <input
+                                      className="input"
+                                      style={{ width: 80, fontSize: "0.85rem", padding: "3px 6px" }}
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      defaultValue={p.usd_fiyat_tamir ?? ""}
+                                      placeholder="—"
+                                      onBlur={async (e) => {
+                                        const value = e.target.value === "" ? null : Number(e.target.value);
+                                        if (value === (p.usd_fiyat_tamir ?? null)) return;
+                                        const { error } = await supabase.from("products").update({ usd_fiyat_tamir: value }).eq("id", p.id);
+                                        if (error) return showError(error);
+                                        setProducts((prev) => prev.map((pr) => pr.id === p.id ? { ...pr, usd_fiyat_tamir: value } : pr));
+                                        await logAction("Ürün T-Amir USD fiyatı güncellendi", "products", p.name, diffOf({ usd_fiyat: p.usd_fiyat_tamir ?? null }, { usd_fiyat: value }));
                                       }}
                                     />
                                   </div>
