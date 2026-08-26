@@ -659,6 +659,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
   const [convertPaid, setConvertPaid] = useState<string>("false");
   const [convertSellerProfit, setConvertSellerProfit] = useState<string>("");
+  const [convertParaSahibi, setConvertParaSahibi] = useState<string>("");
 
   const [search, setSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -2469,6 +2470,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setConvertPrices({ [item.id]: "" });
     setConvertPaid("false");
     setConvertSellerProfit("");
+    setConvertParaSahibi("");
     setConvertModal({ preorder: po, item });
   };
 
@@ -2513,6 +2515,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { preorder: po, item } = convertModal;
     const price = Number(convertPrices[item.id] || 0);
     if (!price) return setMessage("Fiyat girin.");
+    if ((convertPaid === "banka" || convertPaid === "nakit") && !convertParaSahibi) {
+      return setMessage("Para kimde? alanını seçmelisin.");
+    }
     const product = productMap.get(item.product_id);
     if (!product) return;
     const seller: Seller | null = isSellerRole ? null : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
@@ -2607,6 +2612,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               amount: paymentPortion,
               payment_method: payment.payment_method,
               kasa_tutari: paymentPortion,
+              para_sahibi: payment.para_sahibi || null,
               user_email: payment.user_email,
               created_at: payment.created_at,
             })
@@ -2630,7 +2636,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainder > 0 && convertPaid !== "false" && newSales && newSales.length > 0) {
       const { data: payData, error: payErr } = await supabase
         .from("payments")
-        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, seller_account_id: currentSellerAccount?.id || null })
+        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, para_sahibi: convertParaSahibi, seller_account_id: currentSellerAccount?.id || null })
         .select()
         .single();
       if (!payErr && payData) {
@@ -5588,12 +5594,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   </div>
                   <div>
                     <label className="label">{advanceTotal > 0 ? "Kalan Tutar İçin Ödeme Türü" : "Ödeme Türü"}</label>
-                    <select className="input" value={convertPaid} onChange={(e) => setConvertPaid(e.target.value)}>
+                    <select className="input" value={convertPaid} onChange={(e) => { setConvertPaid(e.target.value); if (e.target.value === "false") setConvertParaSahibi(""); }}>
                       <option value="false">Cari borç</option>
                       <option value="banka">Peşin - Banka alındı</option>
                       <option value="nakit">Peşin - Nakit alındı</option>
                     </select>
                   </div>
+                  {(convertPaid === "banka" || convertPaid === "nakit") && (
+                    <div>
+                      <label className="label">Para kimde? *</label>
+                      <select className="input" value={convertParaSahibi} onChange={(e) => setConvertParaSahibi(e.target.value)}>
+                        <option value="">Para kimde? *</option>
+                        {paraSahibiSecenekleri.map((kisi) => <option key={kisi} value={kisi}>{kisi}</option>)}
+                      </select>
+                    </div>
+                  )}
                   {isSellerRole && (
                     <div>
                       <label className="label">Kendi Karım (₺)</label>
@@ -5604,7 +5619,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {message && <p className="text-sm text-red-600 mt-2">{message}</p>}
                 <div className="flex gap-2 mt-4">
                   <button type="button" className="btn" disabled={isLoading("convertToSales")} onClick={() => withLoading("convertToSales", convertToSales)}>{isLoading("convertToSales") ? "..." : "Satışa Dönüştür"}</button>
-                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); setConvertSellerProfit(""); }}>Vazgeç</button>
+                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); setConvertSellerProfit(""); setConvertParaSahibi(""); }}>Vazgeç</button>
                 </div>
               </div>
             </div>
