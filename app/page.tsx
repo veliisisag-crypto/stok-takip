@@ -824,11 +824,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       : typeof error === "object" && error !== null && "message" in error
       ? String((error as {message: unknown}).message)
       : JSON.stringify(error);
+    if (/jwt issued at future|jwt.*future/i.test(msg)) {
+      setForcedErrorMessage(true);
+      setMessage("Telefonunun saat/tarih ayarı sunucuyla uyuşmuyor (JWT hatası). Lütfen telefonunun Ayarlar > Tarih ve Saat bölümünden \"Otomatik tarih ve saat\" seçeneğini açık olduğundan emin ol, gerekirse telefonu yeniden başlat. Sorun devam ederse bu sayfadan çıkış yapıp tekrar giriş yap.");
+      return;
+    }
     setForcedErrorMessage(true);
     setMessage(msg);
   };
 
-  const loadAll = async () => {
+  const loadAll = async (isRetry = false) => {
     setLoadingData(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -932,6 +937,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // partiler için yerel taslak korunur.
       setCostInputs((prev) => ({ ...prev, ...inputs }));
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? String((err as { message: unknown }).message) : String(err);
+      if (!isRetry && /jwt issued at future|jwt.*future/i.test(errMsg)) {
+        // Saat kayması nedeniyle token geçersiz görünüyor olabilir - oturumu tazeleyip bir kez daha dene.
+        const { error: refreshErr } = await supabase.auth.refreshSession();
+        if (!refreshErr) {
+          setLoadingData(false);
+          return loadAll(true);
+        }
+      }
       showError(err);
     } finally {
       setLoadingData(false);
@@ -1689,8 +1703,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const deleteBatchItem = async (item: BatchItem) => {
     const sold = getBatchSoldQtyForItem(item);
     if (sold > 0) return setMessage("Bu parti satırına bağlı aktif satış var. Önce ilgili satışları iptal edin.");
+    // İptal edilmiş satışlar dahil, bu satıra referans veren HERHANGİ bir satış kaydı var mı kontrol et.
+    // (İptal edilmiş bir satış bile veritabanında bu satıra foreign key ile bağlı kalır ve silmeyi engeller.)
+    const hasAnySaleRef = sales.some((s) => s.batch_item_id === item.id);
+    if (hasAnySaleRef) {
+      return setMessage("Bu parti satırına bağlı (iptal edilmiş dahil) geçmiş satış kayıtları olduğu için silinemiyor. Bunun yerine miktarı 0 yaparak stoktan düşebilirsin; satır geçmiş kayıt olarak sistemde kalır.");
+    }
     const { error } = await supabase.from("batch_items").delete().eq("id", item.id);
-    if (error) return showError(error);
+    if (error) {
+      if ((error as { code?: string }).code === "23503") {
+        return setMessage("Bu parti satırına bağlı geçmiş satış/işlem kayıtları olduğu için silinemiyor. Bunun yerine miktarı 0 yaparak stoktan düşebilirsin.");
+      }
+      return showError(error);
+    }
     await logAction("Parti ürün satırı silindi", "batch_items", `${productMap.get(item.product_id)?.name || item.product_id} / ${batchMap.get(item.batch_id)?.name || item.batch_id}`);
     loadAll();
   };
