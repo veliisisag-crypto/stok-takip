@@ -3832,7 +3832,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <h2 style={{fontSize:"1.1rem", fontWeight:600}}>Toplu Ürün Resimleri</h2>
               </div>
               {groups.map((g) => {
-                const groupProducts = sortedProducts.filter((p) => !p.passive && p.gender_category === g.gender && p.image_url);
+                const groupProducts = sortedProducts
+                  .filter((p) => !p.passive && p.gender_category === g.gender && p.image_url)
+                  .map((p) => ({ product: p, stock: getProductStock(p.id), price: getProductLatestPrice(p.id) }))
+                  .sort((a, b) => {
+                    const aInStock = a.stock > 0 ? 1 : 0;
+                    const bInStock = b.stock > 0 ? 1 : 0;
+                    if (aInStock !== bInStock) return bInStock - aInStock;
+                    return 0;
+                  });
                 if (!groupProducts.length) return null;
                 return (
                   <div key={g.gender} style={{marginBottom: 32}}>
@@ -3840,11 +3848,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       {g.label} — {groupProducts.length} ürün
                     </div>
                     <div style={{display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8}}>
-                      {groupProducts.map((p) => (
+                      {groupProducts.map(({ product: p, stock, price }) => (
                         <div key={p.id} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
-                          <div style={{width:"100%", aspectRatio:"1/1", borderRadius:10, overflow:"hidden", background:"#f8fafc", border:"1px solid #e2e8f0", cursor:"pointer"}}
+                          <div style={{position:"relative", width:"100%", aspectRatio:"1/1", borderRadius:10, overflow:"hidden", background:"#f8fafc", border:"1px solid #e2e8f0", cursor:"pointer"}}
                             onClick={() => setLightboxImg(p.image_url)}>
                             <img src={p.image_url!} alt={p.name} style={{width:"100%", height:"100%", objectFit:"cover"}} />
+                            <div style={{position:"absolute", top:6, left:6, background: stock > 0 ? "#dcfce7" : "#fee2e2", color: stock > 0 ? "#166534" : "#991b1b", fontSize:"0.6rem", fontWeight:700, padding:"2px 7px", borderRadius:6}}>
+                              {stock > 0 ? "Stokta" : "Tükendi"}
+                            </div>
+                            <div style={{position:"absolute", top:6, right:6, background:"rgba(15,23,42,0.75)", color:"#ffffff", fontSize:"0.6rem", fontWeight:700, padding:"2px 7px", borderRadius:6}}>
+                              {price ? Math.round(price).toLocaleString("tr-TR") : "-"}
+                            </div>
                           </div>
                           <div style={{fontSize:"0.65rem", textAlign:"center", color:"var(--color-text-secondary)", lineHeight:1.2, wordBreak:"break-word", maxWidth:"100%"}}>
                             {p.name}

@@ -9,19 +9,49 @@ type Product = {
   gender_category: string;
   image_url: string | null;
   passive: boolean;
+  manual_price: number | null;
+};
+
+type BatchItem = {
+  id: string;
+  product_id: string;
+  bought: number;
+  sale_price: number | null;
+  created_at: string;
 };
 
 export default function GaleriPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
+  const [soldByProduct, setSoldByProduct] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
       .from("products")
-      .select("id,name,gender_category,image_url,passive")
+      .select("id,name,gender_category,image_url,passive,manual_price")
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         if (data) setProducts(data as Product[]);
+      });
+
+    supabase
+      .from("batch_items")
+      .select("id,product_id,bought,sale_price,created_at")
+      .then(({ data, error }) => {
+        if (error) { console.warn("batch_items okunamadı", error); return; }
+        if (data) setBatchItems(data as BatchItem[]);
+      });
+
+    supabase
+      .rpc("get_sold_qty_by_product")
+      .then(({ data, error }) => {
+        if (error) { console.warn("get_sold_qty_by_product hata", error); return; }
+        const map: Record<string, number> = {};
+        for (const row of (data || []) as { product_id: string; toplam_satilan: number }[]) {
+          map[row.product_id] = Number(row.toplam_satilan || 0);
+        }
+        setSoldByProduct(map);
       });
   }, []);
 
@@ -33,13 +63,30 @@ export default function GaleriPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [close]);
 
+  const getProductStock = (productId: string) => {
+    const totalBought = batchItems
+      .filter((bi) => bi.product_id === productId)
+      .reduce((sum, bi) => sum + Number(bi.bought || 0), 0);
+    return totalBought - (soldByProduct[productId] || 0);
+  };
+
+  const getProductPrice = (product: Product) => {
+    const items = batchItems
+      .filter((bi) => bi.product_id === product.id && Number(bi.sale_price) > 0)
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    if (items.length) return Number(items[0].sale_price);
+    return Number(product.manual_price || 0);
+  };
+
   const groups: { gender: string }[] = [
     { gender: "Erkek" },
     { gender: "Kadın" },
     { gender: "Unisex" },
   ];
 
-  const visibleProducts = products.filter((p) => !p.passive && p.image_url);
+  const visibleProducts = products
+    .filter((p) => !p.passive && p.image_url)
+    .map((p) => ({ product: p, stock: getProductStock(p.id), price: getProductPrice(p) }));
 
   return (
     <div style={{
@@ -48,7 +95,13 @@ export default function GaleriPage() {
       padding: "12px",
     }}>
       {groups.map(({ gender }) => {
-        const group = visibleProducts.filter((p) => p.gender_category === gender);
+        const group = visibleProducts
+          .filter((row) => row.product.gender_category === gender)
+          .sort((a, b) => {
+            const aInStock = a.stock > 0 ? 1 : 0;
+            const bInStock = b.stock > 0 ? 1 : 0;
+            return bInStock - aInStock;
+          });
         if (!group.length) return null;
         return (
           <div key={gender} style={{ marginBottom: 16 }}>
@@ -74,11 +127,12 @@ export default function GaleriPage() {
               gridTemplateColumns: "repeat(3, 1fr)",
               gap: 4,
             }}>
-              {group.map((p) => (
+              {group.map(({ product: p, stock, price }) => (
                 <div
                   key={p.id}
                   onClick={() => setLightbox(p.image_url)}
                   style={{
+                    position: "relative",
                     aspectRatio: "1/1",
                     borderRadius: 6,
                     overflow: "hidden",
@@ -96,6 +150,33 @@ export default function GaleriPage() {
                       display: "block",
                     }}
                   />
+                  <div style={{
+                    position: "absolute",
+                    top: 4,
+                    left: 4,
+                    background: stock > 0 ? "#16a34a" : "#dc2626",
+                    color: "#ffffff",
+                    fontSize: "0.55rem",
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 5,
+                    letterSpacing: "0.02em",
+                  }}>
+                    {stock > 0 ? "Stokta" : "Tükendi"}
+                  </div>
+                  <div style={{
+                    position: "absolute",
+                    top: 4,
+                    right: 4,
+                    background: "rgba(0,0,0,0.65)",
+                    color: "#ffffff",
+                    fontSize: "0.55rem",
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 5,
+                  }}>
+                    {price ? Math.round(price).toLocaleString("tr-TR") : "-"}
+                  </div>
                 </div>
               ))}
             </div>
