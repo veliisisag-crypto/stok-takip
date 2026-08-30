@@ -3424,7 +3424,32 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {!isSellerRole && (
                   <div style={{display:"flex", gap:8}}>
                     <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
-                    <a href="/galeri" target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px", textDecoration:"none"}}>🔗 Paylaşım Linki</a>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{fontSize:"0.8rem", padding:"6px 12px"}}
+                      onClick={async () => {
+                        const shareUrl = `${window.location.origin}/galeri`;
+                        if (navigator.share) {
+                          try {
+                            await navigator.share({ title: "Ürün Kataloğu", url: shareUrl });
+                          } catch (err) {
+                            if ((err as Error)?.name !== "AbortError") {
+                              console.warn("Paylaşım başarısız", err);
+                            }
+                          }
+                        } else {
+                          try {
+                            await navigator.clipboard.writeText(shareUrl);
+                            setMessage("Paylaşım linki panoya kopyalandı.");
+                          } catch {
+                            setMessage(shareUrl);
+                          }
+                        }
+                      }}
+                    >
+                      🔗 Paylaşım Linki
+                    </button>
                   </div>
                 )}
               </div>
