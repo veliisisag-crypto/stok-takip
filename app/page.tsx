@@ -2324,61 +2324,91 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const odemeId = odemeInserted![0].id as string;
       const odemeSiraNo = odemeInserted![0].sira_no as number;
 
-      let kalan = tutar;
-      const kaynakSatirlari: { kaynak_tipi: "tahsilat" | "devir"; para_sahibi: string | null; payment_id: string | null; period_id: string | null; kullanilan_tutar: number }[] = [];
+      try {
+        let kalan = tutar;
 
-      for (const kaynak of odemeKimden) {
-        if (kalan <= 0.01) break;
-        if (kaynak === "__devir__") {
-          const mevcut = openPeriodForOdeme?.devir_bakiyesi || 0;
-          const kullanilan = Math.min(mevcut, kalan);
-          if (kullanilan <= 0) continue;
-          const eskiNot = openPeriodForOdeme?.devir_bakiyesi_notu || "";
-          const yeniNot = `${eskiNot ? eskiNot + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
-          const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan, devir_bakiyesi_notu: yeniNot }).eq("id", openPeriodForOdeme!.id);
-          if (error) throw error;
-          kaynakSatirlari.push({ kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan });
-          kalan -= kullanilan;
-        } else {
-          const havuz = kasaHavuzlari.get(kaynak);
-          if (!havuz) continue;
-          for (const kayit of havuz.kayitlar) {
-            if (kalan <= 0.01) break;
-            const kullanilan = Math.min(kayit.kasa, kalan);
+        for (const kaynak of odemeKimden) {
+          if (kalan <= 0.01) break;
+          if (kaynak === "__devir__") {
+            const mevcut = openPeriodForOdeme?.devir_bakiyesi || 0;
+            const kullanilan = Math.min(mevcut, kalan);
             if (kullanilan <= 0) continue;
-            const yeniKasa = kayit.kasa - kullanilan;
-            const eskiAciklama = payments.find((p) => p.id === kayit.id)?.aciklama || "";
-            const yeniAciklama = `${eskiAciklama ? eskiAciklama + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
-            const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama }).eq("id", kayit.id);
+            const eskiNot = openPeriodForOdeme?.devir_bakiyesi_notu || "";
+            const yeniNot = `${eskiNot ? eskiNot + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
+            const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan, devir_bakiyesi_notu: yeniNot }).eq("id", openPeriodForOdeme!.id);
             if (error) throw error;
-            kaynakSatirlari.push({ kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan });
+            // Kaynak kaydı ANINDA yazılır - döngü daha sonra bir yerde hata verip yarıda kesilse bile
+            // buraya kadar yapılan düşümler izlenebilir ve silme/iade işlemi doğru çalışabilir.
+            const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
+              odeme_id: odemeId, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan,
+            });
+            if (kaynakErr) throw kaynakErr;
             kalan -= kullanilan;
+          } else {
+            const havuz = kasaHavuzlari.get(kaynak);
+            if (!havuz) continue;
+            for (const kayit of havuz.kayitlar) {
+              if (kalan <= 0.01) break;
+              const kullanilan = Math.min(kayit.kasa, kalan);
+              if (kullanilan <= 0) continue;
+              const yeniKasa = kayit.kasa - kullanilan;
+              const eskiAciklama = payments.find((p) => p.id === kayit.id)?.aciklama || "";
+              const yeniAciklama = `${eskiAciklama ? eskiAciklama + ", " : ""}${odemeSiraNo}/${Math.round(kullanilan)} TL`;
+              const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama }).eq("id", kayit.id);
+              if (error) throw error;
+              // Kaynak kaydı ANINDA yazılır - bkz. yukarıdaki not.
+              const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
+                odeme_id: odemeId, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan,
+              });
+              if (kaynakErr) throw kaynakErr;
+              kalan -= kullanilan;
+            }
           }
         }
-      }
 
-      if (kaynakSatirlari.length > 0) {
-        const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert(
-          kaynakSatirlari.map((k) => ({ odeme_id: odemeId, ...k }))
-        );
-        if (kaynakErr) throw kaynakErr;
-      }
-
-      // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
-      // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
-      // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
-      // Kâr Payı ödemesi hiçbir partiye bağlı değil, bu adım sadece diğer 3 tip için geçerli.
-      if (odemeTip !== "kar_payi") {
-        const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
-        const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
-        if (existing) {
-          const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
-          const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
-          if (error) throw error;
+        // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
+        // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
+        // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
+        // Kâr Payı ödemesi hiçbir partiye bağlı değil, bu adım sadece diğer 3 tip için geçerli.
+        if (odemeTip !== "kar_payi") {
+          const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
+          const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
+          if (existing) {
+            const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
+            const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
+            if (error) throw error;
+          }
         }
+      } catch (innerErr) {
+        // Kaynak düşme / maliyet yazma adımlarından biri başarısız oldu.
+        // Buraya kadar yapılmış olan TÜM düşümleri (odeme_kaynaklari'na anında yazıldığı için)
+        // geri alıp, yarım kalmış ödeme kaydını sil - dangling/izsiz bir düşüş kalmasın.
+        try {
+          const { data: kalanKaynaklar } = await supabase.from("odeme_kaynaklari").select("*").eq("odeme_id", odemeId);
+          for (const k of kalanKaynaklar || []) {
+            const fragment = `${odemeSiraNo}/${Math.round(Number(k.kullanilan_tutar || 0))} TL`;
+            if (k.kaynak_tipi === "tahsilat" && k.payment_id) {
+              const { data: payRow } = await supabase.from("payments").select("kasa_tutari,aciklama").eq("id", k.payment_id).single();
+              const yeniKasa = Number(payRow?.kasa_tutari || 0) + Number(k.kullanilan_tutar || 0);
+              const yeniAciklama = removeNoteFragment(payRow?.aciklama || "", fragment);
+              await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama || null }).eq("id", k.payment_id);
+            } else if (k.kaynak_tipi === "devir" && k.period_id) {
+              const { data: periodRow } = await supabase.from("periods").select("devir_bakiyesi,devir_bakiyesi_notu").eq("id", k.period_id).single();
+              const yeniDevir = Number(periodRow?.devir_bakiyesi || 0) + Number(k.kullanilan_tutar || 0);
+              const yeniNot = removeNoteFragment(periodRow?.devir_bakiyesi_notu || "", fragment);
+              await supabase.from("periods").update({ devir_bakiyesi: yeniDevir, devir_bakiyesi_notu: yeniNot || null }).eq("id", k.period_id);
+            }
+          }
+          await supabase.from("odemeler").delete().eq("id", odemeId);
+        } catch (rollbackErr) {
+          console.error("Otomatik geri alma da başarısız oldu", rollbackErr);
+          window.alert("Ödeme işlemi başarısız oldu VE otomatik geri alma da başarısız oldu. Lütfen 'Kasa Havuzları' ve ilgili ödeme kayıtlarını manuel kontrol edin, gerekirse yönetici ile iletişime geçin.");
+        }
+        window.alert("Ödeme işlemi tamamlanamadı, yapılan düşümler otomatik olarak geri alındı. Lütfen tekrar deneyin.");
+        throw innerErr;
       }
 
       const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
@@ -2399,6 +2429,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       loadAll();
     } catch (err) {
       showError(err);
+      loadAll();
     }
   };
 
@@ -4560,8 +4591,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 </p>
               )}
 
-              <button type="button" className="btn" disabled={odemeEksik > 0.5 || odemeHedefTutar <= 0} onClick={submitOdeme}>
-                Onayla ve Kaydet
+              <button type="button" className="btn" disabled={odemeEksik > 0.5 || odemeHedefTutar <= 0 || isLoading("submitOdeme")} onClick={() => withLoading("submitOdeme", submitOdeme)}>
+                {isLoading("submitOdeme") ? "Kaydediliyor..." : "Onayla ve Kaydet"}
               </button>
             </Card>
 
