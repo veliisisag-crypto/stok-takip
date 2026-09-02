@@ -322,6 +322,14 @@ type BatchCost = {
   kasa: number;
   kargo: number;
   diger: number;
+  // Kargo/Diğer ödemelerinde şahsi cüzdan kullanılırsa buraya yazılır - veli/asli/mihrimah
+  // sadece TOPTANCI şahsi katkısı için ayrılmış olduğundan bunlarla KARIŞTIRILMAZ.
+  kargo_veli?: number;
+  kargo_asli?: number;
+  kargo_mihrimah?: number;
+  diger_veli?: number;
+  diger_asli?: number;
+  diger_mihrimah?: number;
   aciklama: string;
 };
 
@@ -1081,11 +1089,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     return map;
   }, [batchItems]);
-  // Birim ek maliyet artık manuel girilmiyor: Parti Maliyet Kaydı'ndaki Kargo tutarı,
-  // o partideki toplam alınan adede bölünerek otomatik hesaplanır.
+  // Birim ek maliyet artık manuel girilmiyor: Parti Maliyet Kaydı'ndaki Kargo tutarı
+  // (kasa'dan ödenen + şahsi cüzdandan ödenen kargo toplamı), o partideki toplam alınan
+  // adede bölünerek otomatik hesaplanır.
+  const getKargoToplam = (cost: BatchCost | undefined) =>
+    Number(cost?.kargo || 0) + Number(cost?.kargo_veli || 0) + Number(cost?.kargo_asli || 0) + Number(cost?.kargo_mihrimah || 0);
+  const getDigerToplam = (cost: BatchCost | undefined) =>
+    Number(cost?.diger || 0) + Number(cost?.diger_veli || 0) + Number(cost?.diger_asli || 0) + Number(cost?.diger_mihrimah || 0);
   const getEkMaliyet = (batchId: string) => {
     const cost = batchCosts.find((c) => c.batch_id === batchId);
-    const kargo = Number(cost?.kargo || 0);
+    const kargo = getKargoToplam(cost);
     const totalQty = batchBoughtTotal.get(batchId) || 0;
     if (!kargo || !totalQty) return 0;
     return kargo / totalQty;
@@ -2159,6 +2172,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const sahsiCuzdanByKey = new Map(SAHSI_CUZDAN_SAHIPLERI.map((s) => [s.key, s]));
   const isSahsiKaynak = (k: string) => sahsiCuzdanByKey.has(k);
 
+  // Bir ödeme tipi + kişi alanına göre, batch_costs'ta yazılacak GERÇEK kolon adını döner.
+  // Toptancı için düz "veli"/"asli"/"mihrimah" (Toptancı toplamına dahil olsun diye),
+  // Kargo/Diğer için ayrı "kargo_veli"/"diger_asli" gibi kolonlar (Toptancı toplamıyla KARIŞMASIN diye).
+  const getSahsiKolonAdi = (tip: "toptanci" | "kargo" | "diger", alan: "veli" | "asli" | "mihrimah"): keyof BatchCost => {
+    if (tip === "toptanci") return alan;
+    return `${tip}_${alan}` as keyof BatchCost;
+  };
+
   const kasaHavuzlari = useMemo(() => {
     const map = new Map<string, { toplam: number; kayitlar: { id: string; tarih: string; createdAt: string; cari: string; kasa: number }[] }>();
     for (const p of payments) {
@@ -2305,13 +2326,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const { error: sahsiErr } = await supabase.from("odeme_kaynaklari").update({ kullanilan_tutar: yeniSahsiKullanilan }).eq("id", row.kaynak.id);
         if (sahsiErr) throw sahsiErr;
 
-        // Parti Maliyet Kaydı: şahsi kolonundan düş, kasa/kargo/diger koluna ekle - TEK update.
+        // Parti Maliyet Kaydı: doğru şahsi kolonundan düş, kasa/kargo/diger koluna ekle - TEK update.
         if (odeme.batch_id) {
-          const kasaAlani: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+          const tip = odeme.tip as "toptanci" | "kargo" | "diger"; // kar_payi'de batch_id hiç olmaz
+          const kasaAlani: "kasa" | "kargo" | "diger" = tip === "toptanci" ? "kasa" : tip === "kargo" ? "kargo" : "diger";
+          const sahsiKolon = getSahsiKolonAdi(tip, sahsiAlan);
           const existing = batchCosts.find((c) => c.batch_id === odeme.batch_id);
           if (existing) {
             const patch: Record<string, number> = {
-              [sahsiAlan]: Math.max(0, Number(existing[sahsiAlan] || 0) - tutar),
+              [sahsiKolon]: Math.max(0, Number(existing[sahsiKolon] || 0) - tutar),
               [kasaAlani]: Number(existing[kasaAlani] || 0) + tutar,
             };
             const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
@@ -2418,16 +2441,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // bu ödemenin GERÇEK kaynak dağılımına göre (tümü değil, sadece kasa'dan gelen kısım kadar
       // kasa/kargo/diger'den, şahsi'den gelen kısım kadar ilgili kişinin şahsi kolonundan) geri azalt.
       if (odeme.batch_id) {
-        const kasaAlani: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+        const tip = odeme.tip as "toptanci" | "kargo" | "diger"; // kar_payi'de batch_id hiç olmaz
+        const kasaAlani: "kasa" | "kargo" | "diger" = tip === "toptanci" ? "kasa" : tip === "kargo" ? "kargo" : "diger";
         const sahsiToplam = sahsiIadeToplam.veli + sahsiIadeToplam.asli + sahsiIadeToplam.mihrimah;
         const kasaKismi = Number(odeme.tutar || 0) - sahsiToplam;
         const existing = batchCosts.find((c) => c.batch_id === odeme.batch_id);
         if (existing) {
           const patch: Record<string, number> = {};
           if (kasaKismi > 0.01) patch[kasaAlani] = Math.max(0, Number(existing[kasaAlani] || 0) - kasaKismi);
-          if (sahsiIadeToplam.veli > 0.01) patch.veli = Math.max(0, Number(existing.veli || 0) - sahsiIadeToplam.veli);
-          if (sahsiIadeToplam.asli > 0.01) patch.asli = Math.max(0, Number(existing.asli || 0) - sahsiIadeToplam.asli);
-          if (sahsiIadeToplam.mihrimah > 0.01) patch.mihrimah = Math.max(0, Number(existing.mihrimah || 0) - sahsiIadeToplam.mihrimah);
+          (["veli", "asli", "mihrimah"] as const).forEach((alan) => {
+            if (sahsiIadeToplam[alan] > 0.01) {
+              const kolon = getSahsiKolonAdi(tip, alan);
+              patch[kolon] = Math.max(0, Number(existing[kolon] || 0) - sahsiIadeToplam[alan]);
+            }
+          });
           if (Object.keys(patch).length > 0) {
             const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
             if (error) throw error;
@@ -2531,9 +2558,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
         // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
         // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
-        // Kasa havuzundan/devirden karşılanan kısım kasa/kargo/diger koluna, şahsi cüzdandan
-        // karşılanan kısım ise ilgili kişinin (veli/asli/mihrimah) koluna gider - TEK bir
-        // update çağrısında, kısmi yazılıp yarıda kalmasın diye.
+        // Kasa havuzundan/devirden karşılanan kısım kasa/kargo/diger koluna gider. Şahsi cüzdandan
+        // karşılanan kısım ise TİPE GÖRE DOĞRU kolona gider: Toptancı için düz veli/asli/mihrimah
+        // (Toptancı toplamına dahil olsun diye), Kargo/Diğer için ayrı kargo_veli/diger_asli gibi
+        // kolonlara (Toptancı toplamıyla karışmasın diye) - TEK bir update çağrısında.
         // Kâr Payı ödemesi hiçbir partiye bağlı değil, bu adım sadece diğer 3 tip için geçerli.
         if (odemeTip !== "kar_payi") {
           const kasaAlani: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
@@ -2541,9 +2569,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
           const patch: Record<string, number> = {};
           if (kasaKullanilan > 0.01) patch[kasaAlani] = (existing ? Number(existing[kasaAlani] || 0) : 0) + kasaKullanilan;
-          if (sahsiKullanilan.veli > 0.01) patch.veli = (existing ? Number(existing.veli || 0) : 0) + sahsiKullanilan.veli;
-          if (sahsiKullanilan.asli > 0.01) patch.asli = (existing ? Number(existing.asli || 0) : 0) + sahsiKullanilan.asli;
-          if (sahsiKullanilan.mihrimah > 0.01) patch.mihrimah = (existing ? Number(existing.mihrimah || 0) : 0) + sahsiKullanilan.mihrimah;
+          (["veli", "asli", "mihrimah"] as const).forEach((alan) => {
+            if (sahsiKullanilan[alan] > 0.01) {
+              const kolon = getSahsiKolonAdi(odemeTip, alan);
+              patch[kolon] = (existing ? Number(existing[kolon] || 0) : 0) + sahsiKullanilan[alan];
+            }
+          });
           if (existing) {
             const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
             if (error) throw error;
@@ -4206,8 +4237,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <th className="p-3 text-right font-semibold border border-slate-200">Mihri (şahsi)</th>
                       <th className="p-3 text-right font-semibold border border-slate-200">Kasa'dan</th>
                       <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toptancı</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Kargo</th>
-                      <th className="p-3 text-right font-semibold border border-slate-200">Diğer</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200" title="Kasa + şahsi cüzdan katkısı dahil toplam">Kargo</th>
+                      <th className="p-3 text-right font-semibold border border-slate-200" title="Kasa + şahsi cüzdan katkısı dahil toplam">Diğer</th>
                       <th className="p-3 text-left font-semibold border border-slate-200">Açıklama</th>
                       <th className="p-3 text-right font-semibold border border-slate-200 bg-slate-200">Toplam Maliyet</th>
                       <th className="p-3 border border-slate-200"></th>
@@ -4217,13 +4248,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {sortedBatches.map((batch) => {
                       const row = costInputs[batch.id] || { veli: "0", asli: "0", mihrimah: "0", kasa: "0", kargo: "0", diger: "0", aciklama: "" };
                       const setRow = (field: string, val: string) => setCostInputs((prev) => ({ ...prev, [batch.id]: { ...(prev[batch.id] || { veli:"0", asli:"0", mihrimah:"0", kasa:"0", kargo:"0", diger:"0", aciklama:"" }), [field]: val } }));
+                      const existing = batchCosts.find((c) => c.batch_id === batch.id);
+                      // Kargo/Diğer TOPLAM = kasa'dan ödenen (row.kargo/row.diger) + şahsi cüzdandan ödenen
+                      // (existing.kargo_veli vb, costInputs'ta yok çünkü elle girilmiyor, sadece Ödemeler'den gelir).
+                      const kargoToplam = getKargoToplam({ ...existing, kargo: Number(row.kargo) || 0 } as BatchCost);
+                      const digerToplam = getDigerToplam({ ...existing, diger: Number(row.diger) || 0 } as BatchCost);
                       // Toptancı = Veli(şahsi) + Aslı(şahsi) + Mihri(şahsi) + Kasa payı (Ödemeler'den gelir)
                       const toptanci = (Number(row.veli)||0) + (Number(row.asli)||0) + (Number(row.mihrimah)||0) + (Number(row.kasa)||0);
-                      // Kasa'dan = ortak kasadan çıkan HER ŞEY (şahsi katkılar hariç): Kasa payı + Kargo + Diğer
+                      // Kasa'dan = ortak kasadan çıkan HER ŞEY (şahsi katkılar hariç): Kasa payı + Kargo + Diğer (sadece kasa kısmı)
                       const kasaDan = (Number(row.kasa)||0) + (Number(row.kargo)||0) + (Number(row.diger)||0);
-                      // Toplam Maliyet = Toptancı + Kargo + Diğer (yani partiye harcanan her şey)
-                      const total = toptanci + (Number(row.kargo)||0) + (Number(row.diger)||0);
-                      const existing = batchCosts.find((c) => c.batch_id === batch.id);
+                      // Toplam Maliyet = Toptancı + Kargo TOPLAM + Diğer TOPLAM (yani partiye harcanan her şey, kaynağı ne olursa olsun)
+                      const total = toptanci + kargoToplam + digerToplam;
                       const isDirty = !existing
                         ? (Number(row.veli)||0) !== 0 || (Number(row.asli)||0) !== 0 || (Number(row.mihrimah)||0) !== 0 || (row.aciklama || "") !== ""
                         : (Number(row.veli)||0) !== Number(existing.veli||0) || (Number(row.asli)||0) !== Number(existing.asli||0) || (Number(row.mihrimah)||0) !== Number(existing.mihrimah||0) || (row.aciklama || "") !== (existing.aciklama || "");
@@ -4288,11 +4323,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td className="p-3 text-right font-semibold border border-slate-200 bg-slate-50">
                             {total !== 0 ? toptanci.toLocaleString("tr-TR") : "-"}
                           </td>
-                          {(["kargo","diger"] as const).map((f) => (
-                            <td key={f} className="p-3 text-right border border-slate-200 text-slate-600" title="Ödemeler ekranından otomatik dolar">
-                              {Number(row[f]||0) > 0 ? Number(row[f]).toLocaleString("tr-TR") : "-"}
-                            </td>
-                          ))}
+                          <td className="p-3 text-right border border-slate-200 text-slate-600" title="Kasa ve şahsi cüzdan katkısı dahil toplam - Ödemeler ekranından otomatik dolar">
+                            {kargoToplam > 0 ? kargoToplam.toLocaleString("tr-TR") : "-"}
+                          </td>
+                          <td className="p-3 text-right border border-slate-200 text-slate-600" title="Kasa ve şahsi cüzdan katkısı dahil toplam - Ödemeler ekranından otomatik dolar">
+                            {digerToplam > 0 ? digerToplam.toLocaleString("tr-TR") : "-"}
+                          </td>
                           <td className="p-1 border border-slate-200">
                             <input
                               className="w-full p-2 bg-transparent hover:bg-blue-50 focus:bg-white focus:outline-none rounded text-sm"
@@ -4338,14 +4374,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td className="p-3 text-right border border-slate-300">
                           {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0), 0).toLocaleString("tr-TR")}
                         </td>
-                        {(["kargo","diger"] as const).map((f) => (
-                          <td key={f} className="p-3 text-right border border-slate-300">
-                            {batchCosts.reduce((s,c) => s + Number(c[f]||0), 0).toLocaleString("tr-TR")}
-                          </td>
-                        ))}
+                        <td className="p-3 text-right border border-slate-300">
+                          {batchCosts.reduce((s,c) => s + getKargoToplam(c), 0).toLocaleString("tr-TR")}
+                        </td>
+                        <td className="p-3 text-right border border-slate-300">
+                          {batchCosts.reduce((s,c) => s + getDigerToplam(c), 0).toLocaleString("tr-TR")}
+                        </td>
                         <td className="p-3 border border-slate-300"></td>
                         <td className="p-3 text-right border border-slate-300">
-                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + Number(c.kargo||0) + Number(c.diger||0), 0).toLocaleString("tr-TR")}
+                          {batchCosts.reduce((s,c) => s + Number(c.veli||0) + Number(c.asli||0) + Number(c.mihrimah||0) + Number(c.kasa||0) + getKargoToplam(c) + getDigerToplam(c), 0).toLocaleString("tr-TR")}
                         </td>
                         <td className="border border-slate-300"></td>
                       </tr>
