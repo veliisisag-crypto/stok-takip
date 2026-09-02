@@ -295,7 +295,7 @@ type Odeme = {
 type OdemeKaynak = {
   id: string;
   odeme_id: string;
-  kaynak_tipi: "tahsilat" | "devir";
+  kaynak_tipi: "tahsilat" | "devir" | "sahsi";
   para_sahibi: string | null;
   payment_id: string | null;
   period_id: string | null;
@@ -643,6 +643,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [odemeTutar, setOdemeTutar] = useState("");
   const [odemeKimden, setOdemeKimden] = useState<string[]>([]);
   const [odemeKimdenSecim, setOdemeKimdenSecim] = useState("");
+  const [sahsiKarsilamaSecili, setSahsiKarsilamaSecili] = useState<string | null>(null); // odeme_kaynaklari.id (kaynak_tipi='sahsi')
+  const [sahsiKarsilamaTutar, setSahsiKarsilamaTutar] = useState("");
+  const [sahsiKarsilamaKimden, setSahsiKarsilamaKimden] = useState<string[]>([]);
+  const [sahsiKarsilamaKimdenSecim, setSahsiKarsilamaKimdenSecim] = useState("");
   const [editingPaymentRowId, setEditingPaymentRowId] = useState<string | null>(null);
   const [paymentRowDraft, setPaymentRowDraft] = useState<{ note: string; kasa: string; paraSahibi: string; aciklama: string }>({ note: "", kasa: "", paraSahibi: "", aciklama: "" });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -2145,6 +2149,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [sellerAccounts]
   );
 
+  // Şahsi cüzdanlar: sadece 3 ortak için (Parti Maliyet Kaydı'nda karşılığı olan tek kişiler).
+  // Kasa havuzlarından ayrı, bakiye sınırı yok - kişinin kendi cebinden çıkan, sınırsız bir kaynak.
+  const SAHSI_CUZDAN_SAHIPLERI: { key: string; kisi: string; alan: "veli" | "asli" | "mihrimah" }[] = [
+    { key: "__sahsi__Veli", kisi: "Veli", alan: "veli" },
+    { key: "__sahsi__Aslı", kisi: "Aslı", alan: "asli" },
+    { key: "__sahsi__Mihrimah", kisi: "Mihrimah", alan: "mihrimah" },
+  ];
+  const sahsiCuzdanByKey = new Map(SAHSI_CUZDAN_SAHIPLERI.map((s) => [s.key, s]));
+  const isSahsiKaynak = (k: string) => sahsiCuzdanByKey.has(k);
+
   const kasaHavuzlari = useMemo(() => {
     const map = new Map<string, { toplam: number; kayitlar: { id: string; tarih: string; createdAt: string; cari: string; kasa: number }[] }>();
     for (const p of payments) {
@@ -2204,6 +2218,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // "Kimden" seçeneği için kullanılabilir bakiye (para_sahibi adı ya da "__devir__" sentinel'i)
   const getKaynakBakiye = (kaynak: string) => {
     if (kaynak === "__devir__") return openPeriodForOdeme?.devir_bakiyesi || 0;
+    if (isSahsiKaynak(kaynak)) return Infinity;
     return kasaHavuzlari.get(kaynak)?.toplam || 0;
   };
 
@@ -2211,27 +2226,148 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const odemeHedefTutar = Number(odemeTutar) || 0;
   const odemeEksik = Math.max(odemeHedefTutar - odemeKimdenToplamKullanilabilir, 0);
 
-  const markToptanciFullyPaid = async (supplierId: string) => {
-    const kalan = getToptanciKalanBorc(supplierId);
-    if (kalan <= 0.5) return setMessage("Zaten borç görünmüyor.");
-    const supplierName = supplierMap.get(supplierId)?.name || supplierId;
-    if (!confirm(`${supplierName} için ${money(kalan)} tutarındaki kalan borç, gerçek bir kasa kaynağından düşülmeden "ödendi" olarak işaretlenecek (bu sistem öncesi zaten ödenmiş kabul edilecek). Onaylıyor musun?`)) return;
+  // Şahsi cüzdandan yapılmış, henüz kasadan (kısmen dahi) karşılanmamış bakiyesi kalan ödemeler.
+  const sahsiOdenmemisKalanlar = useMemo(() => {
+    return odemeKaynaklari
+      .filter((k) => k.kaynak_tipi === "sahsi" && Number(k.kullanilan_tutar || 0) > 0.5)
+      .map((k) => {
+        const odeme = odemeler.find((o) => o.id === k.odeme_id);
+        return { kaynak: k, odeme };
+      })
+      .filter((row) => !!row.odeme)
+      .sort((a, b) => new Date(b.odeme!.created_at).getTime() - new Date(a.odeme!.created_at).getTime());
+  }, [odemeKaynaklari, odemeler]);
+
+  const sahsiKarsilamaKimdenToplamKullanilabilir = sahsiKarsilamaKimden.reduce((s, k) => s + getKaynakBakiye(k), 0);
+  const sahsiKarsilamaHedefTutar = Number(sahsiKarsilamaTutar) || 0;
+  const sahsiKarsilamaEksik = Math.max(sahsiKarsilamaHedefTutar - sahsiKarsilamaKimdenToplamKullanilabilir, 0);
+
+  const submitSahsiKarsilama = async () => {
+    if (!sahsiKarsilamaSecili) return setMessage("Karşılanacak şahsi ödemeyi seç.");
+    const row = sahsiOdenmemisKalanlar.find((r) => r.kaynak.id === sahsiKarsilamaSecili);
+    if (!row || !row.odeme) return setMessage("Kayıt bulunamadı, sayfayı yenile.");
+    const tutar = Number(sahsiKarsilamaTutar);
+    if (!tutar || tutar <= 0) return setMessage("Geçerli bir tutar girin.");
+    if (tutar > Number(row.kaynak.kullanilan_tutar) + 0.5) return setMessage(`En fazla ${money(row.kaynak.kullanilan_tutar)} karşılanabilir.`);
+    if (sahsiKarsilamaKimden.length === 0) return setMessage("En az bir kasa kaynağı seçmelisin.");
+    if (sahsiKarsilamaEksik > 0.5) return setMessage(`Seçilen kaynaklar yetmiyor, ${money(sahsiKarsilamaEksik)} eksik.`);
+
+    const odeme = row.odeme;
+    const sahibi = row.kaynak.para_sahibi as "Veli" | "Aslı" | "Mihrimah";
+    const sahsiAlan: "veli" | "asli" | "mihrimah" | null = sahibi === "Veli" ? "veli" : sahibi === "Aslı" ? "asli" : sahibi === "Mihrimah" ? "mihrimah" : null;
+    if (!sahsiAlan) return setMessage("Bu kaynağın sahibi tanınamadı.");
+
+    const yeniKaynakIdleri: string[] = [];
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const { error } = await supabase.from("odemeler").insert({
-        tip: "toptanci",
-        supplier_id: supplierId,
-        batch_id: null,
-        tutar: kalan,
-        aciklama: "Geçmiş borç kapatıldı (Ödemeler sistemi öncesi zaten ödenmiş)",
-        created_by: userData.user?.email || "",
-      });
-      if (error) throw error;
-      await logAction("Toptancı geçmiş borcu kapatıldı", "odemeler", supplierName, { tutar: kalan });
-      setMessage(`${supplierName} borcu kapatıldı.`);
+      let kalan = tutar;
+
+      try {
+        for (const kaynak of sahsiKarsilamaKimden) {
+          if (kalan <= 0.01) break;
+          if (kaynak === "__devir__") {
+            const mevcut = openPeriodForOdeme?.devir_bakiyesi || 0;
+            const kullanilan = Math.min(mevcut, kalan);
+            if (kullanilan <= 0) continue;
+            const eskiNot = openPeriodForOdeme?.devir_bakiyesi_notu || "";
+            const yeniNot = `${eskiNot ? eskiNot + ", " : ""}${odeme.sira_no}/${Math.round(kullanilan)} TL (şahsi karşılama)`;
+            const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan, devir_bakiyesi_notu: yeniNot }).eq("id", openPeriodForOdeme!.id);
+            if (error) throw error;
+            const { data: kInserted, error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
+              odeme_id: odeme.id, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan,
+            }).select();
+            if (kaynakErr) throw kaynakErr;
+            yeniKaynakIdleri.push(kInserted![0].id as string);
+            kalan -= kullanilan;
+          } else {
+            const havuz = kasaHavuzlari.get(kaynak);
+            if (!havuz) continue;
+            for (const kayit of havuz.kayitlar) {
+              if (kalan <= 0.01) break;
+              const kullanilan = Math.min(kayit.kasa, kalan);
+              if (kullanilan <= 0) continue;
+              const yeniKasa = kayit.kasa - kullanilan;
+              const eskiAciklama = payments.find((p) => p.id === kayit.id)?.aciklama || "";
+              const yeniAciklama = `${eskiAciklama ? eskiAciklama + ", " : ""}${odeme.sira_no}/${Math.round(kullanilan)} TL (şahsi karşılama)`;
+              const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama }).eq("id", kayit.id);
+              if (error) throw error;
+              const { data: kInserted, error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
+                odeme_id: odeme.id, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan,
+              }).select();
+              if (kaynakErr) throw kaynakErr;
+              yeniKaynakIdleri.push(kInserted![0].id as string);
+              kalan -= kullanilan;
+            }
+          }
+        }
+
+        // Şahsi kaynak satırının kalan tutarını azalt (karşılanan kadar)
+        const yeniSahsiKullanilan = Math.max(0, Number(row.kaynak.kullanilan_tutar) - tutar);
+        const { error: sahsiErr } = await supabase.from("odeme_kaynaklari").update({ kullanilan_tutar: yeniSahsiKullanilan }).eq("id", row.kaynak.id);
+        if (sahsiErr) throw sahsiErr;
+
+        // Parti Maliyet Kaydı: şahsi kolonundan düş, kasa/kargo/diger koluna ekle - TEK update.
+        if (odeme.batch_id) {
+          const kasaAlani: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+          const existing = batchCosts.find((c) => c.batch_id === odeme.batch_id);
+          if (existing) {
+            const patch: Record<string, number> = {
+              [sahsiAlan]: Math.max(0, Number(existing[sahsiAlan] || 0) - tutar),
+              [kasaAlani]: Number(existing[kasaAlani] || 0) + tutar,
+            };
+            const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
+            if (error) throw error;
+          }
+        }
+      } catch (innerErr) {
+        // Yarıda kesildi: buraya kadar eklenen YENİ kaynak satırlarını geri al (kasa/devir'e iade et),
+        // şahsi kaynak satırının kullanilan_tutar'ı henüz DEĞİŞTİRİLMEDİYSE dokunma; değiştirildiyse
+        // (yani sadece batch_costts adımı patladıysa) onu da eski haline döndür.
+        try {
+          const { data: eklenenler } = await supabase.from("odeme_kaynaklari").select("*").in("id", yeniKaynakIdleri.length ? yeniKaynakIdleri : ["__none__"]);
+          for (const k of eklenenler || []) {
+            const fragment = `${odeme.sira_no}/${Math.round(Number(k.kullanilan_tutar || 0))} TL (şahsi karşılama)`;
+            if (k.kaynak_tipi === "tahsilat" && k.payment_id) {
+              const { data: payRow } = await supabase.from("payments").select("kasa_tutari,aciklama").eq("id", k.payment_id).single();
+              const yeniKasa = Number(payRow?.kasa_tutari || 0) + Number(k.kullanilan_tutar || 0);
+              const yeniAciklama = removeNoteFragment(payRow?.aciklama || "", fragment);
+              await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama || null }).eq("id", k.payment_id);
+            } else if (k.kaynak_tipi === "devir" && k.period_id) {
+              const { data: periodRow } = await supabase.from("periods").select("devir_bakiyesi,devir_bakiyesi_notu").eq("id", k.period_id).single();
+              const yeniDevir = Number(periodRow?.devir_bakiyesi || 0) + Number(k.kullanilan_tutar || 0);
+              const yeniNot = removeNoteFragment(periodRow?.devir_bakiyesi_notu || "", fragment);
+              await supabase.from("periods").update({ devir_bakiyesi: yeniDevir, devir_bakiyesi_notu: yeniNot || null }).eq("id", k.period_id);
+            }
+            await supabase.from("odeme_kaynaklari").delete().eq("id", k.id);
+          }
+          // Şahsi kaynak satırını da garanti altına al: kullanilan_tutar orijinaline eşit mi kontrol et, değilse düzelt.
+          const { data: sahsiRow } = await supabase.from("odeme_kaynaklari").select("kullanilan_tutar").eq("id", row.kaynak.id).single();
+          if (sahsiRow && Number(sahsiRow.kullanilan_tutar) !== Number(row.kaynak.kullanilan_tutar)) {
+            await supabase.from("odeme_kaynaklari").update({ kullanilan_tutar: row.kaynak.kullanilan_tutar }).eq("id", row.kaynak.id);
+          }
+        } catch (rollbackErr) {
+          console.error("Şahsi karşılama geri alma da başarısız oldu", rollbackErr);
+          window.alert("Şahsi karşılama işlemi başarısız oldu VE otomatik geri alma da başarısız oldu. Lütfen kayıtları manuel kontrol edin.");
+        }
+        window.alert("Şahsi karşılama işlemi tamamlanamadı, yapılan düşümler otomatik olarak geri alındı. Lütfen tekrar deneyin.");
+        throw innerErr;
+      }
+
+      const kaynakOzet = sahsiKarsilamaKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
+      await logAction(
+        "Şahsi ödeme kasadan karşılandı",
+        "odemeler",
+        `${sahibi} (Şahsi) — ${batchMap.get(odeme.batch_id || "")?.name || odeme.recipient_name || ""}`,
+        { tutar, kaynak: kaynakOzet, odeme_sira_no: odeme.sira_no }
+      );
+
+      setMessage("Şahsi ödeme, seçilen kasa kaynağından karşılandı.");
+      setSahsiKarsilamaSecili(null);
+      setSahsiKarsilamaTutar("");
+      setSahsiKarsilamaKimden([]);
       loadAll();
     } catch (err) {
       showError(err);
+      loadAll();
     }
   };
 
@@ -2253,10 +2389,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       : odeme.tip === "kar_payi"
       ? (odeme.recipient_name || "-")
       : (batchMap.get(odeme.batch_id || "")?.name || "");
-    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi) tutarlar otomatik olarak geri iade edilecek, oradaki "${odeme.sira_no}/..." notu da temizlenecek, Parti Maliyet Kaydı'ndaki ilgili alan da bu kadar azaltılacak.`)) return;
+    if (!confirm(`${entityName} için ${money(odeme.tutar)} tutarındaki bu ödeme kaydı silinsin mi? Kullanılan kaynaklardaki (tahsilat kasası / devir bakiyesi / şahsi cüzdan) tutarlar otomatik olarak geri iade edilecek, oradaki "${odeme.sira_no}/..." notu da temizlenecek, Parti Maliyet Kaydı'ndaki ilgili alan(lar) da bu kadar azaltılacak.`)) return;
 
     try {
       const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === odemeId);
+      const sahsiIadeToplam: Record<"veli" | "asli" | "mihrimah", number> = { veli: 0, asli: 0, mihrimah: 0 };
       for (const k of kaynaklar) {
         const fragment = `${odeme.sira_no}/${Math.round(Number(k.kullanilan_tutar || 0))} TL`;
         if (k.kaynak_tipi === "tahsilat" && k.payment_id) {
@@ -2271,17 +2408,30 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const yeniNot = removeNoteFragment(period?.devir_bakiyesi_notu || "", fragment);
           const { error } = await supabase.from("periods").update({ devir_bakiyesi: yeniDevir, devir_bakiyesi_notu: yeniNot || null }).eq("id", k.period_id);
           if (error) throw error;
+        } else if (k.kaynak_tipi === "sahsi" && k.para_sahibi) {
+          const alan = k.para_sahibi === "Veli" ? "veli" : k.para_sahibi === "Aslı" ? "asli" : k.para_sahibi === "Mihrimah" ? "mihrimah" : null;
+          if (alan) sahsiIadeToplam[alan] += Number(k.kullanilan_tutar || 0);
         }
       }
 
-      // Parti Maliyet Kaydı'ndaki ilgili alanı (kasa/kargo/diger) bu ödeme tutarı kadar geri azalt
+      // Parti Maliyet Kaydı'ndaki ilgili alanları (kasa/kargo/diger VE varsa şahsi kolonları)
+      // bu ödemenin GERÇEK kaynak dağılımına göre (tümü değil, sadece kasa'dan gelen kısım kadar
+      // kasa/kargo/diger'den, şahsi'den gelen kısım kadar ilgili kişinin şahsi kolonundan) geri azalt.
       if (odeme.batch_id) {
-        const alanAdi: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+        const kasaAlani: "kasa" | "kargo" | "diger" = odeme.tip === "toptanci" ? "kasa" : odeme.tip === "kargo" ? "kargo" : "diger";
+        const sahsiToplam = sahsiIadeToplam.veli + sahsiIadeToplam.asli + sahsiIadeToplam.mihrimah;
+        const kasaKismi = Number(odeme.tutar || 0) - sahsiToplam;
         const existing = batchCosts.find((c) => c.batch_id === odeme.batch_id);
         if (existing) {
-          const yeniDeger = Math.max(0, Number(existing[alanAdi] || 0) - Number(odeme.tutar || 0));
-          const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
-          if (error) throw error;
+          const patch: Record<string, number> = {};
+          if (kasaKismi > 0.01) patch[kasaAlani] = Math.max(0, Number(existing[kasaAlani] || 0) - kasaKismi);
+          if (sahsiIadeToplam.veli > 0.01) patch.veli = Math.max(0, Number(existing.veli || 0) - sahsiIadeToplam.veli);
+          if (sahsiIadeToplam.asli > 0.01) patch.asli = Math.max(0, Number(existing.asli || 0) - sahsiIadeToplam.asli);
+          if (sahsiIadeToplam.mihrimah > 0.01) patch.mihrimah = Math.max(0, Number(existing.mihrimah || 0) - sahsiIadeToplam.mihrimah);
+          if (Object.keys(patch).length > 0) {
+            const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
+            if (error) throw error;
+          }
         }
       }
 
@@ -2326,6 +2476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
       try {
         let kalan = tutar;
+        const sahsiKullanilan: Record<"veli" | "asli" | "mihrimah", number> = { veli: 0, asli: 0, mihrimah: 0 };
 
         for (const kaynak of odemeKimden) {
           if (kalan <= 0.01) break;
@@ -2343,6 +2494,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               odeme_id: odemeId, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan,
             });
             if (kaynakErr) throw kaynakErr;
+            kalan -= kullanilan;
+          } else if (isSahsiKaynak(kaynak)) {
+            // Şahsi cüzdan: kasa havuzuna dokunmaz, bakiye sınırı yok - kalan ne varsa tamamını karşılar.
+            const sahibi = sahsiCuzdanByKey.get(kaynak)!;
+            const kullanilan = kalan;
+            if (kullanilan <= 0) continue;
+            const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
+              odeme_id: odemeId, kaynak_tipi: "sahsi", para_sahibi: sahibi.kisi, payment_id: null, period_id: null, kullanilan_tutar: kullanilan,
+            });
+            if (kaynakErr) throw kaynakErr;
+            sahsiKullanilan[sahibi.alan] += kullanilan;
             kalan -= kullanilan;
           } else {
             const havuz = kasaHavuzlari.get(kaynak);
@@ -2369,16 +2531,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         // Toptancı/Kargo/Diğer ödemesi, seçilen partinin Parti Maliyet Kaydı'ndaki ilgili alanına
         // BİRİKTİRİLEREK (üzerine eklenerek) yazılır - artık bu alanlar elle girilmiyor, sadece
         // Ödemeler ekranından besleniyor, o yüzden aynı partiye birden fazla ödeme yapılabilir.
+        // Kasa havuzundan/devirden karşılanan kısım kasa/kargo/diger koluna, şahsi cüzdandan
+        // karşılanan kısım ise ilgili kişinin (veli/asli/mihrimah) koluna gider - TEK bir
+        // update çağrısında, kısmi yazılıp yarıda kalmasın diye.
         // Kâr Payı ödemesi hiçbir partiye bağlı değil, bu adım sadece diğer 3 tip için geçerli.
         if (odemeTip !== "kar_payi") {
-          const alanAdi: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
+          const kasaAlani: "kasa" | "kargo" | "diger" = odemeTip === "toptanci" ? "kasa" : odemeTip === "kargo" ? "kargo" : "diger";
+          const kasaKullanilan = tutar - sahsiKullanilan.veli - sahsiKullanilan.asli - sahsiKullanilan.mihrimah;
           const existing = batchCosts.find((c) => c.batch_id === odemeBatchId);
+          const patch: Record<string, number> = {};
+          if (kasaKullanilan > 0.01) patch[kasaAlani] = (existing ? Number(existing[kasaAlani] || 0) : 0) + kasaKullanilan;
+          if (sahsiKullanilan.veli > 0.01) patch.veli = (existing ? Number(existing.veli || 0) : 0) + sahsiKullanilan.veli;
+          if (sahsiKullanilan.asli > 0.01) patch.asli = (existing ? Number(existing.asli || 0) : 0) + sahsiKullanilan.asli;
+          if (sahsiKullanilan.mihrimah > 0.01) patch.mihrimah = (existing ? Number(existing.mihrimah || 0) : 0) + sahsiKullanilan.mihrimah;
           if (existing) {
-            const yeniDeger = Number(existing[alanAdi] || 0) + tutar;
-            const { error } = await supabase.from("batch_costs").update({ [alanAdi]: yeniDeger }).eq("id", existing.id);
+            const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
             if (error) throw error;
           } else {
-            const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, [alanAdi]: tutar });
+            const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, ...patch });
             if (error) throw error;
           }
         }
@@ -2411,7 +2581,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         throw innerErr;
       }
 
-      const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : k).join(" + ");
+      const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : isSahsiKaynak(k) ? `${sahsiCuzdanByKey.get(k)!.kisi} (Şahsi)` : k).join(" + ");
       const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : odemeTip === "kar_payi" ? "Kâr payı ödendi" : "Diğer masraf ödendi";
       await logAction(
         islemAdi,
@@ -4455,30 +4625,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
             </Card>
 
-            <Card title="Toptancı Bakiyeleri">
-              <Table
-                headers={["Toptancı", "Kalan Borç", ""]}
-                rows={suppliers.map((s) => {
-                  const kalan = getToptanciKalanBorc(s.id);
-                  return [
-                    s.name,
-                    money(kalan),
-                    <button
-                      key="btn"
-                      type="button"
-                      className="btn-secondary"
-                      style={{fontSize:"0.75rem", padding:"3px 10px"}}
-                      disabled={kalan <= 0.5}
-                      onClick={() => markToptanciFullyPaid(s.id)}
-                    >
-                      Tamamen Ödendi İşaretle
-                    </button>,
-                  ];
-                })}
-              />
-              {suppliers.length === 0 && <p className="mt-2 text-sm text-slate-500">Henüz toptancı yok.</p>}
-            </Card>
-
             <Card title="Yeni Ödeme">
               <div className="grid gap-3 md:grid-cols-2 mb-3">
                 <div className="field-label">
@@ -4486,7 +4632,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <select
                     className="input"
                     value={odemeTip}
-                    onChange={(e) => { setOdemeTip(e.target.value as "toptanci" | "kargo" | "diger" | "kar_payi"); setOdemeSupplierId(""); setOdemeBatchId(""); setOdemeKarPayiAlici(""); setOdemeTutar(""); }}
+                    onChange={(e) => { const v = e.target.value as "toptanci" | "kargo" | "diger" | "kar_payi"; setOdemeTip(v); setOdemeSupplierId(""); setOdemeBatchId(""); setOdemeKarPayiAlici(""); setOdemeTutar(""); if (v === "kar_payi") setOdemeKimden(odemeKimden.filter((k) => !isSahsiKaynak(k))); }}
                   >
                     <option value="toptanci">Toptancıya öde (parti bazlı)</option>
                     <option value="kargo">Kargo öde (parti bazlı)</option>
@@ -4562,6 +4708,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     {paraSahibiSecenekleri.filter((k) => !odemeKimden.includes(k)).map((k) => (
                       <option key={k} value={k}>{k} — kullanılabilir {money(getKaynakBakiye(k))}</option>
                     ))}
+                    {odemeTip !== "kar_payi" && SAHSI_CUZDAN_SAHIPLERI.filter((s) => !odemeKimden.includes(s.key)).map((s) => (
+                      <option key={s.key} value={s.key}>{s.kisi} (Şahsi) — sınırsız</option>
+                    ))}
                   </select>
                 </div>
                 <button
@@ -4575,9 +4724,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
               <div className="flex flex-wrap gap-2 mb-3">
                 {odemeKimden.map((k) => (
-                  <span key={k} className="rounded px-3 py-1 text-sm" style={{background:"#e0eafc", color:"#1e40af", display:"inline-flex", alignItems:"center", gap:6}}>
-                    {k === "__devir__" ? "Devir Bakiyesi" : k}
-                    <button type="button" onClick={() => setOdemeKimden(odemeKimden.filter((x) => x !== k))} style={{border:"none", background:"none", cursor:"pointer", color:"#1e40af"}}>✕</button>
+                  <span key={k} className="rounded px-3 py-1 text-sm" style={{background: isSahsiKaynak(k) ? "#fef3c7" : "#e0eafc", color: isSahsiKaynak(k) ? "#92400e" : "#1e40af", display:"inline-flex", alignItems:"center", gap:6}}>
+                    {k === "__devir__" ? "Devir Bakiyesi" : isSahsiKaynak(k) ? `${sahsiCuzdanByKey.get(k)!.kisi} (Şahsi)` : k}
+                    <button type="button" onClick={() => setOdemeKimden(odemeKimden.filter((x) => x !== k))} style={{border:"none", background:"none", cursor:"pointer", color: isSahsiKaynak(k) ? "#92400e" : "#1e40af"}}>✕</button>
                   </span>
                 ))}
                 {odemeKimden.length === 0 && <span className="text-sm text-slate-400">Henüz kaynak eklenmedi</span>}
@@ -4596,12 +4745,115 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </button>
             </Card>
 
+            <Card title="Şahsi Ödemeyi Kasadan Karşıla">
+              <p className="text-sm text-slate-500 mb-3">
+                Daha önce bir ortağın kendi cebinden (şahsi) yaptığı ödemeleri, kasa havuzunda yeterli bakiye oluşunca buradan
+                (kısmen ya da tamamen) kasa kaynağına devredebilirsin.
+              </p>
+              <Table
+                headers={["#", "Tarih", "Kime / Ne için", "Kişi", "Kalan Şahsi Tutar", ""]}
+                rows={sahsiOdenmemisKalanlar.map(({ kaynak, odeme }) => {
+                  const entityName = odeme!.tip === "toptanci"
+                    ? `${supplierMap.get(odeme!.supplier_id || "")?.name || ""} — ${batchMap.get(odeme!.batch_id || "")?.name || ""}`
+                    : (batchMap.get(odeme!.batch_id || "")?.name || "-");
+                  return [
+                    odeme!.sira_no,
+                    toTR(odeme!.created_at, true),
+                    entityName,
+                    kaynak.para_sahibi,
+                    money(kaynak.kullanilan_tutar),
+                    <button
+                      key="btn"
+                      type="button"
+                      className="btn-secondary"
+                      style={{fontSize:"0.75rem", padding:"3px 10px"}}
+                      onClick={() => {
+                        setSahsiKarsilamaSecili(kaynak.id);
+                        setSahsiKarsilamaTutar(String(Math.round(Number(kaynak.kullanilan_tutar))));
+                        setSahsiKarsilamaKimden([]);
+                      }}
+                    >
+                      Karşıla
+                    </button>,
+                  ];
+                })}
+              />
+              {sahsiOdenmemisKalanlar.length === 0 && <p className="mt-2 text-sm text-slate-500">Karşılanmayı bekleyen şahsi ödeme yok.</p>}
+
+              {sahsiKarsilamaSecili && (() => {
+                const row = sahsiOdenmemisKalanlar.find((r) => r.kaynak.id === sahsiKarsilamaSecili);
+                if (!row || !row.odeme) return null;
+                return (
+                  <div className="mt-4 pt-4" style={{borderTop: "1px solid #e2e8f0"}}>
+                    <p className="text-sm font-medium mb-2">
+                      #{row.odeme.sira_no} — {row.kaynak.para_sahibi} (Şahsi) — en fazla {money(row.kaynak.kullanilan_tutar)} karşılanabilir
+                    </p>
+                    <div className="field-label mb-3" style={{maxWidth: 200}}>
+                      Karşılanacak Tutar
+                      <input className="input" type="number" min="0" value={sahsiKarsilamaTutar} onChange={(e) => setSahsiKarsilamaTutar(e.target.value)} placeholder="0" />
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-2 mb-2">
+                      <div className="field-label" style={{minWidth: 220}}>
+                        Kaynak ekle
+                        <select className="input" value={sahsiKarsilamaKimdenSecim} onChange={(e) => setSahsiKarsilamaKimdenSecim(e.target.value)}>
+                          <option value="">Seç...</option>
+                          {paraSahibiSecenekleri.filter((k) => !sahsiKarsilamaKimden.includes(k)).map((k) => (
+                            <option key={k} value={k}>{k} — kullanılabilir {money(getKaynakBakiye(k))}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => { if (sahsiKarsilamaKimdenSecim) { setSahsiKarsilamaKimden([...sahsiKarsilamaKimden, sahsiKarsilamaKimdenSecim]); setSahsiKarsilamaKimdenSecim(""); } }}
+                      >
+                        Kaynak Ekle
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {sahsiKarsilamaKimden.map((k) => (
+                        <span key={k} className="rounded px-3 py-1 text-sm" style={{background:"#e0eafc", color:"#1e40af", display:"inline-flex", alignItems:"center", gap:6}}>
+                          {k === "__devir__" ? "Devir Bakiyesi" : k}
+                          <button type="button" onClick={() => setSahsiKarsilamaKimden(sahsiKarsilamaKimden.filter((x) => x !== k))} style={{border:"none", background:"none", cursor:"pointer", color:"#1e40af"}}>✕</button>
+                        </span>
+                      ))}
+                      {sahsiKarsilamaKimden.length === 0 && <span className="text-sm text-slate-400">Henüz kaynak eklenmedi</span>}
+                    </div>
+
+                    {sahsiKarsilamaKimden.length > 0 && sahsiKarsilamaHedefTutar > 0 && (
+                      <p className="text-sm mb-3" style={{color: sahsiKarsilamaEksik > 0.5 ? "#dc2626" : "#16a34a"}}>
+                        {sahsiKarsilamaEksik > 0.5
+                          ? `Seçilen kaynaklar yetmiyor: ${money(sahsiKarsilamaEksik)} eksik, başka kaynak ekle.`
+                          : "Tüm tutar karşılandı."}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={sahsiKarsilamaEksik > 0.5 || sahsiKarsilamaHedefTutar <= 0 || isLoading("submitSahsiKarsilama")}
+                        onClick={() => withLoading("submitSahsiKarsilama", submitSahsiKarsilama)}
+                      >
+                        {isLoading("submitSahsiKarsilama") ? "Kaydediliyor..." : "Karşıla ve Kaydet"}
+                      </button>
+                      <button type="button" className="btn-secondary" onClick={() => { setSahsiKarsilamaSecili(null); setSahsiKarsilamaTutar(""); setSahsiKarsilamaKimden([]); }}>
+                        Vazgeç
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </Card>
+
             <Card title="Ödeme Geçmişi">
               <Table
                 headers={["#", "Tarih", "Tip", "Kime / Ne için", "Tutar", "Kaynaklar", ""]}
                 rows={[...odemeler].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o) => {
                   const kaynaklar = odemeKaynaklari.filter((k) => k.odeme_id === o.id);
-                  const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
+                  const kaynakOzet = kaynaklar.map((k) => k.kaynak_tipi === "devir" ? `Devir (${money(k.kullanilan_tutar)})` : k.kaynak_tipi === "sahsi" ? `${k.para_sahibi} (Şahsi) (${money(k.kullanilan_tutar)})` : `${k.para_sahibi} (${money(k.kullanilan_tutar)})`).join(", ");
                   return [
                     o.sira_no,
                     toTR(o.created_at, true),
