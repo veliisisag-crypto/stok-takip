@@ -238,6 +238,7 @@ type BatchItem = {
   buy_price: number;
   sale_price: number;
   depo?: string;
+  variant?: "ana" | "cep_boy"; // "ana" = normal boy ürün, "cep_boy" = küçük boy alt ürün (aynı ürün tanımı, ayrı stok/fiyat)
   created_at: string;
 };
 
@@ -258,6 +259,7 @@ type Sale = {
   seller_account_id?: string | null;
   seller_profit?: number | null;
   note?: string | null;
+  variant?: "ana" | "cep_boy"; // hangi alt üründen satıldığı - raporlarda etiketlemek için
   cancelled: boolean;
   created_at: string;
 };
@@ -713,15 +715,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
-  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", usdTyuksel: "", usdThasan: "", usdTamir: "" });
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("");
   const [partiTab, setPartiTab] = useState<"giris" | "maliyet" | "rapor">("giris");
   const [showPartiDetayModal, setShowPartiDetayModal] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
-  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "" });
+  const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" as "ana" | "cep_boy" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -770,10 +772,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return null;
   };
 
+  // Cep Boy (küçük boy alt ürün) için sabit varsayılanlar - her ürün/toptancı için aynı,
+  // ama kullanıcı isterse formda üzerine yazabilir (sadece varsayılan olarak otomatik dolar).
+  const CEP_BOY_USD_FIYAT = 3;
+  const CEP_BOY_SATIS_FIYATI = 500;
+
   const recalcBatchFormBuyPrice = (productId: string, batchId: string) => {
     const product = productMap.get(productId);
     const batch = batchMap.get(batchId);
     if (!product || !batch) return;
+    if (batchForm.variant === "cep_boy") {
+      if (!batch.usd_kuru) return;
+      const computed = Math.round(CEP_BOY_USD_FIYAT * batch.usd_kuru * 100) / 100;
+      setBatchForm((prev) => ({ ...prev, buyPrice: String(computed), salePrice: String(CEP_BOY_SATIS_FIYATI) }));
+      return;
+    }
     const usdPrice = getUsdPriceForBatch(product, batch);
     if (usdPrice === null || !batch.usd_kuru) return;
     const computed = Math.round(usdPrice * batch.usd_kuru * 100) / 100;
@@ -784,7 +797,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!batchForm.productId || !batchForm.batchId) return;
     recalcBatchFormBuyPrice(batchForm.productId, batchForm.batchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchForm.productId, batchForm.batchId, products, batches]);
+  }, [batchForm.productId, batchForm.batchId, batchForm.variant, products, batches]);
 
   const sortedProducts = useMemo(
     () => [...products].sort((a, b) => a.name.localeCompare(b.name, "tr")),
@@ -1040,6 +1053,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // stok hesabı bu yüzden RPC'den gelen (tüm satıcıları kapsayan agregat) rakamı kullanır.
   const getProductSoldQty = (productId: string) => soldQtyByProduct[productId] || 0;
   const getProductStock = (productId: string) => getProductTotalBought(productId) - getProductSoldQty(productId);
+  // Varyant bazlı stok (Ana / Cep Boy) - RPC ürün bazında toplu geldiği için burada
+  // batch_item bazlı (getBatchSoldQtyForItem) hesaplama kullanılır, variant'a göre filtrelenir.
+  const getProductVariantStock = (productId: string, variant: "ana" | "cep_boy") =>
+    batchItemsForProduct(productId)
+      .filter((item) => (item.variant || "ana") === variant)
+      .reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0), 0);
   const getCustomerSalesTotal = (customerId: string) =>
     activeSales
       .filter((sale) => sale.customer_id === customerId)
@@ -1357,10 +1376,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       code,
       gender_category: newProduct.genderCategory,
       image_url: imageUrl,
+      usd_fiyat_tyuksel: newProduct.usdTyuksel ? Number(newProduct.usdTyuksel) : null,
+      usd_fiyat_thasan: newProduct.usdThasan ? Number(newProduct.usdThasan) : null,
+      usd_fiyat_tamir: newProduct.usdTamir ? Number(newProduct.usdTamir) : null,
     });
     if (error) return showError(error);
-    await logAction("Ürün eklendi", "products", name, { code });
-    setNewProduct({ name: "", genderCategory: "Kadın", image: "" });
+    await logAction("Ürün eklendi", "products", name, { code, usd_tyuksel: newProduct.usdTyuksel || null, usd_thasan: newProduct.usdThasan || null, usd_tamir: newProduct.usdTamir || null });
+    setNewProduct({ name: "", genderCategory: "Kadın", image: "", usdTyuksel: "", usdThasan: "", usdTamir: "" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
   };
@@ -1694,10 +1716,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       buy_price: buyPrice,
       sale_price: salePrice,
       depo: batchForm.depo || "Belirsiz",
+      variant: batchForm.variant,
     });
     if (error) return showError(error);
-    await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
-    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok" });
+    await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}${batchForm.variant === "cep_boy" ? " (Cep Boy)" : ""}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo, variant: batchForm.variant });
+    setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
   };
@@ -1709,6 +1732,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (patch.buy_price !== undefined) dbPatch.buy_price = patch.buy_price;
     if (patch.sale_price !== undefined) dbPatch.sale_price = patch.sale_price;
     if (patch.depo !== undefined) dbPatch.depo = patch.depo;
+    if (patch.variant !== undefined) dbPatch.variant = patch.variant;
     const oldItem = batchItems.find((i) => i.id === itemId);
     const { error } = await supabase.from("batch_items").update(dbPatch).eq("id", itemId);
     if (error) return showError(error);
@@ -1751,20 +1775,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if ((saleForm.paid === "banka" || saleForm.paid === "nakit") && !saleForm.paraSahibi) {
       return setMessage("Para kimde? alanını seçmelisin.");
     }
-    // Depo bazlı stok kontrolü
+    // Depo VE varyant (Asıl Ürün / Cep Boy) bazlı stok kontrolü
     const depoStock = batchItemsForProduct(product.id)
-      .filter((i) => i.depo === saleForm.depo)
+      .filter((i) => i.depo === saleForm.depo && (i.variant || "ana") === saleForm.variant)
       .reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-    if (depoStock < qty) return setMessage(`Yetersiz stok. ${saleForm.depo} deposunda bu üründen sadece ${depoStock} adet var.`);
+    const variantLabel = saleForm.variant === "cep_boy" ? " (Cep Boy)" : "";
+    if (depoStock < qty) return setMessage(`Yetersiz stok. ${saleForm.depo} deposunda bu üründen${variantLabel} sadece ${depoStock} adet var.`);
 
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
 
-    // Filter by depo and batch if selected - strictly match depo
+    // Filter by depo, batch (varsa) ve varyant - strictly match
     const availableItems = batchItemsForProduct(product.id).filter((item) => {
       const matchDepo = saleForm.depo ? item.depo === saleForm.depo : true;
       const matchBatch = !saleForm.batchId || item.batch_id === saleForm.batchId;
-      return matchDepo && matchBatch;
+      const matchVariant = (item.variant || "ana") === saleForm.variant;
+      return matchDepo && matchBatch && matchVariant;
     });
 
     for (const item of availableItems) {
@@ -1793,6 +1819,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         seller_account_id: currentSellerAccount?.id || null,
         seller_profit: isSellerRole ? rowSellerProfit : null,
         note: (saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") ? saleForm.note.trim() : null,
+        variant: saleForm.variant,
         cancelled: false,
       });
       remainingQty -= take;
@@ -1841,7 +1868,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
-    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "", paraSahibi: "" }));
+    setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "", paraSahibi: "", variant: "ana" }));
     setMessage("Satış kaydedildi.");
     loadAll();
     } finally {
@@ -4156,6 +4183,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             {partiTab === "giris" && (
             <Card title="Parti Bazlı Ürün Girişi">
+              <div style={{position: "relative"}}>
+                {batchForm.productId && productMap.get(batchForm.productId)?.image_url && (
+                  <img
+                    src={productMap.get(batchForm.productId)!.image_url!}
+                    alt={productMap.get(batchForm.productId)?.name || ""}
+                    style={{position: "absolute", top: 0, right: 0, width: 200, height: 200, objectFit: "cover", borderRadius: 12, border: "1px solid #e2e8f0", zIndex: 5, background: "#fff"}}
+                  />
+                )}
               <p className="mb-5 text-slate-500">Önce kaynak ürün ve parti adı oluşturulur. Sonra partiye ürün, adet, alış fiyatı ve hedef satış fiyatı girilir.</p>
               <div className="mb-5 flex flex-wrap gap-3">
                 <input className="input max-w-sm" placeholder="Yeni parti adı" value={newBatchName} onChange={(e) => setNewBatchName(e.target.value)} />
@@ -4182,6 +4217,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   onChange={(v) => setBatchForm({ ...batchForm, productId: v })}
                   options={sortedActiveProducts.map((p) => ({ value: p.id, label: p.name }))}
                 />
+                <select className="input" value={batchForm.variant} onChange={(e) => setBatchForm({ ...batchForm, variant: e.target.value as "ana" | "cep_boy" })}>
+                  <option value="ana">Asıl Ürün</option>
+                  <option value="cep_boy">Cep Boy</option>
+                </select>
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı (otomatik hesaplanır, isterseniz değiştirin)" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
@@ -4193,6 +4232,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 const supplier = batch?.supplier_id ? supplierMap.get(batch.supplier_id) : null;
                 if (!batch?.supplier_id) return <p className="mt-2 text-sm text-red-600">⚠️ Bu partiye henüz toptancı atanmamış. Önce "Maliyet Kaydı" sekmesinden bu partinin toptancısını ve USD kurunu girin.</p>;
                 if (!batch?.usd_kuru) return <p className="mt-2 text-sm text-red-600">⚠️ Bu partiye henüz USD kuru girilmemiş. Önce "Maliyet Kaydı" sekmesinden USD kurunu girin.</p>;
+                if (batchForm.variant === "cep_boy") {
+                  return <p className="mt-2 text-sm text-emerald-600">✓ Cep Boy: ${CEP_BOY_USD_FIYAT} × {batch.usd_kuru} kur = {money(Math.round(CEP_BOY_USD_FIYAT * batch.usd_kuru * 100) / 100)} alış, {money(CEP_BOY_SATIS_FIYATI)} satış olarak varsayılan dolduruldu (istersen değiştirebilirsin).</p>;
+                }
                 const usdPrice = product ? getUsdPriceForBatch(product, batch) : null;
                 if (usdPrice === null) return <p className="mt-2 text-sm text-red-600">⚠️ "{product?.name}" ürününde "{supplier?.name}" için USD fiyatı girilmemiş. Önce ürün kartından bu alanı doldurun.</p>;
                 return <p className="mt-2 text-sm text-emerald-600">✓ {supplier?.name}: ${usdPrice} × {batch.usd_kuru} kur = {money(Math.round(usdPrice * batch.usd_kuru * 100) / 100)} olarak hesaplandı.</p>;
@@ -4212,11 +4254,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
                         <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
                       </div>
+                      <p className="mt-3 mb-1 text-xs text-slate-500">Toptancı $ fiyatları (opsiyonel - şimdi girersen sonra ürün kartına gitmene gerek kalmaz):</p>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Yüksel ($)" value={newProduct.usdTyuksel} onChange={(e) => setNewProduct({ ...newProduct, usdTyuksel: e.target.value })} />
+                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Hasan ($)" value={newProduct.usdThasan} onChange={(e) => setNewProduct({ ...newProduct, usdThasan: e.target.value })} />
+                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Amir ($)" value={newProduct.usdTamir} onChange={(e) => setNewProduct({ ...newProduct, usdTamir: e.target.value })} />
+                      </div>
                       {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
                     </div>
                   </details>
                 </div>
               )}
+              </div>
             </Card>
             )}
 
@@ -6024,7 +6073,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <SearchableSelect
                   placeholder="Ürün ara..."
                   value={saleForm.productId}
-                  onChange={(v) => setSaleForm({ ...saleForm, productId: v, batchId: "" })}
+                  onChange={(v) => setSaleForm({ ...saleForm, productId: v, batchId: "", variant: "ana" })}
                   options={sortedActiveProducts
                     .filter((p) => batchItemsForProduct(p.id).some((i) => i.bought - getBatchSoldQtyForItem(i) > 0))
                     .map((p) => {
@@ -6032,11 +6081,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       return { value: p.id, label: `${p.name} — Stok: ${stok}` };
                     })}
                 />
-                {/* Parti: birden fazla stoklu parti varsa göster */}
+                {/* Cep Boy stoğu varsa sor, yoksa hiç gösterme - direkt Asıl Ürün'den satılır */}
+                {saleForm.productId && getProductVariantStock(saleForm.productId, "cep_boy") > 0 && (
+                  <select
+                    className="input"
+                    value={saleForm.variant}
+                    onChange={(e) => {
+                      const v = e.target.value as "ana" | "cep_boy";
+                      setSaleForm({ ...saleForm, variant: v, batchId: "", customSalePrice: v === "cep_boy" ? String(CEP_BOY_SATIS_FIYATI) : saleForm.customSalePrice });
+                    }}
+                  >
+                    <option value="ana">Asıl Ürün — Stok: {getProductVariantStock(saleForm.productId, "ana")}</option>
+                    <option value="cep_boy">Cep Boy — Stok: {getProductVariantStock(saleForm.productId, "cep_boy")}</option>
+                  </select>
+                )}
+                {/* Parti: seçili varyanta ait birden fazla stoklu parti varsa göster */}
                 {saleForm.productId && (() => {
                   const partiler = batchItemsForProduct(saleForm.productId).filter((i) => {
                     const kalan = i.bought - getBatchSoldQtyForItem(i);
-                    return kalan > 0;
+                    return kalan > 0 && (i.variant || "ana") === saleForm.variant;
                   });
                   const uniqueBatches = [...new Map(partiler.map((i) => [i.batch_id, i])).values()];
                   if (uniqueBatches.length <= 1) return null;
@@ -6114,7 +6177,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   return [
                     toTR(sale.created_at),
                     customerMap.get(sale.customer_id)?.name || "-",
-                    productMap.get(sale.product_id)?.name || "-",
+                    `${productMap.get(sale.product_id)?.name || "-"}${sale.variant === "cep_boy" ? " (Cep Boy)" : ""}`,
                     batchMap.get(sale.batch_id)?.name || "-",
                     ...(!isSellerRole ? [isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : (sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : sale.seller)] : []),
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
