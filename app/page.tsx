@@ -730,6 +730,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const activePayments = payments.filter((payment) => !payment.cancelled);
 
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  // Bir satışın ürün adını döner; satış Cep Boy ise başına "Cep-" ekler (loglar/tablolar/raporlar için ortak).
+  const saleProductName = (sale: { product_id: string; variant?: "ana" | "cep_boy" }) =>
+    `${sale.variant === "cep_boy" ? "Cep-" : ""}${productMap.get(sale.product_id)?.name || "-"}`;
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
   const preorderMap = useMemo(() => new Map(preorders.map((po) => [po.id, po])), [preorders]);
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.id, b])), [batches]);
@@ -1213,7 +1216,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return {
           tarih: alloc.created_at,
           cari: customerMap.get(sale.customer_id)?.name || "-",
-          urun: productMap.get(sale.product_id)?.name || "-",
+          urun: saleProductName(sale),
           adet: sale.qty,
           satisFiyati: total,
           tahsilat: alloc.amount,
@@ -1298,7 +1301,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         date: sale.created_at,
         type: sale.sale_type === "Fire/Bozuk" ? "Fire/Bozuk" : sale.paid ? "Peşin satış" : "Cari satış",
         customer: customerMap.get(sale.customer_id)?.name || "-",
-        detail: `${productMap.get(sale.product_id)?.name || "-"} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet${methodSuffix}`,
+        detail: `${saleProductName(sale)} / ${batchMap.get(sale.batch_id)?.name || "-"} / ${sale.qty} adet${methodSuffix}`,
         amount: toNum(sale.total),
         user: sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : shortUser(undefined, sale.seller),
       };
@@ -1867,7 +1870,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }
     }
 
-    await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
+    await logAction("Satış eklendi", "sales", `${customer.name} - ${saleForm.variant === "cep_boy" ? "Cep-" : ""}${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", paid: "false", customSalePrice: "", depo: prev.depo, sellerProfit: "", note: "", paraSahibi: "", variant: "ana" }));
     setMessage("Satış kaydedildi.");
     loadAll();
@@ -1898,7 +1901,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return showError(err);
       }
     }
-    await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${productMap.get(sale.product_id)?.name || sale.product_id}` : saleId, { tutar: sale?.total || 0 });
+    await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${saleProductName(sale)}` : saleId, { tutar: sale?.total || 0 });
     setMessage("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.");
     loadAll();
     setDeletingId(null);
@@ -1930,7 +1933,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return showError(err);
       }
     }
-    const saleEntityName = oldSale ? `${customerMap.get(oldSale.customer_id)?.name || oldSale.customer_id} - ${productMap.get(oldSale.product_id)?.name || oldSale.product_id}` : saleId;
+    const saleEntityName = oldSale ? `${customerMap.get(oldSale.customer_id)?.name || oldSale.customer_id} - ${saleProductName(oldSale)}` : saleId;
     await logAction("Satış değiştirildi", "sales", saleEntityName, diffOf(oldSale as unknown as Record<string, unknown>, dbPatch));
     loadAll();
   };
@@ -4485,58 +4488,82 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 const brTh = (col: string, label: string) => (
                   <button type="button" onClick={() => handleBRSort(col)} style={{fontWeight:700,background:"none",border:"none",cursor:"pointer",padding:0,whiteSpace:"nowrap"}}>{label}{brArr(col)}</button>
                 );
+                const soldOf = (item?: BatchItem) => item ? getBatchSoldQtyForItem(item) : 0;
+                const kalanOf = (item?: BatchItem) => item ? item.bought - getBatchSoldQtyForItem(item) : 0;
+
                 const filteredItems = batchItems.filter((item) => batchReportFilter === "Tümü" || item.batch_id === batchReportFilter);
-                const sortedItems = [...filteredItems].sort((a, b) => {
+
+                // Asıl Ürün ve Cep Boy satırları, aynı parti+ürün için TEK satırda, ayrı kolon
+                // gruplarında gösterilsin diye (batch_id, product_id) bazında gruplanır.
+                type BRGroup = { batch_id: string; product_id: string; ana?: BatchItem; cep?: BatchItem };
+                const groupsMap = new Map<string, BRGroup>();
+                for (const item of filteredItems) {
+                  const key = `${item.batch_id}::${item.product_id}`;
+                  const g = groupsMap.get(key) || { batch_id: item.batch_id, product_id: item.product_id };
+                  if ((item.variant || "ana") === "cep_boy") g.cep = item; else g.ana = item;
+                  groupsMap.set(key, g);
+                }
+                const sortedGroups = [...groupsMap.values()].sort((a, b) => {
                   let av: string|number = "", bv: string|number = "";
                   if (batchReportSort.col === "batch") { av = batchMap.get(a.batch_id)?.name||""; bv = batchMap.get(b.batch_id)?.name||""; }
-                  else if (batchReportSort.col === "depo") { av = a.depo||""; bv = b.depo||""; }
                   else if (batchReportSort.col === "product") { av = productMap.get(a.product_id)?.name||""; bv = productMap.get(b.product_id)?.name||""; }
-                  else if (batchReportSort.col === "variant") { av = a.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"; bv = b.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"; }
-                  else if (batchReportSort.col === "bought") { av = a.bought; bv = b.bought; }
-                  else if (batchReportSort.col === "sold") { av = getBatchSoldQtyForItem(a); bv = getBatchSoldQtyForItem(b); }
-                  else if (batchReportSort.col === "kalan") { av = a.bought - getBatchSoldQtyForItem(a); bv = b.bought - getBatchSoldQtyForItem(b); }
-                  else if (batchReportSort.col === "buy_price") { av = a.buy_price; bv = b.buy_price; }
-                  else if (batchReportSort.col === "sale_price") { av = a.sale_price; bv = b.sale_price; }
+                  else if (batchReportSort.col === "asil_bought") { av = a.ana?.bought||0; bv = b.ana?.bought||0; }
+                  else if (batchReportSort.col === "asil_sold") { av = soldOf(a.ana); bv = soldOf(b.ana); }
+                  else if (batchReportSort.col === "asil_kalan") { av = kalanOf(a.ana); bv = kalanOf(b.ana); }
+                  else if (batchReportSort.col === "asil_buy") { av = a.ana?.buy_price||0; bv = b.ana?.buy_price||0; }
+                  else if (batchReportSort.col === "asil_sale") { av = a.ana?.sale_price||0; bv = b.ana?.sale_price||0; }
+                  else if (batchReportSort.col === "cep_bought") { av = a.cep?.bought||0; bv = b.cep?.bought||0; }
+                  else if (batchReportSort.col === "cep_sold") { av = soldOf(a.cep); bv = soldOf(b.cep); }
+                  else if (batchReportSort.col === "cep_kalan") { av = kalanOf(a.cep); bv = kalanOf(b.cep); }
+                  else if (batchReportSort.col === "cep_buy") { av = a.cep?.buy_price||0; bv = b.cep?.buy_price||0; }
+                  else if (batchReportSort.col === "cep_sale") { av = a.cep?.sale_price||0; bv = b.cep?.sale_price||0; }
                   const cmp = typeof av === "number" ? av-(bv as number) : String(av).localeCompare(String(bv),"tr",{numeric:true});
                   return batchReportSort.dir === "asc" ? cmp : -cmp;
                 });
+
+                const renderVariantCells = (item: BatchItem | undefined) => {
+                  if (!item) return [<span key="none" className="text-slate-400">-</span>, "-", "-", "-", "-", ""];
+                  const key = item.id;
+                  return [
+                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
+                    soldOf(item),
+                    kalanOf(item),
+                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
+                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
+                    <div key={key} className="flex gap-1">
+                      <button type="button" className="btn-secondary" style={{padding:"3px 8px", fontSize:"0.75rem"}} onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
+                      <button type="button" className="btn-danger" style={{padding:"3px 8px", fontSize:"0.75rem"}} onClick={() => deleteBatchItem(item)}>Sil</button>
+                    </div>,
+                  ];
+                };
+
                 return (
                   <Table
-                    headers={[brTh("batch","Parti"), brTh("product","Ürün"), brTh("variant","Tür"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
+                    headers={[
+                      brTh("batch","Parti"), brTh("product","Ürün"),
+                      brTh("asil_bought","Asıl Alınan"), brTh("asil_sold","Asıl Satılan"), brTh("asil_kalan","Asıl Kalan"), brTh("asil_buy","Asıl Alış"), brTh("asil_sale","Asıl Satış"), "Asıl İşlem",
+                      brTh("cep_bought","Cep Alınan"), brTh("cep_sold","Cep Satılan"), brTh("cep_kalan","Cep Kalan"), brTh("cep_buy","Cep Alış"), brTh("cep_sale","Cep Satış"), "Cep İşlem",
+                    ]}
                     rows={[
-                      ...sortedItems.map((item) => {
-                        const key = item.id;
-                        const p = productMap.get(item.product_id);
+                      ...sortedGroups.map((g) => {
+                        const p = productMap.get(g.product_id);
                         return [
-                          editingBatchItemId === key ? (
-                            <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
-                              {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-                            </select>
-                          ) : batchMap.get(item.batch_id)?.name || "-",
+                          batchMap.get(g.batch_id)?.name || "-",
                           p?.name || "-",
-                          editingBatchItemId === key ? (
-                            <select className="input" value={item.variant || "ana"} onChange={(e) => updateBatchItem(item.id, { variant: e.target.value as "ana" | "cep_boy" })}>
-                              <option value="ana">Asıl Ürün</option>
-                              <option value="cep_boy">Cep Boy</option>
-                            </select>
-                          ) : (item.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"),
-                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                          getBatchSoldQtyForItem(item),
-                          item.bought - getBatchSoldQtyForItem(item),
-                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
-                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
-                          <div key={key} className="flex gap-2">
-                            <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
-                            <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
-                          </div>,
+                          ...renderVariantCells(g.ana),
+                          ...renderVariantCells(g.cep),
                         ];
                       }),
                       [
-                        <strong key="toplam-label">Toplam</strong>, "", "",
-                        <strong key="toplam-bought">{sortedItems.reduce((s, i) => s + i.bought, 0)}</strong>,
-                        <strong key="toplam-sold">{sortedItems.reduce((s, i) => s + getBatchSoldQtyForItem(i), 0)}</strong>,
-                        <strong key="toplam-kalan">{sortedItems.reduce((s, i) => s + (i.bought - getBatchSoldQtyForItem(i)), 0)}</strong>,
+                        <strong key="toplam-label">Toplam</strong>, "",
+                        <strong key="t-ana-bought">{sortedGroups.reduce((s, g) => s + (g.ana?.bought||0), 0)}</strong>,
+                        <strong key="t-ana-sold">{sortedGroups.reduce((s, g) => s + soldOf(g.ana), 0)}</strong>,
+                        <strong key="t-ana-kalan">{sortedGroups.reduce((s, g) => s + kalanOf(g.ana), 0)}</strong>,
                         "", "", "",
+                        <strong key="t-cep-bought">{sortedGroups.reduce((s, g) => s + (g.cep?.bought||0), 0)}</strong>,
+                        <strong key="t-cep-sold">{sortedGroups.reduce((s, g) => s + soldOf(g.cep), 0)}</strong>,
+                        <strong key="t-cep-kalan">{sortedGroups.reduce((s, g) => s + kalanOf(g.cep), 0)}</strong>,
+                        "", "",
                       ],
                     ]}
                   />
@@ -5111,7 +5138,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         return [
                           toTR(s.created_at, true),
                           customerMap.get(s.customer_id)?.name || "-",
-                          productMap.get(s.product_id)?.name || "-",
+                          saleProductName(s),
                           s.qty,
                           money(s.total),
                           money(Number(s.seller_profit || 0)),
@@ -5417,7 +5444,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 return (
                                   <div key={sale.id} className="cari-sales-row">
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{toTR(sale.created_at)}</div>
-                                    <div className="product-batch-cell product-batch-cell--name" style={{fontSize:"0.68rem"}}>{productMap.get(sale.product_id)?.name || "-"}</div>
+                                    <div className="product-batch-cell product-batch-cell--name" style={{fontSize:"0.68rem"}}>{saleProductName(sale)}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{batchMap.get(sale.batch_id)?.name || "-"}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{sale.qty}</div>
                                     <div className="product-batch-cell" style={{fontSize:"0.68rem"}}>{money(sale.total)}</div>
@@ -5832,7 +5859,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <tr key={s.id} style={{borderBottom:"1px solid #f1f5f9"}}>
                           <td style={{padding:"7px 10px",whiteSpace:"nowrap"}}>{toTR(s.created_at)}</td>
                           <td style={{padding:"7px 10px",fontWeight:500}}>{s.customerName}</td>
-                          <td style={{padding:"7px 10px"}}>{productMap.get(s.product_id)?.name || "-"}</td>
+                          <td style={{padding:"7px 10px"}}>{saleProductName(s)}</td>
                           <td style={{padding:"7px 10px",textAlign:"right"}}>{s.qty}</td>
                           <td style={{padding:"7px 10px",textAlign:"right"}}>{money(s.total)}</td>
                           <td style={{padding:"7px 10px",textAlign:"right",color:"#16a34a"}}>{money(toNum(s.paid_amount))}</td>
@@ -6194,7 +6221,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   return [
                     toTR(sale.created_at),
                     customerMap.get(sale.customer_id)?.name || "-",
-                    `${productMap.get(sale.product_id)?.name || "-"}${sale.variant === "cep_boy" ? " (Cep Boy)" : ""}`,
+                    saleProductName(sale),
                     batchMap.get(sale.batch_id)?.name || "-",
                     ...(!isSellerRole ? [isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : (sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : sale.seller)] : []),
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
@@ -6231,7 +6258,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                       <h2 style={{ fontSize: "1rem", fontWeight: 700 }}>
-                        {customerMap.get(viewingSaleNote.customer_id)?.name || "-"} — {productMap.get(viewingSaleNote.product_id)?.name || "-"}
+                        {customerMap.get(viewingSaleNote.customer_id)?.name || "-"} — {saleProductName(viewingSaleNote)}
                       </h2>
                       <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setViewingSaleNote(null)}>Kapat</button>
                     </div>
