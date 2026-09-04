@@ -6077,8 +6077,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   options={sortedActiveProducts
                     .filter((p) => batchItemsForProduct(p.id).some((i) => i.bought - getBatchSoldQtyForItem(i) > 0))
                     .map((p) => {
-                      const stok = batchItemsForProduct(p.id).reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      return { value: p.id, label: `${p.name} — Stok: ${stok}` };
+                      const anaStok = getProductVariantStock(p.id, "ana");
+                      const cepStok = getProductVariantStock(p.id, "cep_boy");
+                      return { value: p.id, label: cepStok > 0 ? `${p.name} — Stok:${anaStok} Cep:${cepStok}` : `${p.name} — Stok: ${anaStok}` };
                     })}
                 />
                 {/* Cep Boy stoğu varsa sor, yoksa hiç gösterme - direkt Asıl Ürün'den satılır */}
