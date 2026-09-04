@@ -4010,7 +4010,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     return (
                                       <div key={item.id}>
                                         <div className="product-batch-row">
-                                          <div className="product-batch-cell product-batch-cell--name">{batchMap.get(item.batch_id)?.name || "-"}</div>
+                                          <div className="product-batch-cell product-batch-cell--name">
+                                            {batchMap.get(item.batch_id)?.name || "-"}
+                                            {item.variant === "cep_boy" && (
+                                              <span style={{marginLeft: 6, fontSize: "0.6rem", fontWeight: 700, color: "#dc2626", border: "1px solid #fca5a5", background: "#fef2f2", borderRadius: 5, padding: "1px 6px"}}>
+                                                Cep
+                                              </span>
+                                            )}
+                                          </div>
                                           <div className="product-batch-cell">{item.bought}</div>
                                           <div className="product-batch-cell">{sold}</div>
                                           <div className="product-batch-cell">{kalan}</div>
