@@ -4491,6 +4491,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   if (batchReportSort.col === "batch") { av = batchMap.get(a.batch_id)?.name||""; bv = batchMap.get(b.batch_id)?.name||""; }
                   else if (batchReportSort.col === "depo") { av = a.depo||""; bv = b.depo||""; }
                   else if (batchReportSort.col === "product") { av = productMap.get(a.product_id)?.name||""; bv = productMap.get(b.product_id)?.name||""; }
+                  else if (batchReportSort.col === "variant") { av = a.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"; bv = b.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"; }
                   else if (batchReportSort.col === "bought") { av = a.bought; bv = b.bought; }
                   else if (batchReportSort.col === "sold") { av = getBatchSoldQtyForItem(a); bv = getBatchSoldQtyForItem(b); }
                   else if (batchReportSort.col === "kalan") { av = a.bought - getBatchSoldQtyForItem(a); bv = b.bought - getBatchSoldQtyForItem(b); }
@@ -4501,28 +4502,43 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 });
                 return (
                   <Table
-                    headers={[brTh("batch","Parti"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
-                    rows={sortedItems.map((item) => {
-                      const key = item.id;
-                      const p = productMap.get(item.product_id);
-                      return [
-                        editingBatchItemId === key ? (
-                          <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
-                            {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-                          </select>
-                        ) : batchMap.get(item.batch_id)?.name || "-",
-                        p?.name || "-",
-                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                        getBatchSoldQtyForItem(item),
-                        item.bought - getBatchSoldQtyForItem(item),
-                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
-                        editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
-                        <div key={key} className="flex gap-2">
-                          <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
-                          <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
-                        </div>,
-                      ];
-                    })}
+                    headers={[brTh("batch","Parti"), brTh("product","Ürün"), brTh("variant","Tür"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
+                    rows={[
+                      ...sortedItems.map((item) => {
+                        const key = item.id;
+                        const p = productMap.get(item.product_id);
+                        return [
+                          editingBatchItemId === key ? (
+                            <select className="input" value={item.batch_id} onChange={(e) => updateBatchItem(item.id, { batch_id: e.target.value })}>
+                              {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                            </select>
+                          ) : batchMap.get(item.batch_id)?.name || "-",
+                          p?.name || "-",
+                          editingBatchItemId === key ? (
+                            <select className="input" value={item.variant || "ana"} onChange={(e) => updateBatchItem(item.id, { variant: e.target.value as "ana" | "cep_boy" })}>
+                              <option value="ana">Asıl Ürün</option>
+                              <option value="cep_boy">Cep Boy</option>
+                            </select>
+                          ) : (item.variant === "cep_boy" ? "Cep Boy" : "Asıl Ürün"),
+                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
+                          getBatchSoldQtyForItem(item),
+                          item.bought - getBatchSoldQtyForItem(item),
+                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
+                          editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
+                          <div key={key} className="flex gap-2">
+                            <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
+                            <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
+                          </div>,
+                        ];
+                      }),
+                      [
+                        <strong key="toplam-label">Toplam</strong>, "", "",
+                        <strong key="toplam-bought">{sortedItems.reduce((s, i) => s + i.bought, 0)}</strong>,
+                        <strong key="toplam-sold">{sortedItems.reduce((s, i) => s + getBatchSoldQtyForItem(i), 0)}</strong>,
+                        <strong key="toplam-kalan">{sortedItems.reduce((s, i) => s + (i.bought - getBatchSoldQtyForItem(i)), 0)}</strong>,
+                        "", "", "",
+                      ],
+                    ]}
                   />
                 );
               })()}
