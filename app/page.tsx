@@ -22,21 +22,123 @@ async function fetchAllRows<T>(table: string, orderCol: string, ascending: boole
   return { data: allRows, error: null };
 }
 
+async function fetchFilteredAuditLogs(
+  supabaseClient: typeof import("@/lib/supabase").supabase,
+  params: { start: string; end: string; action: string; user: string }
+): Promise<AuditLog[]> {
+  const pageSize = 1000;
+  let allRows: AuditLog[] = [];
+  let from = 0;
+  while (true) {
+    let query = supabaseClient.from("audit_log").select("*").order("created_at", { ascending: false });
+    if (params.start) query = query.gte("created_at", `${params.start}T00:00:00`);
+    if (params.end) query = query.lte("created_at", `${params.end}T23:59:59`);
+    if (params.action !== "Tümü") query = query.eq("action", params.action);
+    if (params.user !== "Tümü") {
+      if (params.user === "-") query = query.is("user_email", null);
+      else query = query.eq("user_email", params.user);
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allRows = allRows.concat(data as AuditLog[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return allRows;
+}
+
 function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [logs, setLogs] = useState<AuditLog[]>([]); // İlk yükleme: sadece son 100 kayıt (hızlı açılış)
   const [loading, setLoading] = useState(true);
   const [detailLog, setDetailLog] = useState<AuditLog | null>(null);
+  const [filterStart, setFilterStart] = useState("");
+  const [filterEnd, setFilterEnd] = useState("");
+  const [filterAction, setFilterAction] = useState("Tümü");
+  const [filterUser, setFilterUser] = useState("Tümü");
+  // Filtre uygulanınca dolan, sınırsız sonuç listesi. null iken üstteki 100 kayıt gösterilir.
+  const [filterResults, setFilterResults] = useState<AuditLog[] | null>(null);
+  const [filterLoading, setFilterLoading] = useState(false);
+  // Dropdown seçenekleri (İşlem Türü / Kullanıcı) sadece ilk 100 kayda değil, TÜM geçmişe
+  // dayansın diye action/user_email kolonları ayrıca (hafif) çekilir.
+  const [allActions, setAllActions] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<string[]>([]);
+
   useEffect(() => {
     supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100)
       .then(({ data }) => { setLogs((data || []) as AuditLog[]); setLoading(false); });
+    supabase.from("audit_log").select("action, user_email").then(({ data }) => {
+      const rows = (data || []) as { action: string; user_email: string | null }[];
+      setAllActions(Array.from(new Set(rows.map((r) => r.action))).sort((a, b) => a.localeCompare(b, "tr")));
+      setAllUsers(Array.from(new Set(rows.map((r) => r.user_email || "-"))).sort((a, b) => a.localeCompare(b, "tr")));
+    });
   }, []);
+
+  const actionOptions = ["Tümü", ...allActions];
+  const userOptions = ["Tümü", ...allUsers];
+  const hasActiveFilter = !!(filterStart || filterEnd || filterAction !== "Tümü" || filterUser !== "Tümü");
+
+  const applyFilter = async () => {
+    setFilterLoading(true);
+    try {
+      const result = await fetchFilteredAuditLogs(supabase, { start: filterStart, end: filterEnd, action: filterAction, user: filterUser });
+      setFilterResults(result);
+    } finally {
+      setFilterLoading(false);
+    }
+  };
+  const clearFilter = () => {
+    setFilterStart(""); setFilterEnd(""); setFilterAction("Tümü"); setFilterUser("Tümü"); setFilterResults(null);
+  };
+
+  const displayedLogs = filterResults !== null ? filterResults : logs;
+
   return (
     <div className="space-y-4">
       <Card title="İşlem Geçmişi">
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <div className="field-label">
+            Başlangıç Tarihi
+            <input className="input" type="date" value={filterStart} onChange={(e) => setFilterStart(e.target.value)} />
+          </div>
+          <div className="field-label">
+            Bitiş Tarihi
+            <input className="input" type="date" value={filterEnd} onChange={(e) => setFilterEnd(e.target.value)} />
+          </div>
+          <div className="field-label">
+            İşlem Türü
+            <select className="input" value={filterAction} onChange={(e) => setFilterAction(e.target.value)}>
+              {actionOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div className="field-label">
+            Kullanıcı
+            <select className="input" value={filterUser} onChange={(e) => setFilterUser(e.target.value)}>
+              {userOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="mb-3 flex items-center gap-3">
+          <button type="button" className="btn" style={{ fontSize: "0.8rem", padding: "6px 14px" }} disabled={!hasActiveFilter || filterLoading} onClick={applyFilter}>
+            {filterLoading ? "Aranıyor..." : "Filtrele"}
+          </button>
+          {filterResults !== null && (
+            <>
+              <span className="text-sm text-slate-500">{filterResults.length} kayıt bulundu.</span>
+              <button type="button" className="btn-secondary" style={{ fontSize: "0.75rem", padding: "3px 10px" }} onClick={clearFilter}>
+                Filtreleri Temizle
+              </button>
+            </>
+          )}
+          {filterResults === null && !hasActiveFilter && (
+            <span className="text-sm text-slate-400">Son 100 kayıt gösteriliyor. Daha eskisini görmek için filtre uygulayın.</span>
+          )}
+        </div>
         {loading ? <p className="text-sm text-slate-500">Yükleniyor...</p> : (
           <Table
+            maxHeight="65vh"
             headers={["Tarih", "İşlem", "Tablo", "Kayıt", "Kullanıcı", "Detay"]}
-            rows={logs.map((log) => [
+            rows={displayedLogs.map((log) => [
               toTR(log.created_at, true),
               log.action,
               log.entity_type,
@@ -551,11 +653,11 @@ function SearchableSelect({
   );
 }
 
-function Table({ headers, rows }: { headers: ReactNode[]; rows: ReactNode[][] }) {
+function Table({ headers, rows, maxHeight = 560 }: { headers: ReactNode[]; rows: ReactNode[][]; maxHeight?: number | string }) {
   return (
-    <div className="overflow-x-auto rounded-xl border">
+    <div className="overflow-x-auto overflow-y-auto rounded-xl border" style={{ maxHeight }}>
       <table className="w-full text-sm">
-        <thead className="bg-slate-100">
+        <thead className="bg-slate-100" style={{ position: "sticky", top: 0, zIndex: 10 }}>
           <tr>
             {headers.map((h, i) => (
               <th key={i} className="whitespace-nowrap p-3 text-left font-semibold">
@@ -824,9 +926,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   ];
   const getProductLatestPrice = (productId: string) => {
     const items = batchItemsForProduct(productId).filter((i) => Number(i.sale_price) > 0);
-    if (items.length) {
+    // Önce Asıl Ürün'ün en son fiyatı öncelikli - Cep Boy fiyatı çok daha düşük/farklı
+    // olduğu için (ör. sabit 500 TL) galeri/liste fiyatını yanıltmasın.
+    const anaItems = items.filter((i) => (i.variant || "ana") === "ana");
+    const pool = anaItems.length ? anaItems : items;
+    if (pool.length) {
       return Number(
-        items.slice().sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0].sale_price
+        pool.slice().sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0].sale_price
       );
     }
     const product = productMap.get(productId);
@@ -4502,15 +4608,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
                 // Asıl Ürün ve Cep Boy satırları, aynı parti+ürün için TEK satırda, ayrı kolon
                 // gruplarında gösterilsin diye (batch_id, product_id) bazında gruplanır.
+                // ÖNEMLİ: aynı ürün aynı partiye birden fazla kez (farklı tarihlerde) eklenmiş
+                // olabilir - bu durumda TÜM kayıtlar listeye/toplamlara dahil olsun diye,
+                // ana ve cep listeleri sırayla eşleştirilir (biri overwrite edip diğerini
+                // kaybetmez); fazlalık olan taraf kendi satırında diğer taraf "-" olarak kalır.
                 type BRGroup = { batch_id: string; product_id: string; ana?: BatchItem; cep?: BatchItem };
-                const groupsMap = new Map<string, BRGroup>();
+                const listsByKey = new Map<string, { batch_id: string; product_id: string; anaList: BatchItem[]; cepList: BatchItem[] }>();
                 for (const item of filteredItems) {
                   const key = `${item.batch_id}::${item.product_id}`;
-                  const g = groupsMap.get(key) || { batch_id: item.batch_id, product_id: item.product_id };
-                  if ((item.variant || "ana") === "cep_boy") g.cep = item; else g.ana = item;
-                  groupsMap.set(key, g);
+                  const g = listsByKey.get(key) || { batch_id: item.batch_id, product_id: item.product_id, anaList: [], cepList: [] };
+                  if ((item.variant || "ana") === "cep_boy") g.cepList.push(item); else g.anaList.push(item);
+                  listsByKey.set(key, g);
                 }
-                const sortedGroups = [...groupsMap.values()].sort((a, b) => {
+                const groupsMap: BRGroup[] = [];
+                for (const g of listsByKey.values()) {
+                  const maxLen = Math.max(g.anaList.length, g.cepList.length, 1);
+                  for (let i = 0; i < maxLen; i++) {
+                    groupsMap.push({ batch_id: g.batch_id, product_id: g.product_id, ana: g.anaList[i], cep: g.cepList[i] });
+                  }
+                }
+                const sortedGroups = [...groupsMap].sort((a, b) => {
                   let av: string|number = "", bv: string|number = "";
                   if (batchReportSort.col === "batch") { av = batchMap.get(a.batch_id)?.name||""; bv = batchMap.get(b.batch_id)?.name||""; }
                   else if (batchReportSort.col === "product") { av = productMap.get(a.product_id)?.name||""; bv = productMap.get(b.product_id)?.name||""; }
@@ -4546,6 +4663,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
                 return (
                   <Table
+                    maxHeight="65vh"
                     headers={[
                       brTh("batch","Parti"), brTh("product","Ürün"),
                       brTh("asil_bought","Asıl Alınan"), brTh("asil_sold","Asıl Satılan"), brTh("asil_kalan","Asıl Kalan"), brTh("asil_buy","Asıl Alış"), brTh("asil_sale","Asıl Satış"), "Asıl İşlem",
