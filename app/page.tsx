@@ -810,6 +810,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [splitQty, setSplitQty] = useState<string>("");
   const [saleDrafts, setSaleDrafts] = useState<Record<string, { qty: string; total: string; cost: string; seller: Seller; sale_type: SaleType; paid: boolean; note: string }>>({});
   const [editingBatchItemId, setEditingBatchItemId] = useState<string | null>(null);
+  const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null);
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [productDrafts, setProductDrafts] = useState<Record<string, Partial<Product>>>({});
   const pendingImageRef = useRef<Record<string, string>>({});
@@ -4645,53 +4646,118 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   return batchReportSort.dir === "asc" ? cmp : -cmp;
                 });
 
-                const renderVariantCells = (item: BatchItem | undefined) => {
-                  if (!item) return [<span key="none" className="text-slate-400">-</span>, "-", "-", "-", "-", ""];
-                  const key = item.id;
-                  return [
-                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.bought} onChange={(e) => updateBatchItem(item.id, { bought: Number(e.target.value || 0) })} /> : item.bought,
-                    soldOf(item),
-                    kalanOf(item),
-                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
-                    editingBatchItemId === key ? <input className="input w-20" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
-                    <div key={key} className="flex gap-1">
-                      <button type="button" className="btn-secondary" style={{padding:"3px 8px", fontSize:"0.75rem"}} onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
-                      <button type="button" className="btn-danger" style={{padding:"3px 8px", fontSize:"0.75rem"}} onClick={() => deleteBatchItem(item)}>Sil</button>
-                    </div>,
-                  ];
+                const renderEditableCell = (item: BatchItem | undefined, field: "bought" | "buy_price" | "sale_price", editing: boolean) => {
+                  if (!item) return "-";
+                  if (!editing) return field === "bought" ? item.bought : money(item[field]);
+                  return (
+                    <input
+                      className="input"
+                      style={{ width: 76 }}
+                      type="number"
+                      value={item[field]}
+                      onChange={(e) => updateBatchItem(item.id, { [field]: Number(e.target.value || 0) } as Partial<BatchItem>)}
+                    />
+                  );
                 };
 
+                const showPartiCol = batchReportFilter === "Tümü";
+
                 return (
-                  <Table
-                    maxHeight="65vh"
-                    headers={[
-                      brTh("batch","Parti"), brTh("product","Ürün"),
-                      brTh("asil_bought","Asıl Alınan"), brTh("asil_sold","Asıl Satılan"), brTh("asil_kalan","Asıl Kalan"), brTh("asil_buy","Asıl Alış"), brTh("asil_sale","Asıl Satış"), "Asıl İşlem",
-                      brTh("cep_bought","Cep Alınan"), brTh("cep_sold","Cep Satılan"), brTh("cep_kalan","Cep Kalan"), brTh("cep_buy","Cep Alış"), brTh("cep_sale","Cep Satış"), "Cep İşlem",
-                    ]}
-                    rows={[
-                      ...sortedGroups.map((g) => {
-                        const p = productMap.get(g.product_id);
-                        return [
-                          batchMap.get(g.batch_id)?.name || "-",
-                          p?.name || "-",
-                          ...renderVariantCells(g.ana),
-                          ...renderVariantCells(g.cep),
-                        ];
-                      }),
-                      [
-                        <strong key="toplam-label">Toplam</strong>, "",
-                        <strong key="t-ana-bought">{sortedGroups.reduce((s, g) => s + (g.ana?.bought||0), 0)}</strong>,
-                        <strong key="t-ana-sold">{sortedGroups.reduce((s, g) => s + soldOf(g.ana), 0)}</strong>,
-                        <strong key="t-ana-kalan">{sortedGroups.reduce((s, g) => s + kalanOf(g.ana), 0)}</strong>,
-                        "", "", "",
-                        <strong key="t-cep-bought">{sortedGroups.reduce((s, g) => s + (g.cep?.bought||0), 0)}</strong>,
-                        <strong key="t-cep-sold">{sortedGroups.reduce((s, g) => s + soldOf(g.cep), 0)}</strong>,
-                        <strong key="t-cep-kalan">{sortedGroups.reduce((s, g) => s + kalanOf(g.cep), 0)}</strong>,
-                        "", "",
-                      ],
-                    ]}
-                  />
+                  <div className="overflow-x-auto overflow-y-auto rounded-xl border" style={{ maxHeight: "65vh" }}>
+                    <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0, whiteSpace: "nowrap" }}>
+                      <thead>
+                        <tr>
+                          {showPartiCol && <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>{brTh("batch", "Parti")}</th>}
+                          <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, left: 0, zIndex: 11 }}>{brTh("product", "Ürün Adı")}</th>
+                          <th colSpan={5} className="bg-blue-50 p-2 text-center font-semibold text-blue-900" style={{ position: "sticky", top: 0, zIndex: 10 }}>Asıl Ürün</th>
+                          <th colSpan={5} className="bg-slate-100 p-2 text-center font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>Cep Boy</th>
+                          <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>İşlem</th>
+                        </tr>
+                        <tr>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_bought", "Alınan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_sold", "Satılan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_kalan", "Kalan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_buy", "Alış")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_sale", "Satış")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_bought", "Alınan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_sold", "Satılan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_kalan", "Kalan")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_buy", "Alış")}</th>
+                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_sale", "Satış")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedGroups.map((g) => {
+                          const rowKey = `${g.ana?.id || "x"}_${g.cep?.id || "x"}`;
+                          const editing = editingBatchItemId === rowKey;
+                          const confirming = deleteConfirmKey === rowKey;
+                          const p = productMap.get(g.product_id);
+                          return (
+                            <tr key={rowKey} className="border-t">
+                              {showPartiCol && <td className="p-3 whitespace-nowrap">{batchMap.get(g.batch_id)?.name || "-"}</td>}
+                              <td className="p-3 font-medium bg-white" style={{ position: "sticky", left: 0, zIndex: 1, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {p?.name || "-"}
+                              </td>
+                              <td className="p-2 text-right">{renderEditableCell(g.ana, "bought", editing)}</td>
+                              <td className="p-2 text-right text-slate-600">{soldOf(g.ana)}</td>
+                              <td className="p-2 text-right text-slate-600">{kalanOf(g.ana)}</td>
+                              <td className="p-2 text-right">{renderEditableCell(g.ana, "buy_price", editing)}</td>
+                              <td className="p-2 text-right">{renderEditableCell(g.ana, "sale_price", editing)}</td>
+                              <td className="p-2 text-right">{renderEditableCell(g.cep, "bought", editing)}</td>
+                              <td className="p-2 text-right text-slate-600">{soldOf(g.cep)}</td>
+                              <td className="p-2 text-right text-slate-600">{kalanOf(g.cep)}</td>
+                              <td className="p-2 text-right">{renderEditableCell(g.cep, "buy_price", editing)}</td>
+                              <td className="p-2 text-right">{renderEditableCell(g.cep, "sale_price", editing)}</td>
+                              <td className="p-2">
+                                {confirming ? (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="text-xs text-slate-600 mr-1">Hangisi silinsin?</span>
+                                    {g.ana && <button type="button" className="btn-danger" style={{ padding: "3px 8px", fontSize: "0.7rem" }} onClick={() => { deleteBatchItem(g.ana!); setDeleteConfirmKey(null); }}>Asıl Ürün</button>}
+                                    {g.cep && <button type="button" className="btn-danger" style={{ padding: "3px 8px", fontSize: "0.7rem" }} onClick={() => { deleteBatchItem(g.cep!); setDeleteConfirmKey(null); }}>Cep Boy</button>}
+                                    <button type="button" className="btn-secondary" style={{ padding: "3px 8px", fontSize: "0.7rem" }} onClick={() => setDeleteConfirmKey(null)}>Vazgeç</button>
+                                  </div>
+                                ) : (
+                                  <div className="flex gap-1">
+                                    <button type="button" className="btn-secondary" style={{ padding: "3px 8px", fontSize: "0.75rem" }} onClick={() => setEditingBatchItemId(editing ? null : rowKey)}>
+                                      {editing ? "Bitti" : "Değiştir"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-danger"
+                                      style={{ padding: "3px 8px", fontSize: "0.75rem" }}
+                                      onClick={() => {
+                                        // Sadece bir taraf varsa direkt sil, ikisi de varsa hangisi olduğunu sor.
+                                        if (g.ana && g.cep) setDeleteConfirmKey(rowKey);
+                                        else if (g.ana) deleteBatchItem(g.ana);
+                                        else if (g.cep) deleteBatchItem(g.cep);
+                                      }}
+                                    >
+                                      Sil
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-slate-200 font-bold border-t">
+                          {showPartiCol && <td className="p-3">Toplam</td>}
+                          <td className="p-3 bg-slate-200" style={{ position: "sticky", left: 0, zIndex: 1 }}>Toplam</td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + (g.ana?.bought||0), 0)}</td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + soldOf(g.ana), 0)}</td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + kalanOf(g.ana), 0)}</td>
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + (g.cep?.bought||0), 0)}</td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + soldOf(g.cep), 0)}</td>
+                          <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + kalanOf(g.cep), 0)}</td>
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 );
               })()}
             </Card>
