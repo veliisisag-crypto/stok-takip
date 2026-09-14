@@ -826,7 +826,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showPartiDetayModal, setShowPartiDetayModal] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" as "ana" | "cep_boy" });
-  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
+  const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as string, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
   const activeSales = sales.filter((sale) => !sale.cancelled);
@@ -1895,6 +1895,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
 
+    // Admin (isSellerRole=false) "Satışı Yapan" alanından bir alt satıcı (Hasret/Esengül/Saliha vb.)
+    // seçmiş olabilir - bu durumda tıpkı o satıcının kendi hesabıyla girdiği satış gibi davranılır:
+    // seller_account_id o satıcıya yazılır, "Kendi Karım" yerine "Satıcı Komisyonu" alanı kullanılır.
+    const selectedSubSeller = !isSellerRole ? sellerAccounts.find((s) => s.id === saleForm.seller) : undefined;
+    const effectiveSellerAccountId = currentSellerAccount?.id || selectedSubSeller?.id || null;
+    const usesSellerProfitFlow = isSellerRole || !!selectedSubSeller;
+
     // Filter by depo, batch (varsa) ve varyant - strictly match
     const availableItems = batchItemsForProduct(product.id).filter((item) => {
       const matchDepo = saleForm.depo ? item.depo === saleForm.depo : true;
@@ -1911,14 +1918,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const isZeroPrice = saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk";
       const totalPrice = isZeroPrice ? 0 : Number(saleForm.customSalePrice || 0);
       const isPaid = saleForm.paid !== "false" || isZeroPrice;
-      const sellerProfitTotal = isSellerRole && !isZeroPrice ? Number(saleForm.sellerProfit || 0) : 0;
+      const sellerProfitTotal = usesSellerProfitFlow && !isZeroPrice ? Number(saleForm.sellerProfit || 0) : 0;
       const rowSellerProfit = qty > 0 ? (take / qty) * sellerProfitTotal : 0;
       rows.push({
         customer_id: customer.id,
         product_id: product.id,
         batch_id: item.batch_id,
         batch_item_id: item.id,
-        seller: isSellerRole ? null : saleForm.seller,
+        seller: (isSellerRole || selectedSubSeller) ? null : (saleForm.seller as Seller),
         sale_type: saleForm.saleType,
         qty: take,
         total: totalPrice,
@@ -1926,8 +1933,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         paid: isPaid,
         paid_amount: isPaid ? totalPrice : 0,
         payment_method: (saleForm.paid === "banka" || saleForm.paid === "nakit") ? saleForm.paid : null,
-        seller_account_id: currentSellerAccount?.id || null,
-        seller_profit: isSellerRole ? rowSellerProfit : null,
+        seller_account_id: effectiveSellerAccountId,
+        seller_profit: usesSellerProfitFlow ? rowSellerProfit : null,
         note: (saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") ? saleForm.note.trim() : null,
         variant: saleForm.variant,
         cancelled: false,
@@ -1945,7 +1952,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, para_sahibi: saleForm.paraSahibi, seller_account_id: currentSellerAccount?.id || null })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, para_sahibi: saleForm.paraSahibi, seller_account_id: effectiveSellerAccountId })
           .select()
           .single();
         if (payErr) {
@@ -6351,7 +6358,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 })()}
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
                 {!isSellerRole && (
-                  <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Aslı</option><option>Mihrimah</option></select>
+                  <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value, sellerProfit: "" })}>
+                    <option value="Aslı">Aslı</option>
+                    <option value="Mihrimah">Mihrimah</option>
+                    {sellerAccounts.filter((s) => s.active).map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
                 )}
                 <select className="input" value={saleForm.saleType} onChange={(e) => {
                   const t = e.target.value as SaleType;
@@ -6364,6 +6377,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 )}
                 {isSellerRole && saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
                   <input className="input" type="number" min="0" placeholder="Kendi Karım (₺)" value={saleForm.sellerProfit} onChange={(e) => setSaleForm({ ...saleForm, sellerProfit: e.target.value })} />
+                )}
+                {!isSellerRole && sellerAccounts.some((s) => s.id === saleForm.seller) && saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
+                  <input className="input" type="number" min="0" placeholder="Satıcı Komisyonu (₺)" value={saleForm.sellerProfit} onChange={(e) => setSaleForm({ ...saleForm, sellerProfit: e.target.value })} />
                 )}
                 {saleForm.saleType !== "Fire/Bozuk" && saleForm.saleType !== "Hibe" && (
                   <select className="input" value={saleForm.paid} onChange={(e) => setSaleForm({ ...saleForm, paid: e.target.value })}>
