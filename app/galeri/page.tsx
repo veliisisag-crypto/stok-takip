@@ -17,13 +17,14 @@ type BatchItem = {
   product_id: string;
   bought: number;
   sale_price: number | null;
+  variant: "ana" | "cep_boy" | null;
   created_at: string;
 };
 
 export default function GaleriPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
-  const [soldByProduct, setSoldByProduct] = useState<Record<string, number>>({});
+  const [soldByBatchItem, setSoldByBatchItem] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,21 +38,21 @@ export default function GaleriPage() {
 
     supabase
       .from("batch_items")
-      .select("id,product_id,bought,sale_price,created_at")
+      .select("id,product_id,bought,sale_price,variant,created_at")
       .then(({ data, error }) => {
         if (error) { console.warn("batch_items okunamadı", error); return; }
         if (data) setBatchItems(data as BatchItem[]);
       });
 
     supabase
-      .rpc("get_sold_qty_by_product")
+      .rpc("get_sold_qty_by_batch_item")
       .then(({ data, error }) => {
-        if (error) { console.warn("get_sold_qty_by_product hata", error); return; }
+        if (error) { console.warn("get_sold_qty_by_batch_item hata", error); return; }
         const map: Record<string, number> = {};
-        for (const row of (data || []) as { product_id: string; toplam_satilan: number }[]) {
-          map[row.product_id] = Number(row.toplam_satilan || 0);
+        for (const row of (data || []) as { batch_item_id: string; toplam_satilan: number }[]) {
+          map[row.batch_item_id] = Number(row.toplam_satilan || 0);
         }
-        setSoldByProduct(map);
+        setSoldByBatchItem(map);
       });
   }, []);
 
@@ -63,19 +64,14 @@ export default function GaleriPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [close]);
 
-  const getProductStock = (productId: string) => {
-    const totalBought = batchItems
-      .filter((bi) => bi.product_id === productId)
-      .reduce((sum, bi) => sum + Number(bi.bought || 0), 0);
-    return totalBought - (soldByProduct[productId] || 0);
-  };
-
-  const getProductPrice = (product: Product) => {
-    const items = batchItems
-      .filter((bi) => bi.product_id === product.id && Number(bi.sale_price) > 0)
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-    if (items.length) return Number(items[0].sale_price);
-    return Number(product.manual_price || 0);
+  // Ürünün belirli bir varyanttaki (ana / cep_boy) stok ve fiyat bilgisi.
+  const getVariantInfo = (productId: string, variant: "ana" | "cep_boy") => {
+    const items = batchItems.filter((bi) => bi.product_id === productId && (bi.variant || "ana") === variant);
+    if (!items.length) return null; // bu varyanttan hiç girilmemiş
+    const stock = items.reduce((sum, bi) => sum + Number(bi.bought || 0) - (soldByBatchItem[bi.id] || 0), 0);
+    const priced = items.filter((bi) => Number(bi.sale_price) > 0).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    const price = priced.length ? Number(priced[0].sale_price) : 0;
+    return { stock, price };
   };
 
   const groups: { gender: string }[] = [
@@ -86,7 +82,13 @@ export default function GaleriPage() {
 
   const visibleProducts = products
     .filter((p) => !p.passive && p.image_url)
-    .map((p) => ({ product: p, stock: getProductStock(p.id), price: getProductPrice(p) }));
+    .map((p) => {
+      const ana = getVariantInfo(p.id, "ana");
+      const cep = getVariantInfo(p.id, "cep_boy");
+      const fallbackPrice = Number(p.manual_price || 0);
+      const hasStock = (ana?.stock || 0) > 0 || (cep?.stock || 0) > 0;
+      return { product: p, ana, cep, fallbackPrice, hasStock };
+    });
 
   return (
     <div style={{
@@ -97,11 +99,7 @@ export default function GaleriPage() {
       {groups.map(({ gender }) => {
         const group = visibleProducts
           .filter((row) => row.product.gender_category === gender)
-          .sort((a, b) => {
-            const aInStock = a.stock > 0 ? 1 : 0;
-            const bInStock = b.stock > 0 ? 1 : 0;
-            return bInStock - aInStock;
-          });
+          .sort((a, b) => (b.hasStock ? 1 : 0) - (a.hasStock ? 1 : 0));
         if (!group.length) return null;
         return (
           <div key={gender} style={{ marginBottom: 16 }}>
@@ -127,58 +125,69 @@ export default function GaleriPage() {
               gridTemplateColumns: "repeat(3, 1fr)",
               gap: 4,
             }}>
-              {group.map(({ product: p, stock, price }) => (
-                <div
-                  key={p.id}
-                  onClick={() => setLightbox(p.image_url)}
-                  style={{
-                    position: "relative",
-                    aspectRatio: "1/1",
-                    borderRadius: 6,
-                    overflow: "hidden",
-                    cursor: "pointer",
-                    background: "#1a1a1a",
-                  }}
-                >
-                  <img
-                    src={p.image_url!}
-                    alt=""
+              {group.map(({ product: p, ana, cep, fallbackPrice }) => {
+                const anaPrice = ana ? (ana.price || fallbackPrice) : fallbackPrice;
+                const anaStock = ana?.stock || 0;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => setLightbox(p.image_url)}
                     style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block",
+                      position: "relative",
+                      aspectRatio: "1/1",
+                      borderRadius: 6,
+                      overflow: "hidden",
+                      cursor: "pointer",
+                      background: "#1a1a1a",
                     }}
-                  />
-                  <div style={{
-                    position: "absolute",
-                    top: 4,
-                    left: 4,
-                    background: stock > 0 ? "#16a34a" : "#dc2626",
-                    color: "#ffffff",
-                    fontSize: "0.55rem",
-                    fontWeight: 700,
-                    padding: "2px 6px",
-                    borderRadius: 5,
-                    letterSpacing: "0.02em",
-                  }}>
-                    {stock > 0 ? "Stokta" : "Tükendi"}
+                  >
+                    <img
+                      src={p.image_url!}
+                      alt=""
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                    <div style={{
+                      position: "absolute",
+                      top: 5,
+                      right: 5,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      alignItems: "flex-end",
+                    }}>
+                      <div style={{
+                        background: anaStock > 0 ? "#16a34a" : "#dc2626",
+                        color: "#ffffff",
+                        fontSize: "0.5rem",
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        whiteSpace: "nowrap",
+                      }}>
+                        Büyük Boy · {anaStock > 0 ? "Stokta" : "Tükendi"} · {anaPrice ? Math.round(anaPrice).toLocaleString("tr-TR") : "-"}
+                      </div>
+                      {cep && (
+                        <div style={{
+                          background: cep.stock > 0 ? "#16a34a" : "#dc2626",
+                          color: "#ffffff",
+                          fontSize: "0.5rem",
+                          fontWeight: 700,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          whiteSpace: "nowrap",
+                        }}>
+                          Çanta Boy · {cep.stock > 0 ? "Stokta" : "Tükendi"} · {cep.price ? Math.round(cep.price).toLocaleString("tr-TR") : "-"}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{
-                    position: "absolute",
-                    top: 4,
-                    right: 4,
-                    background: "rgba(0,0,0,0.65)",
-                    color: "#ffffff",
-                    fontSize: "0.55rem",
-                    fontWeight: 700,
-                    padding: "2px 6px",
-                    borderRadius: 5,
-                  }}>
-                    {price ? Math.round(price).toLocaleString("tr-TR") : "-"}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
