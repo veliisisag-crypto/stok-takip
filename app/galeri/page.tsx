@@ -45,7 +45,7 @@ export default function GaleriPage() {
       });
 
     supabase
-      .rpc("get_sold_qty_by_batch_item")
+      .rpc("get_sold_qty_by_batch_item", { p_workspace: "kuzey" })
       .then(({ data, error }) => {
         if (error) { console.warn("get_sold_qty_by_batch_item hata", error); return; }
         const map: Record<string, number> = {};

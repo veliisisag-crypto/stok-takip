@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "ek düzenlemeler 35"
+git commit -m "ek düzenlemeler 39"
 git push
 
 
@@ -12,6 +12,8 @@ Kx9#mP2$vL7@nQwR  veli@stok-takip.com
 Samsun2026+	  eso@stok-takip.com	
 Samsun56++        sevilay@stok-takip.com
 Samsun55**	  hasret@stok-takip.com
+		  saliha@stok-takip.com
+Adana01**         nese@stok-takip.com
 
 
 pg_dump "postgresql://postgres:Kx9#mP2$vL7@nQwR@cfkfaxgtqoswybazrwlx.supabase.co:5432/postgres" \
@@ -19,3 +21,13 @@ pg_dump "postgresql://postgres:Kx9#mP2$vL7@nQwR@cfkfaxgtqoswybazrwlx.supabase.co
 
 pg_dump "postgresql://postgres:[ŞİFREN]@db.cfkfaxgtqoswybazrwlx.supabase.co:5432/postgres" \
   --no-owner --no-privileges -F c -f redline_backup_$(date +%Y%m%d_%H%M).dump
+
+Fotoğrafı olmayanlar sorgusu:
+
+SELECT id, name, code, gender_category
+FROM products
+WHERE (image_url IS NULL OR image_url = '')
+  AND passive = false
+ORDER BY name;
+
+npx supabase db dump --db-url "postgresql://postgres:L33iZmNxTnOw8QsU@db.cfkfaxgtqoswybazrwlx.supabase.co:5432/postgres" -f yedek_2026_09_16.sql

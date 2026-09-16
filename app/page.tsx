@@ -7,12 +7,14 @@ import * as XLSX from "xlsx";
 // Supabase/PostgREST varsayılan olarak tek istekte sınırlı sayıda satır döndürür.
 // Kayıt sayısı arttıkça (500+, 1000+ vb.) sabit bir .limit() eski kayıtları sessizce
 // gizleyebiliyor. Bu fonksiyon .range() ile sayfa sayfa çekip TÜM satırları getirir.
-async function fetchAllRows<T>(table: string, orderCol: string, ascending: boolean): Promise<{ data: T[] | null; error: unknown }> {
+async function fetchAllRows<T>(table: string, orderCol: string, ascending: boolean, workspaceFilter?: string): Promise<{ data: T[] | null; error: unknown }> {
   const pageSize = 1000;
   let allRows: T[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await supabase.from(table).select("*").order(orderCol, { ascending }).range(from, from + pageSize - 1);
+    let query = supabase.from(table).select("*").order(orderCol, { ascending });
+    if (workspaceFilter) query = query.eq("workspace", workspaceFilter);
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) return { data: null, error };
     if (!data || data.length === 0) break;
     allRows = allRows.concat(data as T[]);
@@ -24,13 +26,13 @@ async function fetchAllRows<T>(table: string, orderCol: string, ascending: boole
 
 async function fetchFilteredAuditLogs(
   supabaseClient: typeof import("@/lib/supabase").supabase,
-  params: { start: string; end: string; action: string; user: string }
+  params: { start: string; end: string; action: string; user: string; workspace: string }
 ): Promise<AuditLog[]> {
   const pageSize = 1000;
   let allRows: AuditLog[] = [];
   let from = 0;
   while (true) {
-    let query = supabaseClient.from("audit_log").select("*").order("created_at", { ascending: false });
+    let query = supabaseClient.from("audit_log").select("*").eq("workspace", params.workspace).order("created_at", { ascending: false });
     if (params.start) query = query.gte("created_at", `${params.start}T00:00:00`);
     if (params.end) query = query.lte("created_at", `${params.end}T23:59:59`);
     if (params.action !== "Tümü") query = query.eq("action", params.action);
@@ -48,7 +50,7 @@ async function fetchFilteredAuditLogs(
   return allRows;
 }
 
-function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").supabase }) {
+function AuditSection({ supabase, activeWorkspace }: { supabase: typeof import("@/lib/supabase").supabase; activeWorkspace: string }) {
   const [logs, setLogs] = useState<AuditLog[]>([]); // İlk yükleme: sadece son 100 kayıt (hızlı açılış)
   const [loading, setLoading] = useState(true);
   const [detailLog, setDetailLog] = useState<AuditLog | null>(null);
@@ -65,14 +67,17 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
   const [allUsers, setAllUsers] = useState<string[]>([]);
 
   useEffect(() => {
-    supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100)
+    setLoading(true);
+    setFilterResults(null);
+    setFilterStart(""); setFilterEnd(""); setFilterAction("Tümü"); setFilterUser("Tümü");
+    supabase.from("audit_log").select("*").eq("workspace", activeWorkspace).order("created_at", { ascending: false }).limit(100)
       .then(({ data }) => { setLogs((data || []) as AuditLog[]); setLoading(false); });
-    supabase.from("audit_log").select("action, user_email").then(({ data }) => {
+    supabase.from("audit_log").select("action, user_email").eq("workspace", activeWorkspace).then(({ data }) => {
       const rows = (data || []) as { action: string; user_email: string | null }[];
       setAllActions(Array.from(new Set(rows.map((r) => r.action))).sort((a, b) => a.localeCompare(b, "tr")));
       setAllUsers(Array.from(new Set(rows.map((r) => r.user_email || "-"))).sort((a, b) => a.localeCompare(b, "tr")));
     });
-  }, []);
+  }, [activeWorkspace]);
 
   const actionOptions = ["Tümü", ...allActions];
   const userOptions = ["Tümü", ...allUsers];
@@ -81,7 +86,7 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
   const applyFilter = async () => {
     setFilterLoading(true);
     try {
-      const result = await fetchFilteredAuditLogs(supabase, { start: filterStart, end: filterEnd, action: filterAction, user: filterUser });
+      const result = await fetchFilteredAuditLogs(supabase, { start: filterStart, end: filterEnd, action: filterAction, user: filterUser, workspace: activeWorkspace });
       setFilterResults(result);
     } finally {
       setFilterLoading(false);
@@ -312,6 +317,13 @@ type Batch = {
   usd_kuru?: number | null;
 };
 
+type BatchPhoto = {
+  id: string;
+  batch_id: string;
+  image_url: string;
+  created_at: string;
+};
+
 type Supplier = {
   id: string;
   name: string;
@@ -341,6 +353,7 @@ type BatchItem = {
   sale_price: number;
   depo?: string;
   variant?: "ana" | "cep_boy"; // "ana" = normal boy ürün, "cep_boy" = küçük boy alt ürün (aynı ürün tanımı, ayrı stok/fiyat)
+  workspace?: string; // "kuzey" | "guney"
   created_at: string;
 };
 
@@ -709,6 +722,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return negative.some((w) => lower.includes(w)) ? "error" : "success";
   };
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  // Workspace (Kuzey/Güney) - Aslı ve Veli ikisi arasında geçiş yapabilir, diğer herkes tek workspace'e sabit.
+  const [activeWorkspace, setActiveWorkspace] = useState<"kuzey" | "guney">("kuzey");
+  const [allowedWorkspaces, setAllowedWorkspaces] = useState<string[]>(["kuzey"]);
   const [sellerAccounts, setSellerAccounts] = useState<SellerAccount[]>([]);
   const [sellerSettlements, setSellerSettlements] = useState<SellerSettlement[]>([]);
   const [sellerTransfers, setSellerTransfers] = useState<SellerTransfer[]>([]);
@@ -824,6 +840,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [batchReportFilter, setBatchReportFilter] = useState("");
   const [partiTab, setPartiTab] = useState<"giris" | "maliyet" | "rapor">("giris");
   const [showPartiDetayModal, setShowPartiDetayModal] = useState(false);
+  const [batchPhotos, setBatchPhotos] = useState<BatchPhoto[]>([]);
+  const [photoManagerBatchId, setPhotoManagerBatchId] = useState<string | null>(null);
+  const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState<number | null>(null);
+  const [uploadingBatchPhoto, setUploadingBatchPhoto] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" as "ana" | "cep_boy" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as string, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
@@ -979,32 +999,46 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,usd_fiyat_tamir,manual_price").order("created_at", { ascending: true }),
-        supabase.from("customers").select("*").order("created_at", { ascending: true }),
-        supabase.from("batches").select("*").order("created_at", { ascending: true }),
-        supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
-        fetchAllRows<Sale>("sales", "created_at", false),
-        fetchAllRows<Payment>("payments", "created_at", false),
-        supabase.from("partner_ledger").select("*").order("partner_name", { ascending: true }),
-        supabase.from("periods").select("*").order("created_at", { ascending: false }),
-        supabase.from("batch_costs").select("*"),
-        supabase.from("preorders").select("*").order("created_at", { ascending: false }),
-        supabase.from("preorder_items").select("*"),
-        supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
-        supabase.from("suppliers").select("*").order("name", { ascending: true }),
-        supabase.from("supplier_returns").select("*").order("created_at", { ascending: false }),
-        supabase.from("seller_accounts").select("*").order("name", { ascending: true }),
+      // Workspace (Kuzey/Güney) erişimini belirle. Tek workspace'i olan herkes ona sabitlenir;
+      // birden fazlası olan (Veli, Aslı) son seçtiği workspace'te kalır (localStorage), o da
+      // geçersizse (örn. hiç seçim yapılmamışsa) ilk izinli workspace'e düşer.
+      const { data: waRow } = await supabase.from("workspace_access").select("workspaces").eq("email", email.toLowerCase()).maybeSingle();
+      const myWorkspaces: string[] = (waRow?.workspaces && waRow.workspaces.length) ? waRow.workspaces : ["kuzey"];
+      setAllowedWorkspaces(myWorkspaces);
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem("activeWorkspace") : null;
+      const resolvedWorkspace = (stored === "kuzey" || stored === "guney") && myWorkspaces.includes(stored) ? stored : myWorkspaces[0];
+      setActiveWorkspace(resolvedWorkspace as "kuzey" | "guney");
+      // Ürün/Toptancı kataloğu asimetrik: Güney workspace'indeyken Kuzey'in kataloğu da görünür
+      // (kullanılabilir), Kuzey'deyken sadece Kuzey'in kendi kataloğu görünür.
+      const catalogWorkspaces = resolvedWorkspace === "guney" ? ["kuzey", "guney"] : ["kuzey"];
+
+      const [productsRes, customersRes, batchesRes, batchItemsRes, batchPhotosRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes, odemelerRes, odemeKaynaklariRes, soldByProductRes, soldByBatchItemRes, soldByProductBatchRes] = await Promise.all([
+        supabase.from("products").select("id,name,code,gender_category,image_url,passive,usd_fiyat_tyuksel,usd_fiyat_thasan,usd_fiyat_tamir,manual_price").in("workspace", catalogWorkspaces).order("created_at", { ascending: true }),
+        supabase.from("customers").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: true }),
+        supabase.from("batches").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: true }),
+        supabase.from("batch_items").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: true }),
+        supabase.from("batch_photos").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: true }),
+        fetchAllRows<Sale>("sales", "created_at", false, resolvedWorkspace),
+        fetchAllRows<Payment>("payments", "created_at", false, resolvedWorkspace),
+        supabase.from("partner_ledger").select("*").eq("workspace", resolvedWorkspace).order("partner_name", { ascending: true }),
+        supabase.from("periods").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: false }),
+        supabase.from("batch_costs").select("*").eq("workspace", resolvedWorkspace),
+        supabase.from("preorders").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: false }),
+        supabase.from("preorder_items").select("*").eq("workspace", resolvedWorkspace),
+        supabase.from("payment_allocations").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: true }),
+        supabase.from("suppliers").select("*").in("workspace", catalogWorkspaces).order("name", { ascending: true }),
+        supabase.from("supplier_returns").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: false }),
+        supabase.from("seller_accounts").select("*").eq("workspace", resolvedWorkspace).order("name", { ascending: true }),
         supabase.from("seller_settlements").select("*").order("created_at", { ascending: false }),
         supabase.from("seller_transfers").select("*").order("created_at", { ascending: false }),
-        supabase.from("odemeler").select("*").order("created_at", { ascending: false }),
-        supabase.from("odeme_kaynaklari").select("*"),
-        supabase.rpc("get_sold_qty_by_product"),
-        supabase.rpc("get_sold_qty_by_batch_item"),
-        supabase.rpc("get_sold_qty_by_product_batch"),
+        supabase.from("odemeler").select("*").eq("workspace", resolvedWorkspace).order("created_at", { ascending: false }),
+        supabase.from("odeme_kaynaklari").select("*").eq("workspace", resolvedWorkspace),
+        supabase.rpc("get_sold_qty_by_product", { p_workspace: resolvedWorkspace }),
+        supabase.rpc("get_sold_qty_by_batch_item", { p_workspace: resolvedWorkspace }),
+        supabase.rpc("get_sold_qty_by_product_batch", { p_workspace: resolvedWorkspace }),
       ]);
 
-      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes]) {
+      for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, batchPhotosRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, suppliersRes, supplierReturnsRes, sellerAccountsRes, sellerSettlementsRes, sellerTransfersRes]) {
         if (res.error) throw res.error;
       }
       // odemeler/odeme_kaynaklari satıcı rolünde RLS ile boş döner, hata fırlatmaz - ayrı kontrol
@@ -1041,6 +1075,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setCustomers((customersRes.data || []) as Customer[]);
       setBatches((batchesRes.data || []) as Batch[]);
       setBatchItems((batchItemsRes.data || []) as BatchItem[]);
+      setBatchPhotos((batchPhotosRes.data || []) as BatchPhoto[]);
       setSales((salesRes.data || []) as Sale[]);
       setPayments((paymentsRes.data || []) as Payment[]);
       setPartners((partnersRes.data || []) as PartnerRow[]);
@@ -1087,6 +1122,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  // Kuzey/Güney arasında geçiş yapar (sadece birden fazla workspace'e erişimi olanlar için anlamlı,
+  // ama tek workspace'i olanlar için de zararsızdır çünkü seçenek zaten sadece o tek değeri içerir).
+  const switchWorkspace = (ws: "kuzey" | "guney") => {
+    if (ws === activeWorkspace) return;
+    if (typeof window !== "undefined") window.localStorage.setItem("activeWorkspace", ws);
+    setActiveWorkspace(ws);
+    loadAll();
+  };
+
+  // "Ticari Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
+  const toggleWorkspace = () => {
+    if (allowedWorkspaces.length < 2) return;
+    switchWorkspace(activeWorkspace === "kuzey" ? "guney" : "kuzey");
+  };
+
   useEffect(() => {
     loadAll();
   }, []);
@@ -1105,6 +1155,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         entity_name: entityName || "",
         user_email: data.user?.email || "",
         details: details || {},
+        workspace: activeWorkspace,
       });
     } catch (err) {
       console.warn("Audit log yazılamadı", err);
@@ -1489,6 +1540,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       usd_fiyat_tyuksel: newProduct.usdTyuksel ? Number(newProduct.usdTyuksel) : null,
       usd_fiyat_thasan: newProduct.usdThasan ? Number(newProduct.usdThasan) : null,
       usd_fiyat_tamir: newProduct.usdTamir ? Number(newProduct.usdTamir) : null,
+      workspace: activeWorkspace,
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code, usd_tyuksel: newProduct.usdTyuksel || null, usd_thasan: newProduct.usdThasan || null, usd_tamir: newProduct.usdTamir || null });
@@ -1539,7 +1591,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newCustomerName.trim();
     if (!name || name.length > 50) return setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
-    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null, created_by: currentUserEmail || null });
+    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null, created_by: currentUserEmail || null, workspace: activeWorkspace });
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
@@ -1578,7 +1630,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newBatchName.trim();
     if (!name) return setMessage("Parti adı boş olamaz.");
     if (batches.some((b) => b.name === name)) return setMessage("Bu parti zaten kayıtlı.");
-    const { error } = await supabase.from("batches").insert({ name, supplier_id: newBatchSupplierId || null });
+    const { error } = await supabase.from("batches").insert({ name, supplier_id: newBatchSupplierId || null, workspace: activeWorkspace });
     if (error) return showError(error);
     await logAction("Parti eklendi", "batches", name, { toptanci: newBatchSupplierId ? supplierMap.get(newBatchSupplierId)?.name : "Belirtilmedi" });
     setNewBatchName("");
@@ -1608,11 +1660,34 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
+  const addBatchPhoto = async (batchId: string, base64: string) => {
+    setUploadingBatchPhoto(true);
+    try {
+      const url = await uploadImageToStorage(base64, `parti-${batchId}`);
+      if (!url) return;
+      const { error } = await supabase.from("batch_photos").insert({ batch_id: batchId, image_url: url, workspace: activeWorkspace });
+      if (error) return showError(error);
+      await logAction("Parti fotoğrafı eklendi", "batch_photos", batchMap.get(batchId)?.name || batchId);
+      loadAll();
+    } finally {
+      setUploadingBatchPhoto(false);
+    }
+  };
+
+  const deleteBatchPhoto = async (photo: BatchPhoto) => {
+    if (!confirm("Bu fotoğrafı silmek istediğine emin misin?")) return;
+    const { error } = await supabase.from("batch_photos").delete().eq("id", photo.id);
+    if (error) return showError(error);
+    await logAction("Parti fotoğrafı silindi", "batch_photos", batchMap.get(photo.batch_id)?.name || photo.batch_id);
+    setLightboxPhotoIndex(null);
+    loadAll();
+  };
+
   const addSupplier = async () => {
     const clean = newSupplierName.trim();
     if (!clean) return setMessage("Toptancı adı zorunlu.");
     if (suppliers.some((s) => s.name.toLowerCase() === clean.toLowerCase())) return setMessage("Bu toptancı zaten var.");
-    const { data, error } = await supabase.from("suppliers").insert({ name: clean }).select();
+    const { data, error } = await supabase.from("suppliers").insert({ name: clean, workspace: activeWorkspace }).select();
     if (error) return showError(error);
     if (data && data[0]) setSuppliers((prev) => [...prev, data[0] as Supplier].sort((a, b) => a.name.localeCompare(b.name, "tr")));
     await logAction("Toptancı eklendi", "suppliers", clean);
@@ -1625,7 +1700,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const email = newSellerEmail.trim().toLowerCase();
     if (!name || !email) return setMessage("Satıcı adı ve e-postası zorunlu.");
     if (sellerAccounts.some((s) => s.email.toLowerCase() === email)) return setMessage("Bu e-posta zaten bir satıcıya ait.");
-    const { data, error } = await supabase.from("seller_accounts").insert({ name, email, active: true }).select();
+    const { data, error } = await supabase.from("seller_accounts").insert({ name, email, active: true, workspace: activeWorkspace }).select();
     if (error) return showError(error);
     if (data && data[0]) setSellerAccounts((prev) => [...prev, data[0] as SellerAccount].sort((a, b) => a.name.localeCompare(b.name, "tr")));
     await logAction("Satıcı eklendi", "seller_accounts", name, { email });
@@ -1752,6 +1827,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       qty,
       resolution_type: "bekliyor",
       note: returnFormNote || null,
+      workspace: activeWorkspace,
     });
     if (insertErr) return showError(insertErr);
 
@@ -1827,6 +1903,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       sale_price: salePrice,
       depo: batchForm.depo || "Belirsiz",
       variant: batchForm.variant,
+      workspace: activeWorkspace,
     });
     if (error) return showError(error);
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}${batchForm.variant === "cep_boy" ? " (Cep Boy)" : ""}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo, variant: batchForm.variant });
@@ -1938,6 +2015,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         note: (saleForm.saleType === "Hibe" || saleForm.saleType === "Fire/Bozuk") ? saleForm.note.trim() : null,
         variant: saleForm.variant,
         cancelled: false,
+        workspace: activeWorkspace,
       });
       remainingQty -= take;
     }
@@ -1952,7 +2030,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       if (totalAmount > 0) {
         const { data: payData, error: payErr } = await supabase
           .from("payments")
-          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, para_sahibi: saleForm.paraSahibi, seller_account_id: effectiveSellerAccountId })
+          .insert({ customer_id: customer.id, amount: totalAmount, user_email: currentUserEmail, cancelled: false, payment_method: saleForm.paid === "nakit" ? "nakit" : "banka", kasa_tutari: totalAmount, para_sahibi: saleForm.paraSahibi, seller_account_id: effectiveSellerAccountId, workspace: activeWorkspace })
           .select()
           .single();
         if (payErr) {
@@ -1974,7 +2052,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             const existingIds = new Set((existing || []).map((e: {sale_id: string}) => e.sale_id));
             const allocations = newSales
               .filter((s: {id: string; total: number}) => !existingIds.has(s.id))
-              .map((s: {id: string; total: number}) => ({ payment_id: payData.id, sale_id: s.id, amount: s.total, created_at: payData.created_at }));
+              .map((s: {id: string; total: number}) => ({ payment_id: payData.id, sale_id: s.id, amount: s.total, created_at: payData.created_at, workspace: activeWorkspace }));
             if (allocations.length > 0) {
               const { error: allocErr } = await supabase.from("payment_allocations").insert(allocations);
               if (allocErr) console.error("Allocation insert error:", allocErr);
@@ -2175,7 +2253,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     // Her ödemeyi satışlara dağıt
-    const allocations: { payment_id: string; sale_id: string; amount: number; created_at: string }[] = [];
+    const allocations: { payment_id: string; sale_id: string; amount: number; created_at: string; workspace: string }[] = [];
     let saleQueue = [...saleUpdates];
     for (const pay of cariPays) {
       let payRemaining = toNum(pay.amount);
@@ -2187,7 +2265,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const remaining = sale.paidAmount - alreadyAllocated;
         const thisAlloc = Math.min(payRemaining, Math.max(remaining, 0));
         if (thisAlloc > 0) {
-          allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at });
+          allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at, workspace: activeWorkspace });
           payRemaining -= thisAlloc;
         }
       }
@@ -2254,7 +2332,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount, para_sahibi: paraSahibi, seller_account_id: currentSellerAccount?.id || null });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount, user_email: userEmail, payment_method: method, kasa_tutari: amount, para_sahibi: paraSahibi, seller_account_id: currentSellerAccount?.id || null, workspace: activeWorkspace });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
@@ -2302,16 +2380,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const paraSahibiSecenekleri = useMemo(
-    () => ["Veli", "Aslı", "Mihrimah", ...sellerAccounts.map((s) => s.name)],
-    [sellerAccounts]
+    () => (activeWorkspace === "guney" ? ["Veli", "Aslı"] : ["Veli", "Aslı", "Mihrimah"]).concat(sellerAccounts.map((s) => s.name)),
+    [sellerAccounts, activeWorkspace]
   );
 
-  // Şahsi cüzdanlar: sadece 3 ortak için (Parti Maliyet Kaydı'nda karşılığı olan tek kişiler).
+  // Şahsi cüzdanlar: sadece o workspace'teki ortaklar için (Parti Maliyet Kaydı'nda karşılığı olan
+  // tek kişiler). Mihrimah'ın Güney'de hiçbir rolü yok, o yüzden Güney'de listeden çıkarılır.
   // Kasa havuzlarından ayrı, bakiye sınırı yok - kişinin kendi cebinden çıkan, sınırsız bir kaynak.
   const SAHSI_CUZDAN_SAHIPLERI: { key: string; kisi: string; alan: "veli" | "asli" | "mihrimah" }[] = [
     { key: "__sahsi__Veli", kisi: "Veli", alan: "veli" },
     { key: "__sahsi__Aslı", kisi: "Aslı", alan: "asli" },
-    { key: "__sahsi__Mihrimah", kisi: "Mihrimah", alan: "mihrimah" },
+    ...(activeWorkspace === "guney" ? [] : [{ key: "__sahsi__Mihrimah", kisi: "Mihrimah", alan: "mihrimah" as const }]),
   ];
   const sahsiCuzdanByKey = new Map(SAHSI_CUZDAN_SAHIPLERI.map((s) => [s.key, s]));
   const isSahsiKaynak = (k: string) => sahsiCuzdanByKey.has(k);
@@ -2438,7 +2517,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             const { error } = await supabase.from("periods").update({ devir_bakiyesi: mevcut - kullanilan, devir_bakiyesi_notu: yeniNot }).eq("id", openPeriodForOdeme!.id);
             if (error) throw error;
             const { data: kInserted, error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
-              odeme_id: odeme.id, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan,
+              odeme_id: odeme.id, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan, workspace: activeWorkspace,
             }).select();
             if (kaynakErr) throw kaynakErr;
             yeniKaynakIdleri.push(kInserted![0].id as string);
@@ -2456,7 +2535,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               const { error } = await supabase.from("payments").update({ kasa_tutari: yeniKasa, aciklama: yeniAciklama }).eq("id", kayit.id);
               if (error) throw error;
               const { data: kInserted, error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
-                odeme_id: odeme.id, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan,
+                odeme_id: odeme.id, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan, workspace: activeWorkspace,
               }).select();
               if (kaynakErr) throw kaynakErr;
               yeniKaynakIdleri.push(kInserted![0].id as string);
@@ -2640,6 +2719,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         tutar,
         aciklama: odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : odemeTip === "kar_payi" ? odemeKarPayiAlici : batchName,
         created_by: createdBy,
+        workspace: activeWorkspace,
       }).select();
       if (odemeErr) throw odemeErr;
       const odemeId = odemeInserted![0].id as string;
@@ -2662,7 +2742,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             // Kaynak kaydı ANINDA yazılır - döngü daha sonra bir yerde hata verip yarıda kesilse bile
             // buraya kadar yapılan düşümler izlenebilir ve silme/iade işlemi doğru çalışabilir.
             const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
-              odeme_id: odemeId, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan,
+              odeme_id: odemeId, kaynak_tipi: "devir", para_sahibi: null, payment_id: null, period_id: openPeriodForOdeme!.id, kullanilan_tutar: kullanilan, workspace: activeWorkspace,
             });
             if (kaynakErr) throw kaynakErr;
             kalan -= kullanilan;
@@ -2672,7 +2752,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             const kullanilan = kalan;
             if (kullanilan <= 0) continue;
             const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
-              odeme_id: odemeId, kaynak_tipi: "sahsi", para_sahibi: sahibi.kisi, payment_id: null, period_id: null, kullanilan_tutar: kullanilan,
+              odeme_id: odemeId, kaynak_tipi: "sahsi", para_sahibi: sahibi.kisi, payment_id: null, period_id: null, kullanilan_tutar: kullanilan, workspace: activeWorkspace,
             });
             if (kaynakErr) throw kaynakErr;
             sahsiKullanilan[sahibi.alan] += kullanilan;
@@ -2691,7 +2771,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               if (error) throw error;
               // Kaynak kaydı ANINDA yazılır - bkz. yukarıdaki not.
               const { error: kaynakErr } = await supabase.from("odeme_kaynaklari").insert({
-                odeme_id: odemeId, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan,
+                odeme_id: odemeId, kaynak_tipi: "tahsilat", para_sahibi: kaynak, payment_id: kayit.id, period_id: null, kullanilan_tutar: kullanilan, workspace: activeWorkspace,
               });
               if (kaynakErr) throw kaynakErr;
               kalan -= kullanilan;
@@ -2723,7 +2803,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             const { error } = await supabase.from("batch_costs").update(patch).eq("id", existing.id);
             if (error) throw error;
           } else {
-            const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, ...patch });
+            const { error } = await supabase.from("batch_costs").insert({ batch_id: odemeBatchId, veli: 0, asli: 0, mihrimah: 0, kasa: 0, kargo: 0, diger: 0, workspace: activeWorkspace, ...patch });
             if (error) throw error;
           }
         }
@@ -2834,14 +2914,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { error } = await supabase.from("preorders").update({ customer_id: preorderForm.customerId, note: preorderForm.note }).eq("id", editingPreorderId);
       if (error) return showError(error);
       await supabase.from("preorder_items").delete().eq("preorder_id", editingPreorderId);
-      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty) })));
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty), workspace: activeWorkspace })));
       if (itemErr) return showError(itemErr);
       await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", diffOf({ urunler: oldItemsDesc }, { urunler: newItemsDesc }));
       setEditingPreorderId(null);
     } else {
-      const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor", seller_account_id: currentSellerAccount?.id || null }).select().single();
+      const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor", seller_account_id: currentSellerAccount?.id || null, workspace: activeWorkspace }).select().single();
       if (error || !newPO) return showError(error);
-      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty) })));
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty), workspace: activeWorkspace })));
       if (itemErr) return showError(itemErr);
       await logAction("Ön sipariş oluşturuldu", "preorders", customer?.name || "", { items: validItems.length, oluşturan: currentUserEmail });
     }
@@ -2901,6 +2981,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       preorder_id: advancePaymentModal.id,
       note: advanceNote || "Ön ödeme",
       user_email: currentUserEmail,
+      workspace: activeWorkspace,
     });
     if (error) return showError(error);
     await logAction("Ön ödeme alındı", "preorders", customerMap.get(advancePaymentModal.customer_id)?.name || "", { tutar: amount, yontem: method });
@@ -2964,6 +3045,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         payment_method: paymentMethod,
         seller_account_id: currentSellerAccount?.id || null,
         seller_profit: isSellerRole ? rowSellerProfit : null,
+        workspace: activeWorkspace,
       });
       remainingQty -= take;
     }
@@ -3001,6 +3083,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             sale_id: s.id,
             amount: (s.total / saleTotalTarget) * paymentPortion,
             created_at: new Date().toISOString(),
+            workspace: activeWorkspace,
           }));
           await supabase.from("payment_allocations").insert(allocations);
         } else {
@@ -3016,6 +3099,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               para_sahibi: payment.para_sahibi || null,
               user_email: payment.user_email,
               created_at: payment.created_at,
+              workspace: activeWorkspace,
             })
             .select()
             .single();
@@ -3025,6 +3109,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               sale_id: s.id,
               amount: (s.total / saleTotalTarget) * paymentPortion,
               created_at: cleanPay.created_at,
+              workspace: activeWorkspace,
             }));
             await supabase.from("payment_allocations").insert(allocations);
           }
@@ -3037,7 +3122,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainder > 0 && convertPaid !== "false" && newSales && newSales.length > 0) {
       const { data: payData, error: payErr } = await supabase
         .from("payments")
-        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, para_sahibi: convertParaSahibi, seller_account_id: currentSellerAccount?.id || null })
+        .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, para_sahibi: convertParaSahibi, seller_account_id: currentSellerAccount?.id || null, workspace: activeWorkspace })
         .select()
         .single();
       if (!payErr && payData) {
@@ -3046,6 +3131,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           sale_id: s.id,
           amount: (s.total / saleTotalTarget) * remainder,
           created_at: payData.created_at,
+          workspace: activeWorkspace,
         }));
         await supabase.from("payment_allocations").insert(allocations);
       }
@@ -3067,7 +3153,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (balance <= 0) return;
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
-    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance, user_email: userEmail });
+    const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance, user_email: userEmail, workspace: activeWorkspace });
     if (error) return showError(error);
     try {
       await allocatePaymentsForCustomer(customerId);
@@ -3103,6 +3189,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       product_cost: productCost,
       shipping_cost: shippingCost,
       closed: false,
+      workspace: activeWorkspace,
     });
     if (periodError) return showError(periodError);
 
@@ -3255,13 +3342,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       return;
     }
 
+    // Kuzey'de kâr Aslı+Mihrimah arasında %50/%50; Güney'de tek ortak (Aslı) var, o yüzden %100 Aslı'ya gider.
+    // Güney'de Neşe'nin payı zaten kendi satışlarındaki "seller_profit" olarak maliyete yazılıp burada
+    // hesaba dahil edilmiş oluyor (companyProfit hesabı bunu zaten düşmüş durumda) - ayrıca bir işlem gerekmez.
+    const isGuney = activeWorkspace === "guney";
     const half = Math.max(companyProfit, 0) / 2;
+    const asliShare = isGuney ? Math.max(companyProfit, 0) : half;
     const closedAt = new Date().toISOString();
     const asli = partners.find((p) => p.partner_name === "Aslı");
-    const mihrimah = partners.find((p) => p.partner_name === "Mihrimah");
+    const mihrimah = isGuney ? undefined : partners.find((p) => p.partner_name === "Mihrimah");
     const updates = [];
 
-    if (asli) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(asli.debt - half, 0), profit_share: asli.profit_share + half }).eq("id", asli.id));
+    if (asli) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(asli.debt - asliShare, 0), profit_share: asli.profit_share + asliShare }).eq("id", asli.id));
     if (mihrimah) updates.push(supabase.from("partner_ledger").update({ debt: Math.max(mihrimah.debt - half, 0), profit_share: mihrimah.profit_share + half }).eq("id", mihrimah.id));
 
     // Kasada fiilen olan para (Kasa Havuzları Toplamı) ile dağıtılan kar arasındaki fark (dağıtılmayan/devreden kasa)
@@ -3277,8 +3369,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       closed: true,
       closed_at: closedAt,
       closing_cash: Number(totals.cash || 0),
-      asli_distribution: half,
-      mihrimah_distribution: half,
+      asli_distribution: asliShare,
+      mihrimah_distribution: isGuney ? 0 : half,
       donem_kari: distributableProfit,
       devir_bakiyesi: devirBakiyesi,
       seller_distributions: sellerDistributions,
@@ -3295,6 +3387,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           mihrimah_contribution: 0,
           product_cost: 0,
           shipping_cost: 0,
+          workspace: activeWorkspace,
           ...periodPayload,
         })
       );
@@ -3306,9 +3399,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       window.alert(`Dönem kapatma başarısız oldu:\n${firstError.message || firstError}`);
       return showError(firstError);
     }
-    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi, satici_dagilimi: sellerDistributions });
-    window.alert(`Dönem kapatıldı.\nToplam tanınan kâr: ${money(distributableProfit)} (şirket: ${money(companyProfit)}, satıcılar: ${money(distributableProfit - companyProfit)}).\nŞirket kârı Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
-    setMessage(`Dönem kapatıldı; şirket kârı (${money(companyProfit)}) Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
+    await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, isGuney ? { dagitilan_kar: distributableProfit, asli_payi: asliShare, devir_bakiyesi: devirBakiyesi, satici_dagilimi: sellerDistributions } : { dagitilan_kar: distributableProfit, asli_payi: half, mihrimah_payi: half, devir_bakiyesi: devirBakiyesi, satici_dagilimi: sellerDistributions });
+    if (isGuney) {
+      window.alert(`Dönem kapatıldı.\nToplam tanınan kâr: ${money(distributableProfit)} (şirket: ${money(companyProfit)}, satıcılar: ${money(distributableProfit - companyProfit)}).\nŞirket kârının tamamı Aslı'ya dağıtıldı.\nAslı payı: ${money(asliShare)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
+      setMessage(`Dönem kapatıldı; şirket kârının tamamı (${money(asliShare)}) Aslı'ya dağıtıldı.`);
+    } else {
+      window.alert(`Dönem kapatıldı.\nToplam tanınan kâr: ${money(distributableProfit)} (şirket: ${money(companyProfit)}, satıcılar: ${money(distributableProfit - companyProfit)}).\nŞirket kârı Aslı ve Mihrimah arasında %50/%50 dağıtıldı.\nAslı payı: ${money(half)}\nMihrimah payı: ${money(half)}${devirBakiyesi !== 0 ? `\n\nKasada dağıtılmayan ${money(devirBakiyesi)} bir sonraki döneme devir bakiyesi olarak taşınacak.` : ""}`);
+      setMessage(`Dönem kapatıldı; şirket kârı (${money(companyProfit)}) Aslı ve Mihrimah arasında %50/%50 dağıtıldı.`);
+    }
     loadAll();
    } catch (err: unknown) {
      const msg = err instanceof Error ? err.message : String(err);
@@ -3552,6 +3650,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               buy_price: item.buy_price,
               sale_price: item.sale_price,
               depo: newDepo,
+              variant: item.variant || "ana",
+              workspace: item.workspace || activeWorkspace,
             });
             loadAll();
           }
@@ -3627,9 +3727,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           </div>
         );
       })()}
-      <aside className="fixed left-0 top-0 hidden h-full w-72 border-r bg-white p-5 lg:block">
+      <aside
+        className="fixed left-0 top-0 hidden h-full w-72 bg-white p-5 lg:block"
+        style={{
+          borderRight: activeWorkspace === "guney" ? "3px solid #f97316" : "1px solid #e2e8f0",
+          transition: "border-color 0.2s",
+        }}
+      >
         <div className="mb-8">
-          <h1 className="text-lg font-bold">Ticari Takip</h1>
+          <h1
+            className="text-lg font-bold"
+            style={{
+              color: activeWorkspace === "guney" ? "#ea580c" : undefined,
+              cursor: allowedWorkspaces.length > 1 ? "pointer" : "default",
+              userSelect: "none",
+            }}
+            onClick={toggleWorkspace}
+            title={allowedWorkspaces.length > 1 ? "Workspace değiştirmek için tıkla" : undefined}
+          >
+            Ticari Takip{activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700, color:"#ea580c", background:"#fff7ed", border:"1px solid #fdba74", borderRadius:5, padding:"2px 6px", verticalAlign:"middle"}}>GÜNEY</span>}
+          </h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
             <div className="mt-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
@@ -3639,7 +3756,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         </div>
         <nav className="space-y-2">
           {menu.map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setActive(key)} className={`w-full rounded-xl px-4 py-3 text-left ${active === key ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}>
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActive(key)}
+              className={`w-full rounded-xl px-4 py-3 text-left ${active === key ? (activeWorkspace === "guney" ? "text-white" : "bg-slate-900 text-white") : "hover:bg-slate-100"}`}
+              style={active === key && activeWorkspace === "guney" ? {background:"#ea580c"} : undefined}
+            >
               {label}
             </button>
           ))}
@@ -3689,12 +3812,28 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         <div className="mb-6 grid grid-cols-2 gap-2 lg:hidden">
           {currentUserEmail && (
-            <div className="col-span-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 text-center">
+            <div
+              className="col-span-2 rounded-xl px-3 py-2 text-sm font-semibold text-center"
+              style={{
+                background: activeWorkspace === "guney" ? "#fff7ed" : "#f1f5f9",
+                color: activeWorkspace === "guney" ? "#ea580c" : "#334155",
+                border: activeWorkspace === "guney" ? "1px solid #fdba74" : "1px solid transparent",
+                cursor: allowedWorkspaces.length > 1 ? "pointer" : "default",
+              }}
+              onClick={toggleWorkspace}
+            >
               👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
+              {activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700}}>· GÜNEY</span>}
             </div>
           )}
           {menu.map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setActive(key)} className={`rounded-xl px-3 py-2 ${active === key ? "bg-slate-900 text-white" : "bg-white"}`}>
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActive(key)}
+              className={`rounded-xl px-3 py-2 ${active === key ? "text-white" : "bg-white"}`}
+              style={active === key ? {background: activeWorkspace === "guney" ? "#ea580c" : "#0f172a"} : undefined}
+            >
               {label}
             </button>
           ))}
@@ -3788,7 +3927,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "audit" && (
-          <AuditSection supabase={supabase} />
+          <AuditSection supabase={supabase} activeWorkspace={activeWorkspace} />
         )}
 
         {active === "products" && (
@@ -4448,7 +4587,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         .filter((i) => i.batch_id === batch.id)
                         .reduce((min: string | null, i) => (!min || new Date(i.created_at) < new Date(min) ? i.created_at : min), null as string | null);
                       const saveCost = async () => {
-                        const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "" };
+                        const data = { batch_id: batch.id, veli: Number(row.veli)||0, asli: Number(row.asli)||0, mihrimah: Number(row.mihrimah)||0, kasa: Number(row.kasa)||0, kargo: Number(row.kargo)||0, diger: Number(row.diger)||0, aciklama: row.aciklama || "", workspace: activeWorkspace };
                         let saveError = null;
                         if (existing) {
                           const { error } = await supabase.from("batch_costs").update(data).eq("id", existing.id);
@@ -4793,7 +4932,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setShowPartiDetayModal(false)}>Kapat</button>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {sortedBatches.map((batch) => (
+                    {sortedBatches.map((batch) => {
+                      const photoCount = batchPhotos.filter((p) => p.batch_id === batch.id).length;
+                      return (
                       <div key={batch.id} className="flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
                         <span>{batch.name}</span>
                         <select
@@ -4810,13 +4951,118 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           const next = prompt("Yeni parti adı", batch.name);
                           if (next) renameBatchName(batch.id, next);
                         }}>Değiştir</button>
+                        <button type="button" className="underline" style={{color: photoCount > 0 ? "#2563eb" : "#64748b"}} onClick={() => setPhotoManagerBatchId(batch.id)}>
+                          📷{photoCount > 0 ? ` (${photoCount})` : ""}
+                        </button>
                       </div>
-                    ))}
+                      );
+                    })}
                     {sortedBatches.length === 0 && <span className="text-sm text-slate-500">Henüz parti yok.</span>}
                   </div>
                 </div>
               </div>
             )}
+
+            {photoManagerBatchId && (() => {
+              const batch = batches.find((b) => b.id === photoManagerBatchId);
+              const photos = batchPhotos.filter((p) => p.batch_id === photoManagerBatchId);
+              return (
+                <div
+                  style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+                  onClick={() => setPhotoManagerBatchId(null)}
+                >
+                  <div
+                    style={{ background: "white", borderRadius: 16, padding: 20, width: "100%", maxWidth: 520, maxHeight: "80vh", overflowY: "auto" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                      <h2 style={{ fontSize: "1.05rem", fontWeight: 700 }}>{batch?.name || "Parti"} — Fotoğraflar</h2>
+                      <button type="button" className="btn-secondary" style={{ padding: "4px 12px" }} onClick={() => setPhotoManagerBatchId(null)}>Kapat</button>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                      {photos.map((photo, idx) => (
+                        <div key={photo.id} style={{ position: "relative", aspectRatio: "1/1", borderRadius: 8, overflow: "hidden", background: "#f1f5f9", cursor: "pointer" }}>
+                          <img
+                            src={photo.image_url}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            onClick={() => setLightboxPhotoIndex(idx)}
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); deleteBatchPhoto(photo); }}
+                            style={{ position: "absolute", top: 4, right: 4, background: "rgba(220,38,38,0.9)", color: "#fff", border: "none", borderRadius: "50%", width: 22, height: 22, fontSize: "0.7rem", lineHeight: 1, cursor: "pointer" }}
+                          >✕</button>
+                        </div>
+                      ))}
+                      <label
+                        className="flex items-center justify-center"
+                        style={{ aspectRatio: "1/1", borderRadius: 8, border: "2px dashed #cbd5e1", cursor: "pointer", color: "#64748b", fontSize: "0.8rem", textAlign: "center" }}
+                      >
+                        {uploadingBatchPhoto ? "Yükleniyor..." : "+ Fotoğraf Ekle"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          disabled={uploadingBatchPhoto}
+                          onChange={(e) => {
+                            const files = Array.from(e.target.files || []);
+                            files.forEach((file) => {
+                              const reader = new FileReader();
+                              reader.onload = () => addBatchPhoto(photoManagerBatchId!, String(reader.result || ""));
+                              reader.readAsDataURL(file);
+                            });
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                    {photos.length === 0 && <p className="text-sm text-slate-500 mt-2">Henüz fotoğraf eklenmedi.</p>}
+                  </div>
+
+                  {lightboxPhotoIndex !== null && photos[lightboxPhotoIndex] && (
+                    <div
+                      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+                      onClick={() => setLightboxPhotoIndex(null)}
+                    >
+                      <img
+                        src={photos[lightboxPhotoIndex].image_url}
+                        alt=""
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ maxWidth: "90vw", maxHeight: "80vh", borderRadius: 10, objectFit: "contain" }}
+                      />
+                      {photos.length > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setLightboxPhotoIndex((lightboxPhotoIndex! - 1 + photos.length) % photos.length); }}
+                            style={{ position: "fixed", left: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 44, height: 44, color: "white", fontSize: 20, cursor: "pointer" }}
+                          >‹</button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setLightboxPhotoIndex((lightboxPhotoIndex! + 1) % photos.length); }}
+                            style={{ position: "fixed", right: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 44, height: 44, color: "white", fontSize: 20, cursor: "pointer" }}
+                          >›</button>
+                        </>
+                      )}
+                      <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", color: "white", fontSize: "0.85rem", opacity: 0.8 }}>
+                        {lightboxPhotoIndex + 1} / {photos.length}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); deleteBatchPhoto(photos[lightboxPhotoIndex]); }}
+                        style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "rgba(220,38,38,0.9)", color: "white", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: "0.85rem", cursor: "pointer" }}
+                      >Bu fotoğrafı sil</button>
+                      <button
+                        onClick={() => setLightboxPhotoIndex(null)}
+                        style={{ position: "fixed", top: 16, right: 16, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 36, height: 36, color: "white", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >✕</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -5003,7 +5249,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     >
                       <option value="">Seç...</option>
                       <option value="Aslı">Aslı (ortak)</option>
-                      <option value="Mihrimah">Mihrimah (ortak)</option>
+                      {activeWorkspace !== "guney" && <option value="Mihrimah">Mihrimah (ortak)</option>}
                       {sellerAccounts.map((s) => (
                         <option key={s.id} value={s.name}>{s.name} (satıcı)</option>
                       ))}
@@ -5433,7 +5679,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <option value="">Seç...</option>
                       <option value="Veli">Veli</option>
                       <option value="Aslı">Aslı</option>
-                      <option value="Mihrimah">Mihrimah</option>
+                      {activeWorkspace !== "guney" && <option value="Mihrimah">Mihrimah</option>}
                     </select>
                   </div>
                   <div className="field-label" style={{justifyContent:"flex-end"}}>
@@ -6369,7 +6615,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {!isSellerRole && (
                   <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value, sellerProfit: "" })}>
                     <option value="Aslı">Aslı</option>
-                    <option value="Mihrimah">Mihrimah</option>
+                    {activeWorkspace !== "guney" && <option value="Mihrimah">Mihrimah</option>}
                     {sellerAccounts.filter((s) => s.active).map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
@@ -6439,7 +6685,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     customerMap.get(sale.customer_id)?.name || "-",
                     saleProductName(sale),
                     batchMap.get(sale.batch_id)?.name || "-",
-                    ...(!isSellerRole ? [isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option><option>Mihrimah</option></select> : (sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : sale.seller)] : []),
+                    ...(!isSellerRole ? [isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Aslı</option>{activeWorkspace !== "guney" && <option>Mihrimah</option>}</select> : (sale.seller_account_id ? (sellerAccountMap.get(sale.seller_account_id)?.name || "Satıcı") : sale.seller)] : []),
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
@@ -6498,8 +6744,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 )}
                 <div className="rounded-xl bg-slate-100 p-4">Kasadaki para (bilgi amaçlı)<br /><b>{money(toplamKasaHavuzu)}</b></div>
                 <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-4">Kar tablosu dip toplamı (dağıtılacak)<br /><b>{money(donemKapanisKari)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(anlıkKar / 2)}</b></div>
-                <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
+                <div className="rounded-xl bg-slate-100 p-4">Aslı payı<br /><b>{money(activeWorkspace === "guney" ? anlıkKar : anlıkKar / 2)}</b></div>
+                {activeWorkspace !== "guney" && (
+                  <div className="rounded-xl bg-slate-100 p-4">Mihrimah payı<br /><b>{money(anlıkKar / 2)}</b></div>
+                )}
                 <div className="rounded-xl bg-slate-100 p-4">Müşteri cari<br /><b>{money(totals.customerDebt)}</b></div>
                 {sellerAccounts.map((s) => {
                   const tutar = sellerRealizedProfitSinceClose.get(s.id) || 0;
@@ -6509,6 +6757,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })}
               </div>
+              {activeWorkspace === "guney" && (
+                <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  Güney'de şirket kârının tamamı Aslı'ya dağıtılır. Neşe'nin payı zaten kendi satışlarındaki kâr payı olarak maliyete yazılmış durumda.
+                </p>
+              )}
               <button type="button" className="btn" disabled={isLoading("closePeriod")} onClick={() => withLoading("closePeriod", closePeriod)}>{isLoading("closePeriod") ? "Kapatılıyor..." : "Dönemi Kapat ve Mahsuplaştır"}</button>
             </Card>
 
@@ -6521,7 +6774,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Dönem Karı</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Toplam Tahsilat</th>
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Aslı Net Ödeme</th>
-                          <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihri Net Ödeme</th>
+                          {activeWorkspace !== "guney" && <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Mihri Net Ödeme</th>}
                           <th style={{padding:"10px 12px", textAlign:"right", fontWeight:600, color:"#64748b"}}>Satıcılar</th>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Durum</th>
                           <th style={{padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#64748b"}}>Kapanış</th>
@@ -6557,7 +6810,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               </td>
                             ))}
                             <td style={{padding:"10px 12px", textAlign:"right", fontWeight:500}}>{money(Number(p.closing_cash || 0))}</td>
-                            {(["asli_net_odeme", "mihri_net_odeme"] as const).map((field) => (
+                            {(activeWorkspace === "guney" ? ["asli_net_odeme"] as const : ["asli_net_odeme", "mihri_net_odeme"] as const).map((field) => (
                               <td key={field} style={{padding:"10px 12px", textAlign:"right"}}>
                                 {editingNetOdemeId === `${p.id}-${field}` ? (
                                   <div style={{display:"flex", gap:4, justifyContent:"flex-end", alignItems:"center"}}>
