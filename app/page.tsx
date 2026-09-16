@@ -4260,7 +4260,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div style={{fontSize:"0.75rem", fontWeight:700, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, paddingBottom:6, borderBottom:"1.5px solid var(--color-border-tertiary)"}}>
                       {g.label} — {groupProducts.length} ürün
                     </div>
-                    <div style={{display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8}}>
+                    <div style={{display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:8}}>
                       {groupProducts.map(({ product: p, anaStock, cepStock, anaPrice, hasCep, cepPrice }) => (
                         <div key={p.id} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
                           <div style={{position:"relative", width:"100%", aspectRatio:"1/1", borderRadius:10, overflow:"hidden", background:"#f8fafc", border:"1px solid #e2e8f0", cursor:"pointer"}}

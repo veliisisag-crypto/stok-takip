@@ -122,7 +122,7 @@ export default function GaleriPage() {
             </div>
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
+              gridTemplateColumns: "repeat(2, 1fr)",
               gap: 4,
             }}>
               {group.map(({ product: p, ana, cep, fallbackPrice }) => {
