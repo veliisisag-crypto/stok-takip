@@ -785,6 +785,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string; variant: "ana" | "cep_boy" }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1", variant: "ana" }] });
   const [editingPreorderId, setEditingPreorderId] = useState<string | null>(null);
   const [convertModal, setConvertModal] = useState<{ preorder: Preorder; item: PreorderItem } | null>(null);
+  const [convertVariant, setConvertVariant] = useState<"ana" | "cep_boy">("ana");
   const [advancePaymentModal, setAdvancePaymentModal] = useState<Preorder | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState("");
   const [advanceMethod, setAdvanceMethod] = useState("banka");
@@ -1374,7 +1375,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const linkedPayment = paymentMap.get(alloc.payment_id);
         const fromPreviousPeriod = !!linkedPayment && new Date(linkedPayment.created_at) <= sinceDate;
         return {
-          tarih: alloc.created_at,
+          tarih: sale.created_at, // Tahsisin (payment_allocations) değil, satışın KENDİ tarihi - kâr o gün gerçekleşti sayılır
           cari: customerMap.get(sale.customer_id)?.name || "-",
           urun: saleProductName(sale),
           adet: sale.qty,
@@ -2957,6 +2958,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setConvertPaid("false");
     setConvertSellerProfit("");
     setConvertParaSahibi("");
+    setConvertVariant(item.variant || "ana");
     setConvertModal({ preorder: po, item });
   };
 
@@ -3011,9 +3013,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const product = productMap.get(item.product_id);
     if (!product) return;
     const seller: Seller | null = isSellerRole ? null : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
-    // Ön sipariş kalemine kaydedilmiş varyant tercihine (Asıl/Cep Boy) göre KESİN filtrele -
-    // artık tahmin etmiyoruz, müşteri hangisini istediyse ondan düşülür.
-    const wantedVariant: "ana" | "cep_boy" = item.variant || "ana";
+    // Dönüştürme anında seçilen/onaylanan varyanta (Asıl/Cep Boy) göre KESİN filtrele -
+    // ön sipariş kaydedilirken seçilen değer varsayılan olarak gelir ama burada değiştirilebilir,
+    // tahmin etmiyoruz, ne seçiliyse ondan düşülür.
+    const wantedVariant: "ana" | "cep_boy" = convertVariant;
     const depoBatchItems = batchItemsForProduct(product.id)
       .filter((bi) => (bi.variant || "ana") === wantedVariant)
       .filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
@@ -4828,23 +4831,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0, whiteSpace: "nowrap" }}>
                       <thead>
                         <tr>
-                          {showPartiCol && <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>{brTh("batch", "Parti")}</th>}
-                          <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, left: 0, zIndex: 11 }}>{brTh("product", "Ürün Adı")}</th>
-                          <th colSpan={5} className="bg-blue-50 p-2 text-center font-semibold text-blue-900" style={{ position: "sticky", top: 0, zIndex: 10 }}>Asıl Ürün</th>
-                          <th colSpan={5} className="bg-slate-100 p-2 text-center font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>Cep Boy</th>
-                          <th rowSpan={2} className="bg-slate-100 p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10 }}>İşlem</th>
+                          {showPartiCol && <th className="p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("batch", "Parti")}</th>}
+                          <th className="p-3 text-left font-semibold" style={{ position: "sticky", top: 0, left: 0, zIndex: 11, backgroundColor: "#f1f5f9" }}>{brTh("product", "Ürün Adı")}</th>
+                          <th colSpan={5} className="p-2 text-center font-semibold" style={{ position: "sticky", top: 0, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>Asıl Ürün</th>
+                          <th colSpan={5} className="p-2 text-center font-semibold" style={{ position: "sticky", top: 0, zIndex: 10, backgroundColor: "#f1f5f9" }}>Cep Boy</th>
+                          <th className="p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10, backgroundColor: "#f1f5f9" }}>İşlem</th>
                         </tr>
                         <tr>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_bought", "Alınan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_sold", "Satılan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_kalan", "Kalan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_buy", "Alış")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("asil_sale", "Satış")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_bought", "Alınan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_sold", "Satılan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_kalan", "Kalan")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_buy", "Alış")}</th>
-                          <th className="bg-slate-100 p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10 }}>{brTh("cep_sale", "Satış")}</th>
+                          {showPartiCol && <th style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}></th>}
+                          <th style={{ position: "sticky", top: 33, left: 0, zIndex: 11, backgroundColor: "#f1f5f9" }}></th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>{brTh("asil_bought", "Alınan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>{brTh("asil_sold", "Satılan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>{brTh("asil_kalan", "Kalan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>{brTh("asil_buy", "Alış")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#dbeafe", color: "#1e3a8a" }}>{brTh("asil_sale", "Satış")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("cep_bought", "Alınan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("cep_sold", "Satılan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("cep_kalan", "Kalan")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("cep_buy", "Alış")}</th>
+                          <th className="p-2 text-right font-semibold" style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("cep_sale", "Satış")}</th>
+                          <th style={{ position: "sticky", top: 33, zIndex: 10, backgroundColor: "#f1f5f9" }}></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4856,7 +4862,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           return (
                             <tr key={rowKey} className="border-t">
                               {showPartiCol && <td className="p-3 whitespace-nowrap">{batchMap.get(g.batch_id)?.name || "-"}</td>}
-                              <td className="p-3 font-medium bg-white" style={{ position: "sticky", left: 0, zIndex: 1, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <td className="p-3 font-medium" style={{ position: "sticky", left: 0, zIndex: 1, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", backgroundColor: "#ffffff" }}>
                                 {p?.name || "-"}
                               </td>
                               <td className="p-2 text-right">{renderEditableCell(g.ana, "bought", editing)}</td>
@@ -4903,7 +4909,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         })}
                         <tr className="bg-slate-200 font-bold border-t">
                           {showPartiCol && <td className="p-3">Toplam</td>}
-                          <td className="p-3 bg-slate-200" style={{ position: "sticky", left: 0, zIndex: 1 }}>Toplam</td>
+                          <td className="p-3" style={{ position: "sticky", left: 0, zIndex: 1, backgroundColor: "#e2e8f0" }}>Toplam</td>
                           <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + (g.ana?.bought||0), 0)}</td>
                           <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + soldOf(g.ana), 0)}</td>
                           <td className="p-2 text-right">{sortedGroups.reduce((s, g) => s + kalanOf(g.ana), 0)}</td>
@@ -6527,11 +6533,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const price = Number(convertPrices[item.id] || 0);
           const saleTotalPreview = price * item.qty;
           const remainderPreview = Math.max(saleTotalPreview - advanceTotal, 0);
+          const hasCepStock = getProductVariantStock(item.product_id, "cep_boy") > 0;
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
               <div style={{background:"white",borderRadius:"16px",padding:"24px",width:"100%",maxWidth:"400px"}}>
                 <h2 className="text-lg font-bold mb-1">Satışa Dönüştür</h2>
-                <p className="text-sm text-slate-500 mb-4">{customer?.name} · {product?.name}{item.variant === "cep_boy" && <strong style={{color:"#dc2626"}}> (Cep Boy)</strong>} × {item.qty}</p>
+                <p className="text-sm text-slate-500 mb-2">{customer?.name} · {product?.name}{convertVariant === "cep_boy" && <strong style={{color:"#dc2626"}}> (Cep Boy)</strong>} × {item.qty}</p>
+                {hasCepStock && (
+                  <div className="mb-3">
+                    <label className="label">Hangi boy stoktan düşülsün?</label>
+                    <select className="input" value={convertVariant} onChange={(e) => setConvertVariant(e.target.value as "ana" | "cep_boy")}>
+                      <option value="ana">Asıl Ürün — Stok: {getProductVariantStock(item.product_id, "ana")}</option>
+                      <option value="cep_boy">Cep Boy — Stok: {getProductVariantStock(item.product_id, "cep_boy")}</option>
+                    </select>
+                  </div>
+                )}
                 {advanceTotal > 0 && (
                   <div className="text-sm rounded-lg p-3 mb-3" style={{background:"#fffbeb", color:"#92400e", border:"1px solid #fde68a"}}>
                     💰 Bu siparişe daha önce <b>{money(advanceTotal)}</b> ön ödeme alınmış.
