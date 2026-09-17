@@ -274,6 +274,7 @@ type PreorderItem = {
   preorder_id: string;
   product_id: string;
   qty: number;
+  variant?: "ana" | "cep_boy";
 };
 
 type Preorder = {
@@ -781,12 +782,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [preorders, setPreorders] = useState<Preorder[]>([]);
   const [preorderItems, setPreorderItems] = useState<PreorderItem[]>([]);
   const [paymentAllocations, setPaymentAllocations] = useState<{id:string; payment_id:string; sale_id:string; amount:number; created_at:string}[]>([]);
-  const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
+  const [preorderForm, setPreorderForm] = useState<{ customerId: string; note: string; items: { productId: string; qty: string; variant: "ana" | "cep_boy" }[] }>({ customerId: "", note: "", items: [{ productId: "", qty: "1", variant: "ana" }] });
   const [editingPreorderId, setEditingPreorderId] = useState<string | null>(null);
   const [convertModal, setConvertModal] = useState<{ preorder: Preorder; item: PreorderItem } | null>(null);
   const [advancePaymentModal, setAdvancePaymentModal] = useState<Preorder | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState("");
   const [advanceMethod, setAdvanceMethod] = useState("banka");
+  const [advanceParaSahibi, setAdvanceParaSahibi] = useState("");
   const [advanceNote, setAdvanceNote] = useState("");
   const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
   const [convertPaid, setConvertPaid] = useState<string>("false");
@@ -1410,10 +1412,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const po = preorderMap.get(p.preorder_id);
       return !!po && po.status === "bekliyor";
     };
-    const tahsilatEligiblePayments = recentPayments.filter((p) => !isPendingAdvance(p));
+    // Ön ödemeler de gerçek tahsilattır, toplamdan çıkarılmaz - sadece kâr tarafına
+    // (satış tablosundan geldiği için) hiç girmezler zaten, ayrıca bir işlem gerekmiyor.
     const recentRefunds = supplierReturns.filter((r) => r.resolution_type === "para" && r.resolved_at && new Date(r.resolved_at) > sinceDate);
     const refundIncome = isSellerRole ? 0 : recentRefunds.reduce((sum, r) => sum + Number(r.refund_amount || 0), 0);
-    const grossCash = tahsilatEligiblePayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
+    const grossCash = recentPayments.reduce((sum, item) => sum + item.amount, 0) + refundIncome;
     const pendingAdvanceTotal = scopedActivePayments
       .filter((p) => isPendingAdvance(p))
       .reduce((sum, p) => sum + Number(p.kasa_tutari ?? p.amount ?? 0), 0);
@@ -2907,25 +2910,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const validItems = preorderForm.items.filter((i) => i.productId && Number(i.qty) > 0);
     if (!validItems.length) return setMessage("En az bir ürün ekleyin.");
     const customer = customers.find((c) => c.id === preorderForm.customerId);
+    const itemLabel = (i: { productId: string; qty: string | number; variant?: "ana" | "cep_boy" }) =>
+      `${productMap.get(i.productId)?.name || i.productId}${i.variant === "cep_boy" ? " (Cep Boy)" : ""} (${Number(i.qty)} adet)`;
     if (editingPreorderId) {
       const oldItems = preorderItems.filter((i) => i.preorder_id === editingPreorderId);
-      const oldItemsDesc = oldItems.map((i) => `${productMap.get(i.product_id)?.name || i.product_id} (${i.qty} adet)`).join(", ") || "-";
-      const newItemsDesc = validItems.map((i) => `${productMap.get(i.productId)?.name || i.productId} (${Number(i.qty)} adet)`).join(", ") || "-";
+      const oldItemsDesc = oldItems.map((i) => `${productMap.get(i.product_id)?.name || i.product_id}${i.variant === "cep_boy" ? " (Cep Boy)" : ""} (${i.qty} adet)`).join(", ") || "-";
+      const newItemsDesc = validItems.map(itemLabel).join(", ") || "-";
       const { error } = await supabase.from("preorders").update({ customer_id: preorderForm.customerId, note: preorderForm.note }).eq("id", editingPreorderId);
       if (error) return showError(error);
       await supabase.from("preorder_items").delete().eq("preorder_id", editingPreorderId);
-      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty), workspace: activeWorkspace })));
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: editingPreorderId, product_id: i.productId, qty: Number(i.qty), variant: i.variant || "ana", workspace: activeWorkspace })));
       if (itemErr) return showError(itemErr);
       await logAction("Ön sipariş güncellendi", "preorders", customer?.name || "", diffOf({ urunler: oldItemsDesc }, { urunler: newItemsDesc }));
       setEditingPreorderId(null);
     } else {
       const { data: newPO, error } = await supabase.from("preorders").insert({ customer_id: preorderForm.customerId, note: preorderForm.note, created_by: currentUserEmail, status: "bekliyor", seller_account_id: currentSellerAccount?.id || null, workspace: activeWorkspace }).select().single();
       if (error || !newPO) return showError(error);
-      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty), workspace: activeWorkspace })));
+      const { error: itemErr } = await supabase.from("preorder_items").insert(validItems.map((i) => ({ preorder_id: newPO.id, product_id: i.productId, qty: Number(i.qty), variant: i.variant || "ana", workspace: activeWorkspace })));
       if (itemErr) return showError(itemErr);
-      await logAction("Ön sipariş oluşturuldu", "preorders", customer?.name || "", { items: validItems.length, oluşturan: currentUserEmail });
+      await logAction("Ön sipariş oluşturuldu", "preorders", customer?.name || "", { items: validItems.map(itemLabel).join(", "), oluşturan: currentUserEmail });
     }
-    setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
+    setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1", variant: "ana" }] });
     loadAll();
   };
 
@@ -2941,7 +2946,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const startEditPreorder = (po: Preorder) => {
     const items = preorderItems.filter((i) => i.preorder_id === po.id);
-    setPreorderForm({ customerId: po.customer_id, note: po.note || "", items: items.map((i) => ({ productId: i.product_id, qty: String(i.qty) })) });
+    setPreorderForm({ customerId: po.customer_id, note: po.note || "", items: items.map((i) => ({ productId: i.product_id, qty: String(i.qty), variant: i.variant || "ana" })) });
     setEditingPreorderId(po.id);
     setActive("preorders");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2959,6 +2964,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!advancePaymentModal) return;
     const amount = Number(advanceAmount);
     if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
+    if (!advanceParaSahibi) return setMessage("Para kimde? alanını seçmelisin.");
     const method = advanceMethod === "nakit" ? "nakit" : "banka";
 
     const now = Date.now();
@@ -2978,17 +2984,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       amount,
       payment_method: method,
       kasa_tutari: amount,
+      para_sahibi: advanceParaSahibi,
       preorder_id: advancePaymentModal.id,
       note: advanceNote || "Ön ödeme",
       user_email: currentUserEmail,
       workspace: activeWorkspace,
     });
     if (error) return showError(error);
-    await logAction("Ön ödeme alındı", "preorders", customerMap.get(advancePaymentModal.customer_id)?.name || "", { tutar: amount, yontem: method });
+    await logAction("Ön ödeme alındı", "preorders", customerMap.get(advancePaymentModal.customer_id)?.name || "", { tutar: amount, yontem: method, kimde: advanceParaSahibi });
     setMessage(`${money(amount)} ön ödeme kaydedildi.`);
     setAdvancePaymentModal(null);
     setAdvanceAmount("");
     setAdvanceNote("");
+    setAdvanceParaSahibi("");
     loadAll();
   };
 
@@ -3003,9 +3011,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const product = productMap.get(item.product_id);
     if (!product) return;
     const seller: Seller | null = isSellerRole ? null : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
-    const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
+    // Ön sipariş kalemine kaydedilmiş varyant tercihine (Asıl/Cep Boy) göre KESİN filtrele -
+    // artık tahmin etmiyoruz, müşteri hangisini istediyse ondan düşülür.
+    const wantedVariant: "ana" | "cep_boy" = item.variant || "ana";
+    const depoBatchItems = batchItemsForProduct(product.id)
+      .filter((bi) => (bi.variant || "ana") === wantedVariant)
+      .filter((bi) => Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
     const totalAvailable = depoBatchItems.reduce((s, bi) => s + Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0), 0);
-    if (totalAvailable < item.qty) return setMessage(`${product.name} için yeterli stok yok. Mevcut: ${totalAvailable}, gereken: ${item.qty}.`);
+    if (totalAvailable < item.qty) return setMessage(`${product.name}${wantedVariant === "cep_boy" ? " (Cep Boy)" : ""} için yeterli stok yok. Mevcut: ${totalAvailable}, gereken: ${item.qty}.`);
 
     // Bu ön siparişe daha önce ön ödeme alınmış mı kontrol et
     const advancePayments = payments.filter((p) => p.preorder_id === po.id && !p.cancelled);
@@ -3045,12 +3058,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         payment_method: paymentMethod,
         seller_account_id: currentSellerAccount?.id || null,
         seller_profit: isSellerRole ? rowSellerProfit : null,
+        variant: bi.variant || "ana",
         workspace: activeWorkspace,
       });
       remainingQty -= take;
     }
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
-    const { error } = await supabase.from("sales").insert(rows);
+    const { data: newSales, error } = await supabase.from("sales").insert(rows).select("id,total");
     if (error) return showError(error);
     // Bu item'ı sil
     await supabase.from("preorder_items").delete().eq("id", item.id);
@@ -3059,14 +3073,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remaining.length === 0) {
       await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
     }
-
-    const { data: newSales } = await supabase
-      .from("sales")
-      .select("id,total")
-      .eq("customer_id", po.customer_id)
-      .eq("cancelled", false)
-      .order("created_at", { ascending: false })
-      .limit(rows.length);
 
     // 1) Ön ödeme varsa: her ön ödeme için, o ödemeden SONRA kapanmış bir dönem var mı kontrol et
     if (advanceTotal > 0 && newSales && newSales.length > 0) {
@@ -3311,7 +3317,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             toTR(po.created_at, true),
             customer?.name || "-",
             shortUserName(po.created_by),
-            productMap.get(item.product_id)?.name || "-",
+            `${productMap.get(item.product_id)?.name || "-"}${item.variant === "cep_boy" ? " (Cep Boy)" : ""}`,
             item.qty,
             po.note || "",
             advanceTotal,
@@ -5976,22 +5982,33 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <SearchableSelect
                             placeholder="Ürün ara..."
                             value={item.productId}
-                            onChange={(v) => { const items = [...preorderForm.items]; items[idx].productId = v; setPreorderForm({ ...preorderForm, items }); }}
+                            onChange={(v) => { const items = [...preorderForm.items]; items[idx].productId = v; items[idx].variant = "ana"; setPreorderForm({ ...preorderForm, items }); }}
                             options={sortedActiveProducts.map((p) => ({ value: p.id, label: p.name }))}
                           />
                         </div>
+                        {item.productId && getProductVariantStock(item.productId, "cep_boy") > 0 && (
+                          <select
+                            className="input"
+                            style={{ flex: 1, minWidth: 110 }}
+                            value={item.variant}
+                            onChange={(e) => { const items = [...preorderForm.items]; items[idx].variant = e.target.value as "ana" | "cep_boy"; setPreorderForm({ ...preorderForm, items }); }}
+                          >
+                            <option value="ana">Asıl Ürün</option>
+                            <option value="cep_boy">Cep Boy</option>
+                          </select>
+                        )}
                         <input className="input" style={{flex:1, minWidth:60}} type="number" min="1" value={item.qty} onChange={(e) => { const items = [...preorderForm.items]; items[idx].qty = e.target.value; setPreorderForm({ ...preorderForm, items }); }} placeholder="Adet" />
                         {preorderForm.items.length > 1 && (
                           <button type="button" className="btn-danger" style={{padding:"6px 10px", flexShrink:0}} onClick={() => { const items = preorderForm.items.filter((_, i) => i !== idx); setPreorderForm({ ...preorderForm, items }); }}>✕</button>
                         )}
                       </div>
                     ))}
-                    <button type="button" className="btn-secondary text-sm" onClick={() => setPreorderForm({ ...preorderForm, items: [...preorderForm.items, { productId: "", qty: "1" }] })}>+ Ürün Ekle</button>
+                    <button type="button" className="btn-secondary text-sm" onClick={() => setPreorderForm({ ...preorderForm, items: [...preorderForm.items, { productId: "", qty: "1", variant: "ana" }] })}>+ Ürün Ekle</button>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <button type="button" className="btn" disabled={isLoading("savePreorder")} onClick={() => withLoading("savePreorder", savePreorder)}>{isLoading("savePreorder") ? "..." : editingPreorderId ? "Güncelle" : "Kaydet"}</button>
-                  {editingPreorderId && <button type="button" className="btn-secondary" onClick={() => { setEditingPreorderId(null); setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] }); }}>Vazgeç</button>}
+                  {editingPreorderId && <button type="button" className="btn-secondary" onClick={() => { setEditingPreorderId(null); setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1", variant: "ana" }] }); }}>Vazgeç</button>}
                 </div>
                 {message && <p className="text-sm text-red-600">{message}</p>}
               </div>
@@ -6025,14 +6042,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <ul className="mt-2 space-y-1">
                             {items.map((item) => (
                               <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
-                                <span>• {productMap.get(item.product_id)?.name || "—"} — {item.qty} adet</span>
+                                <span>• {productMap.get(item.product_id)?.name || "—"}{item.variant === "cep_boy" && <strong style={{color:"#dc2626"}}> (Cep Boy)</strong>} — {item.qty} adet</span>
                                 <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"2px 8px"}} onClick={() => openConvertModal(po, item)}>Satışa Dönüştür</button>
                               </li>
                             ))}
                           </ul>
                         </div>
                         <div className="flex gap-2 flex-wrap">
-                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => { setAdvancePaymentModal(po); setAdvanceAmount(""); setAdvanceMethod("banka"); setAdvanceNote(""); }}>Ön Ödeme Ekle</button>
+                          <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => { setAdvancePaymentModal(po); setAdvanceAmount(""); setAdvanceMethod("banka"); setAdvanceNote(""); setAdvanceParaSahibi(""); }}>Ön Ödeme Ekle</button>
                           <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => startEditPreorder(po)}>Düzenle</button>
                           <button type="button" className="btn-danger" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => deletePreorder(po.id)}>Sil</button>
                         </div>
@@ -6057,7 +6074,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <div className="text-xs text-slate-400 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)}</div>
                           <ul className="mt-1 space-y-0.5">
                             {items.map((item) => (
-                              <li key={item.id} className="text-xs text-slate-500">• {productMap.get(item.product_id)?.name || "—"} — {item.qty} adet</li>
+                              <li key={item.id} className="text-xs text-slate-500">• {productMap.get(item.product_id)?.name || "—"}{item.variant === "cep_boy" && " (Cep Boy)"} — {item.qty} adet</li>
                             ))}
                           </ul>
                         </div>
@@ -6486,6 +6503,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <label className="label">Not (opsiyonel)</label>
                   <input className="input" value={advanceNote} onChange={(e) => setAdvanceNote(e.target.value)} placeholder="Örn: Kapora" />
                 </div>
+                <div>
+                  <label className="label">Para kimde? *</label>
+                  <select className="input" value={advanceParaSahibi} onChange={(e) => setAdvanceParaSahibi(e.target.value)}>
+                    <option value="">Para kimde? *</option>
+                    {paraSahibiSecenekleri.map((kisi) => <option key={kisi} value={kisi}>{kisi}</option>)}
+                  </select>
+                </div>
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" className="btn" disabled={isLoading("advancePayment")} onClick={() => withLoading("advancePayment", addPreorderAdvancePayment)}>{isLoading("advancePayment") ? "..." : "Kaydet"}</button>
@@ -6507,7 +6531,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
               <div style={{background:"white",borderRadius:"16px",padding:"24px",width:"100%",maxWidth:"400px"}}>
                 <h2 className="text-lg font-bold mb-1">Satışa Dönüştür</h2>
-                <p className="text-sm text-slate-500 mb-4">{customer?.name} · {product?.name} × {item.qty}</p>
+                <p className="text-sm text-slate-500 mb-4">{customer?.name} · {product?.name}{item.variant === "cep_boy" && <strong style={{color:"#dc2626"}}> (Cep Boy)</strong>} × {item.qty}</p>
                 {advanceTotal > 0 && (
                   <div className="text-sm rounded-lg p-3 mb-3" style={{background:"#fffbeb", color:"#92400e", border:"1px solid #fde68a"}}>
                     💰 Bu siparişe daha önce <b>{money(advanceTotal)}</b> ön ödeme alınmış.
