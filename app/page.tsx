@@ -845,7 +845,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setPartiTab("rapor");
     setBatchReportFilter(batchId);
     if (typeof window !== "undefined") {
-      setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 150);
+      // Sayfanın en tepesine değil, doğrudan Stok Raporu kartının kendisine kaydır -
+      // mobilde sayfanın en üstü büyük menü listesi olduğu için oraya gitmek istemiyoruz.
+      setTimeout(() => {
+        const el = document.getElementById("stok-raporu-card");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
     }
   };
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -4505,7 +4510,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "partiIslemleri" && (
           <div className="space-y-4">
-            <div style={{ display: "flex", gap: 6, marginBottom: 8, position: "sticky", top: 0, background: "#f8fafc", zIndex: 10, paddingTop: 4, paddingBottom: 8 }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, paddingTop: 4, paddingBottom: 8 }}>
               {([["giris","Yeni Parti / Ürün Girişi"],["maliyet","Maliyet Kaydı"],["rapor","Stok Raporu"]] as const).map(([key,label]) => (
                 <button
                   key={key}
@@ -4799,6 +4804,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             )}
 
             {partiTab === "rapor" && (
+            <div id="stok-raporu-card">
             <Card title="Parti Bazlı Ürün / Stok Raporu">
               <div className="mb-5 flex flex-wrap items-center gap-2">
                 <select className="input" style={{flex: "1 1 100%", minWidth: 0}} value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
@@ -4814,7 +4820,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 const totalKalan = totalAlinan - totalSatilan;
                 const photoCount = batchReportFilter !== "Tümü" ? batchPhotos.filter((p) => p.batch_id === batchReportFilter).length : 0;
                 return (
-                  <div className="stok-toplam-badges rounded-xl bg-slate-100 flex divide-x divide-slate-300 flex-shrink-0">
+                  <div className="rounded-xl bg-slate-100 flex divide-x divide-slate-300 flex-shrink-0">
                     <div className="px-3 py-2 text-center">
                       <div className="text-xs text-slate-500 font-semibold mb-1">Toplam<br/>Alınan</div>
                       <div className="text-lg font-bold text-slate-900">{totalAlinan}</div>
@@ -5017,6 +5023,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             </Card>
+            </div>
             )}
 
             {photoManagerBatchId && (() => {
@@ -7064,14 +7071,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
           /* Parti Bazlı Ürün / Stok Raporu - kartın kendi padding'ini iptal edip kenardan kenara yay */
           .stok-raporu-scroll { margin-left: -20px; margin-right: -20px; border-radius: 0; border-left: none; border-right: none; }
-          .stok-raporu-table th, .stok-raporu-table td { padding: 3px 4px !important; font-size: 0.68rem; }
-          .stok-raporu-table th:first-child, .stok-raporu-table td:first-child,
-          .stok-raporu-table th:nth-child(2), .stok-raporu-table td:nth-child(2) { font-size: 0.72rem; }
-
-          /* Toplam Alınan/Satılan/Kalan/Parti Fotoğrafı rozetleri - taşma yerine 2x2 ızgaraya dönüşsün */
-          .stok-toplam-badges { flex-wrap: wrap; width: 100%; }
-          .stok-toplam-badges > div, .stok-toplam-badges > button { flex: 1 1 45%; min-width: 0; border-right: none !important; border-bottom: 1px solid #cbd5e1; }
-          .stok-toplam-badges > div:nth-child(2n), .stok-toplam-badges > button:nth-child(2n) { border-left: 1px solid #cbd5e1; }
+          /* Sadece VERİ satırlarını daralt - başlık satırının yüksekliğine dokunma, sticky konumlandırma buna göre ayarlı */
+          .stok-raporu-table tbody td { padding: 3px 4px !important; font-size: 0.68rem; }
+          .stok-raporu-table tbody td:first-child, .stok-raporu-table tbody td:nth-child(2) { font-size: 0.72rem; }
         }
 
         /* Action Buttons */
