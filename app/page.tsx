@@ -3596,7 +3596,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["dashboard", "Özet Tablo"],
     ["preorders", "Ön Siparişler"],
     ["products", "Ürünler"],
-    ["gallery", "Toplu Ürün Resimleri"],
     ["partiIslemleri", "Parti İşlemleri"],
     ["returns", "Toptancı İadeleri"],
     ["customers", "Müşteriler / Cari"],
@@ -3886,7 +3885,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Ürün satış, cari, stok ve dönem bazlı ortaklık takibi</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.01</p>
           </div>
         </div>
 
