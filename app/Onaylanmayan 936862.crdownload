@@ -809,35 +809,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
 
   // Uygulamanın herhangi bir yerinde bir ürün/cari adına tıklanınca, tekrar arama yapmaya
-  // gerek kalmadan doğrudan o ürünün/carinin detay sayfasını açar VE o karta kaydırır
-  // (sadece sekmeyi değiştirmek yetmiyor - liste uzun olduğunda kart ekranın çok altında kalabiliyor).
+  // gerek kalmadan doğrudan o ürünün/carinin detay sayfasını açar.
   const goToProduct = (productId: string) => {
     setSearch("");
     setActive("products");
     setExpandedProductId(productId);
-    if (typeof window !== "undefined") {
-      setTimeout(() => {
-        const el = document.getElementById(`urun-card-${productId}`);
-        if (el) {
-          const y = el.getBoundingClientRect().top + window.scrollY - 16;
-          window.scrollTo({ top: y, behavior: "smooth" });
-        }
-      }, 150);
-    }
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const goToCustomer = (customerId: string) => {
     setCustomerSearch("");
     setActive("customers");
     setExpandedCustomerId(customerId);
-    if (typeof window !== "undefined") {
-      setTimeout(() => {
-        const el = document.getElementById(`cari-card-${customerId}`);
-        if (el) {
-          const y = el.getBoundingClientRect().top + window.scrollY - 16;
-          window.scrollTo({ top: y, behavior: "smooth" });
-        }
-      }, 150);
-    }
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
@@ -1679,42 +1662,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const used = batchItems.some((item) => item.batch_id === batchId) || activeSales.some((sale) => sale.batch_id === batchId);
     if (used) return setMessage("Bu parti kullanıldığı için silinemez.");
     const batchName = batches.find((b) => b.id === batchId)?.name || batchId;
-
-    // 1. onay
-    if (!window.confirm(`"${batchName}" partisini silmek istediğine emin misin?\n\nBu işlem geri alınamaz (ama bir yedek kaydı tutulacak).`)) return;
-
-    // 2. onay - parti adını yazarak teyit
-    const typed = window.prompt(`Silmeyi onaylamak için parti adını tam olarak yaz:\n\n"${batchName}"`);
-    if (typed !== batchName) {
-      if (typed !== null) setMessage("Yazdığın ad eşleşmedi, parti silinmedi.");
-      return;
-    }
-
-    // Silmeden önce bu partiyle ilgili her şeyin bir yedeğini al (nolur nolmaz geri getirebilelim)
-    const batchRow = batches.find((b) => b.id === batchId);
-    const backupData = {
-      batch: batchRow,
-      batch_costs: batchCosts.filter((c) => c.batch_id === batchId),
-      batch_photos: batchPhotos.filter((p) => p.batch_id === batchId),
-      cancelled_sales: sales.filter((s) => s.batch_id === batchId && s.cancelled),
-      supplier_returns: supplierReturns.filter((r) => r.batch_id === batchId),
-    };
-    const { error: backupErr } = await supabase.from("deleted_batch_backups").insert({
-      batch_id: batchId,
-      batch_name: batchName,
-      backup_data: backupData,
-      deleted_by: currentUserEmail,
-      workspace: activeWorkspace,
-    });
-    if (backupErr) {
-      window.alert(`Yedek alınamadığı için parti silinmedi (güvenlik amacıyla):\n${backupErr.message || backupErr}`);
-      return;
-    }
-
     const { error } = await supabase.from("batches").delete().eq("id", batchId);
     if (error) return showError(error);
-    await logAction("Parti silindi", "batches", batchName, { yedek_alindi: true });
-    setMessage(`"${batchName}" partisi silindi. Yedeği alındı, gerekirse geri getirebiliriz.`);
+    await logAction("Parti silindi", "batches", batchName);
     loadAll();
   };
 
@@ -4107,7 +4057,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const isLowStock = stock === 0;
                   const latestPrice = getProductLatestPrice(p.id);
                   return (
-                    <div key={p.id} id={`urun-card-${p.id}`} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
+                    <div key={p.id} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
                       <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
                         <div className="product-row-left">
                           <div className={`product-name product-name--${p.gender_category === "Erkek" ? "erkek" : p.gender_category === "Kadın" ? "kadin" : "unisex"}`}>{p.name}</div>
@@ -4939,9 +4889,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             <tr key={rowKey} className="border-t">
                               {showPartiCol && <td className="p-3 whitespace-nowrap">{batchMap.get(g.batch_id)?.name || "-"}</td>}
                               <td className="p-3 font-medium" style={{ position: "sticky", left: 0, zIndex: 1, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", backgroundColor: "#ffffff" }}>
-                                <button type="button" onClick={() => goToProduct(g.product_id)} style={{background:"none", border:"none", padding:0, color:"#2563eb", fontWeight:600, cursor:"pointer", textDecoration:"underline", fontSize:"inherit", textAlign:"left"}}>
-                                  {p?.name || "-"}
-                                </button>
+                                {p?.name || "-"}
                               </td>
                               <td className="p-2 text-right">{renderEditableCell(g.ana, "bought", editing)}</td>
                               <td className="p-2 text-right text-slate-600">{soldOf(g.ana)}</td>
@@ -6388,40 +6336,38 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         })()}
 
         {showStokDetay && (() => {
-          // Ürün bazında tek satır - Asıl Ürün ve Cep Boy ayrı kolon gruplarında toplanır (parti ayrımı olmadan).
-          type StokRow = { productId: string; urun: string; tur: string; asilKalan: number; asilDeger: number; cepKalan: number; cepDeger: number };
-          const byProduct = new Map<string, StokRow>();
+          // Her ürün-parti kombinasyonu için stok hesapla
+          const rows: {urun: string; parti: string; tur: string; toplam: number; alisF: number}[] = [];
           for (const bi of batchItems) {
             const product = productMap.get(bi.product_id);
+            const batch = batchMap.get(bi.batch_id);
             if (!product || product.passive) continue;
             const sold = getBatchSoldQtyForItem(bi);
             const kalan = Math.max(bi.bought - sold, 0);
             if (kalan <= 0) continue;
-            let row = byProduct.get(product.id);
-            if (!row) {
-              row = { productId: product.id, urun: product.name, tur: product.gender_category || "-", asilKalan: 0, asilDeger: 0, cepKalan: 0, cepDeger: 0 };
-              byProduct.set(product.id, row);
-            }
-            if (bi.variant === "cep_boy") {
-              row.cepKalan += kalan;
-              row.cepDeger += kalan * bi.buy_price;
+            const existing = rows.find((r) => r.urun === product.name && r.parti === (batch?.name || "") && r.alisF === bi.buy_price);
+            if (existing) {
+              existing.toplam += kalan;
             } else {
-              row.asilKalan += kalan;
-              row.asilDeger += kalan * bi.buy_price;
+              rows.push({ urun: product.name, parti: batch?.name || "-", tur: product.gender_category || "-", toplam: kalan, alisF: bi.buy_price });
             }
           }
-          const rows = Array.from(byProduct.values());
           const sorted = [...rows].sort((a, b) => {
             const dir = stokSort.dir === "asc" ? 1 : -1;
             if (stokSort.col === "urun") return a.urun.localeCompare(b.urun, "tr") * dir;
+            if (stokSort.col === "parti") return a.parti.localeCompare(b.parti, "tr", { numeric: true }) * dir;
             if (stokSort.col === "tur") return a.tur.localeCompare(b.tur, "tr") * dir;
-            if (stokSort.col === "asil_kalan") return (a.asilKalan - b.asilKalan) * dir;
-            if (stokSort.col === "cep_kalan") return (a.cepKalan - b.cepKalan) * dir;
-            return ((a.asilKalan + a.cepKalan) - (b.asilKalan + b.cepKalan)) * dir;
+            if (stokSort.col === "toplam") return (a.toplam - b.toplam) * dir;
+            if (stokSort.col === "alis") return (a.alisF - b.alisF) * dir;
+            return 0;
           });
-          const toplamAsilKalan = sorted.reduce((s, r) => s + r.asilKalan, 0);
-          const toplamCepKalan = sorted.reduce((s, r) => s + r.cepKalan, 0);
-          const toplamDeger = sorted.reduce((s, r) => s + r.asilDeger + r.cepDeger, 0);
+          const stokTh = (col: string, label: string) => (
+            <th key={col} onClick={() => setStokSort((p) => ({col, dir: p.col === col && p.dir === "asc" ? "desc" : "asc"}))}
+              style={{padding:"8px 10px",textAlign:["asli","mihri","toplam","alis"].includes(col)?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",position:"sticky",top:0,background:"#f8fafc",zIndex:2}}>
+              {label}{stokSort.col === col ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}
+            </th>
+          );
+          const genelToplam = sorted.reduce((s, r) => s + r.toplam, 0);
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowStokDetay(false)}>
               <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:900,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
@@ -6434,33 +6380,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                     <thead>
-                      <tr>
-                        <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}} onClick={() => setStokSort((p) => ({col:"urun", dir: p.col === "urun" && p.dir === "asc" ? "desc" : "asc"}))}>Ürün Adı{stokSort.col === "urun" ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}</th>
-                        <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}} onClick={() => setStokSort((p) => ({col:"tur", dir: p.col === "tur" && p.dir === "asc" ? "desc" : "asc"}))}>Tür{stokSort.col === "tur" ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}</th>
-                        <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#1e3a8a",position:"sticky",top:0,backgroundColor:"#dbeafe",zIndex:2,height:37}} onClick={() => setStokSort((p) => ({col:"asil_kalan", dir: p.col === "asil_kalan" && p.dir === "asc" ? "desc" : "asc"}))}>Asıl Kalan{stokSort.col === "asil_kalan" ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}</th>
-                        <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#1e3a8a",position:"sticky",top:0,backgroundColor:"#dbeafe",zIndex:2,height:37}}>Asıl Değer</th>
-                        <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#334155",position:"sticky",top:0,backgroundColor:"#f1f5f9",zIndex:2,height:37}} onClick={() => setStokSort((p) => ({col:"cep_kalan", dir: p.col === "cep_kalan" && p.dir === "asc" ? "desc" : "asc"}))}>Cep Kalan{stokSort.col === "cep_kalan" ? (stokSort.dir === "asc" ? " ↑" : " ↓") : " ↕"}</th>
-                        <th style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:"#334155",position:"sticky",top:0,backgroundColor:"#f1f5f9",zIndex:2,height:37}}>Cep Değer</th>
+                      <tr style={{background:"#f8fafc",borderBottom:"1.5px solid #e2e8f0"}}>
+                        {stokTh("urun","Ürün Adı")}
+                        {stokTh("parti","Parti")}
+                        {stokTh("tur","Tür")}
+                        {stokTh("toplam","Stok")}
+                        {stokTh("alis","Alış Fiyatı")}
                       </tr>
-                      <tr>
-                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={2}>Toplamı ({sorted.length} ürün)</td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{toplamAsilKalan}</td>
-                        <td style={{padding:"7px 10px",position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}></td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{toplamCepKalan}</td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(toplamDeger)}</td>
+                      <tr style={{background:"#f0fdf4",borderBottom:"1.5px solid #bbf7d0"}}>
+                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}} colSpan={3}>Toplamı ({sorted.length} kalem)</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{genelToplam}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:33,background:"#f0fdf4",zIndex:2}}>{money(sorted.reduce((s, r) => s + r.alisF * r.toplam, 0))}</td>
                       </tr>
                     </thead>
                     <tbody>
-                      {sorted.map((r) => (
-                        <tr key={r.productId} style={{borderBottom:"1px solid #f1f5f9"}}>
-                          <td style={{padding:"7px 10px",fontWeight:500}}>
-                            <button type="button" onClick={() => { setShowStokDetay(false); goToProduct(r.productId); }} style={{background:"none", border:"none", padding:0, color:"#2563eb", fontWeight:600, cursor:"pointer", textDecoration:"underline", fontSize:"inherit"}}>{r.urun}</button>
-                          </td>
+                      {sorted.map((r, i) => (
+                        <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                          <td style={{padding:"7px 10px",fontWeight:500}}>{r.urun}</td>
+                          <td style={{padding:"7px 10px",color:"#64748b"}}>{r.parti}</td>
                           <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.asilKalan > 0 ? r.asilKalan : "-"}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",color:"#64748b"}}>{r.asilKalan > 0 ? money(r.asilDeger) : "-"}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.cepKalan > 0 ? r.cepKalan : "-"}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",color:"#64748b"}}>{r.cepKalan > 0 ? money(r.cepDeger) : "-"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.toplam}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>{money(r.alisF)}</td>
                         </tr>
                       ))}
                     </tbody>
