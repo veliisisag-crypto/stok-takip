@@ -863,7 +863,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
   const [showMusteriDetay, setShowMusteriDetay] = useState(false);
   const [showStokDetay, setShowStokDetay] = useState(false);
+  const [stokDetayMode, setStokDetayMode] = useState<"ozet" | "detay">("ozet");
   const [stokSort, setStokSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "urun", dir: "asc"});
+  const [stokDetaySort, setStokDetaySort] = useState<{col: string; dir: "asc"|"desc"}>({col: "tarih", dir: "asc"});
   const [saleLoading, setSaleLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
@@ -3885,7 +3887,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.01</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.02</p>
           </div>
         </div>
 
@@ -6440,15 +6442,95 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const toplamCepKalan = sorted.reduce((s, r) => s + r.cepKalan, 0);
           const toplamAsilDeger = sorted.reduce((s, r) => s + r.asilDeger, 0);
           const toplamCepDeger = sorted.reduce((s, r) => s + r.cepDeger, 0);
+
+          // Detaylı görünüm: parti bazında, tek satır - Cep Boy ayrı bir "ürün" gibi listelenir, en eski alış tarihi en üstte.
+          type DetayRow = { key: string; productId: string; urun: string; tur: string; parti: string; alisTarihi: string; kalan: number; alisFiyati: number };
+          const detayRows: DetayRow[] = [];
+          if (stokDetayMode === "detay") {
+            for (const bi of batchItems) {
+              const product = productMap.get(bi.product_id);
+              if (!product || product.passive) continue;
+              const sold = getBatchSoldQtyForItem(bi);
+              const kalan = Math.max(bi.bought - sold, 0);
+              if (kalan <= 0) continue;
+              detayRows.push({
+                key: bi.id,
+                productId: product.id,
+                urun: bi.variant === "cep_boy" ? `Cep-${product.name}` : product.name,
+                tur: product.gender_category || "-",
+                parti: batchMap.get(bi.batch_id)?.name || "-",
+                alisTarihi: bi.created_at,
+                kalan,
+                alisFiyati: bi.buy_price,
+              });
+            }
+          }
+          const detaySorted = [...detayRows].sort((a, b) => {
+            const dir = stokDetaySort.dir === "asc" ? 1 : -1;
+            if (stokDetaySort.col === "urun") return a.urun.localeCompare(b.urun, "tr") * dir;
+            if (stokDetaySort.col === "parti") return a.parti.localeCompare(b.parti, "tr", { numeric: true }) * dir;
+            if (stokDetaySort.col === "kalan") return (a.kalan - b.kalan) * dir;
+            if (stokDetaySort.col === "alis") return (a.alisFiyati - b.alisFiyati) * dir;
+            return (new Date(a.alisTarihi).getTime() - new Date(b.alisTarihi).getTime()) * dir;
+          });
+          const detayTh = (col: string, label: string) => (
+            <th key={col} onClick={() => setStokDetaySort((p) => ({col, dir: p.col === col && p.dir === "asc" ? "desc" : "asc"}))}
+              style={{padding:"8px 10px",textAlign:col==="kalan"||col==="alis"?"right":"left",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>
+              {label}{stokDetaySort.col === col ? (stokDetaySort.dir === "asc" ? " ↑" : " ↓") : " ↕"}
+            </th>
+          );
+
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowStokDetay(false)}>
               <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:900,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
                 <div style={{flexShrink:0,padding:"24px 24px 0"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
                     <h2 style={{fontSize:"1.1rem",fontWeight:700}}>Mevcut Stok Detayı</h2>
-                    <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setShowStokDetay(false)}>Kapat</button>
+                    <div style={{display:"flex",gap:8}}>
+                      {stokDetayMode === "ozet" ? (
+                        <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setStokDetayMode("detay")}>Detaylı Görünüm</button>
+                      ) : (
+                        <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setStokDetayMode("ozet")}>← Geri Dön</button>
+                      )}
+                      <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => { setShowStokDetay(false); setStokDetayMode("ozet"); }}>Kapat</button>
+                    </div>
                   </div>
                 </div>
+                {stokDetayMode === "detay" ? (
+                <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
+                    <thead>
+                      <tr>
+                        {detayTh("tarih","Alış Tarihi")}
+                        {detayTh("parti","Parti")}
+                        {detayTh("urun","Ürün Adı")}
+                        <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Tür</th>
+                        {detayTh("kalan","Kalan")}
+                        {detayTh("alis","Alış Fiyatı")}
+                      </tr>
+                      <tr>
+                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={4}>Toplamı ({detaySorted.length} kalem)</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{detaySorted.reduce((s, r) => s + r.kalan, 0)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(detaySorted.reduce((s, r) => s + r.kalan * r.alisFiyati, 0))}</td>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detaySorted.map((r) => (
+                        <tr key={r.key} style={{borderBottom:"1px solid #f1f5f9"}}>
+                          <td style={{padding:"7px 10px",color:"#64748b",whiteSpace:"nowrap"}}>{toTR(r.alisTarihi)}</td>
+                          <td style={{padding:"7px 10px",color:"#64748b",whiteSpace:"nowrap"}}>{r.parti}</td>
+                          <td style={{padding:"7px 10px",fontWeight:500}}>
+                            <button type="button" onClick={() => { setShowStokDetay(false); setStokDetayMode("ozet"); goToProduct(r.productId); }} style={{background:"none", border:"none", padding:0, color:"#2563eb", fontWeight:600, cursor:"pointer", textDecoration:"underline", fontSize:"inherit"}}>{r.urun}</button>
+                          </td>
+                          <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.kalan}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",color:"#64748b"}}>{money(r.alisFiyati)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                ) : (
                 <div style={{overflow:"auto",padding:"0 24px 24px",flex:1}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.8rem"}}>
                     <thead>
@@ -6484,6 +6566,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             </div>
           );
