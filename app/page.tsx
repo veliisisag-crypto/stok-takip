@@ -6421,7 +6421,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           });
           const toplamAsilKalan = sorted.reduce((s, r) => s + r.asilKalan, 0);
           const toplamCepKalan = sorted.reduce((s, r) => s + r.cepKalan, 0);
-          const toplamDeger = sorted.reduce((s, r) => s + r.asilDeger + r.cepDeger, 0);
+          const toplamAsilDeger = sorted.reduce((s, r) => s + r.asilDeger, 0);
+          const toplamCepDeger = sorted.reduce((s, r) => s + r.cepDeger, 0);
           return (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowStokDetay(false)}>
               <div style={{background:"white",borderRadius:16,width:"100%",maxWidth:900,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={(e) => e.stopPropagation()}>
@@ -6445,9 +6446,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <tr>
                         <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={2}>Toplamı ({sorted.length} ürün)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{toplamAsilKalan}</td>
-                        <td style={{padding:"7px 10px",position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}></td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(toplamAsilDeger)}</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{toplamCepKalan}</td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(toplamDeger)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(toplamCepDeger)}</td>
                       </tr>
                     </thead>
                     <tbody>
