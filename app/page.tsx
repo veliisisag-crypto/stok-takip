@@ -839,6 +839,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }, 150);
     }
   };
+  // Bir parti adına tıklanınca, Parti İşlemleri > Stok Raporu'nu o parti seçili şekilde açar.
+  const goToBatchReport = (batchId: string) => {
+    setActive("partiIslemleri");
+    setPartiTab("rapor");
+    setBatchReportFilter(batchId);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
@@ -4327,7 +4334,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                       <div key={item.id}>
                                         <div className="product-batch-row">
                                           <div className="product-batch-cell product-batch-cell--name">
-                                            {batchMap.get(item.batch_id)?.name || "-"}
+                                            <button type="button" onClick={() => goToBatchReport(item.batch_id)} style={{background:"none", border:"none", padding:0, color:"#2563eb", fontWeight:600, cursor:"pointer", textDecoration:"underline", fontSize:"inherit"}}>
+                                              {batchMap.get(item.batch_id)?.name || "-"}
+                                            </button>
                                             {item.variant === "cep_boy" && (
                                               <span style={{marginLeft: 6, fontSize: "0.6rem", fontWeight: 700, color: "#dc2626", border: "1px solid #fca5a5", background: "#fef2f2", borderRadius: 5, padding: "1px 6px"}}>
                                                 Cep
@@ -4789,8 +4798,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
             {partiTab === "rapor" && (
             <Card title="Parti Bazlı Ürün / Stok Raporu">
-              <div className="mb-5 flex items-center gap-2">
-                <select className="input flex-1" value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <select className="input" style={{flex: "1 1 100%", minWidth: 0}} value={batchReportFilter} onChange={(e) => setBatchReportFilter(e.target.value)}>
                   <option value="">Seçim yapın</option>
                   <option value="Tümü">Tüm Partiler</option>
                   {sortedBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
@@ -4903,8 +4912,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 const showPartiCol = batchReportFilter === "Tümü";
 
                 return (
-                  <div className="overflow-x-auto overflow-y-auto rounded-xl border" style={{ maxHeight: "65vh" }}>
-                    <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0, whiteSpace: "nowrap" }}>
+                  <div className="stok-raporu-scroll overflow-x-auto overflow-y-auto rounded-xl border" style={{ maxHeight: "65vh" }}>
+                    <table className="stok-raporu-table w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0, whiteSpace: "nowrap" }}>
                       <thead>
                         <tr>
                           {showPartiCol && <th className="p-3 text-left font-semibold" style={{ position: "sticky", top: 0, zIndex: 10, backgroundColor: "#f1f5f9" }}>{brTh("batch", "Parti")}</th>}
@@ -7050,6 +7059,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           .product-card { position: relative; }
           .product-sort-row { padding: 4px 6px 8px; }
           .product-list { padding: 12px 6px 4px; }
+
+          /* Parti Bazlı Ürün / Stok Raporu - kartın kendi padding'ini iptal edip kenardan kenara yay */
+          .stok-raporu-scroll { margin-left: -20px; margin-right: -20px; border-radius: 0; border-left: none; border-right: none; }
+          .stok-raporu-table th, .stok-raporu-table td { padding: 3px 4px !important; font-size: 0.68rem; }
+          .stok-raporu-table th:first-child, .stok-raporu-table td:first-child,
+          .stok-raporu-table th:nth-child(2), .stok-raporu-table td:nth-child(2) { font-size: 0.72rem; }
         }
 
         /* Action Buttons */
