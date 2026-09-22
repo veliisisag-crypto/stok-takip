@@ -1847,20 +1847,22 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
-    // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler - Size Kalan Borç'tan
-    // ayrı bir akış (o, satıcının SİZE aktardığı parayı takip eder; bu ise SİZİN ona ödediğinizi).
+    // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler (dönem kapanışı
+    // dışında, ayrı bir ödeme). Bu tutar, hem "Kâr Payı (Toplam)" hem "Gerçekleşen Kâr" kutularından
+    // düşülür ki kutular her zaman "hâlâ ödenmesi gereken net tutarı" göstersin.
     // Yeni kayıtlar seller_account_id ile bağlı; eski kayıtlar (bu alan eklenmeden önce girilenler)
     // isim eşleşmesiyle (recipient_name) bulunur.
     const sellerName = sellerAccountMap.get(sellerId)?.name || "";
     const totalOdenenKarPayi = odemeler
       .filter((o) => o.tip === "kar_payi" && new Date(o.created_at) > sinceDate && (o.seller_account_id === sellerId || (!o.seller_account_id && o.recipient_name === sellerName)))
       .reduce((sum, o) => sum + toNum(o.tutar), 0);
-    const kalanKarPayiBorcu = totalKarPayi - totalOdenenKarPayi;
+    const netTotalKarPayi = totalKarPayi - totalOdenenKarPayi;
+    const netGerceklesenKarPayi = gerceklesenKarPayi - totalOdenenKarPayi;
     // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı - (satıcının size zaten transfer ettiği tutar), ikisi de son kapanıştan bu yana.
     // Eksi çıkabilir: satıcı kendi kâr payı dahil HER ŞEYİ size verdiyse, eksi değer "siz ona borçlusunuz" anlamına gelir
     // (dönem kapanışında kâr payı öde mekanizmasıyla ona geri ödenir).
     const kalanBorc = totalTahsilat - gerceklesenKarPayi - totalTeslimEdilen;
-    return { totalSatis, totalKarPayi, gerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat, totalOdenenKarPayi, kalanKarPayiBorcu };
+    return { totalSatis, totalKarPayi: netTotalKarPayi, gerceklesenKarPayi: netGerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat };
   };
 
   // Satıcıdan ortağa/Veli'ye yapılan iç transfer - bir müşteri tahsilatı DEĞİL, bu yüzden
@@ -2913,12 +2915,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }
 
       const kaynakOzet = odemeKimden.map((k) => k === "__devir__" ? "Devir Bakiyesi" : isSahsiKaynak(k) ? `${sahsiCuzdanByKey.get(k)!.kisi} (Şahsi)` : k).join(" + ");
-      const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : odemeTip === "kar_payi" ? "Kâr payı ödendi" : "Diğer masraf ödendi";
+      const islemAdi = odemeTip === "toptanci" ? "Toptancıya ödeme yapıldı" : odemeTip === "kargo" ? "Kargo ödemesi yapıldı" : odemeTip === "kar_payi" ? "Kâr payı ödendi (dönem kapanışı harici, elden ödeme)" : "Diğer masraf ödendi";
       await logAction(
         islemAdi,
         "odemeler",
         odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : odemeTip === "kar_payi" ? odemeKarPayiAlici : batchName,
-        { tutar, kaynak: kaynakOzet }
+        odemeTip === "kar_payi"
+          ? { tutar, kaynak: kaynakOzet, odeme_sira_no: odemeSiraNo, satici: odemeKarPayiAlici, aciklama: "Bu ödeme dönem kapanışı dışında, elden yapılan bir kâr payı ödemesidir." }
+          : { tutar, kaynak: kaynakOzet }
       );
 
       setMessage("Ödeme kaydedildi.");
@@ -5590,22 +5594,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                             </button>
                           </div>
                         </div>
-                        <div className="grid gap-2 text-sm md:grid-cols-4 lg:grid-cols-4">
+                        <div className="grid gap-2 text-sm md:grid-cols-3 lg:grid-cols-6">
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Satış</div><b>{money(summary.totalSatis)}</b></div>
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Tahsilat</div><b>{money(summary.totalTahsilat)}</b></div>
                           <div className="rounded-lg bg-slate-50 p-2"><div className="text-xs text-slate-500">Cari Borcu</div><b>{money(summary.cariBorcu)}</b></div>
+                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı (Toplam)</div><b>{money(summary.totalKarPayi)}</b></div>
+                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Gerçekleşen Kâr</div><b>{money(summary.gerceklesenKarPayi)}</b></div>
                           <div className="rounded-lg p-2" style={{background: summary.kalanBorc < 0 ? "#eff6ff" : "#fffbeb"}}>
                             <div className="text-xs text-slate-500">Size Kalan Borç</div>
                             <b style={{color: summary.kalanBorc > 0 ? "#b45309" : summary.kalanBorc < 0 ? "#2563eb" : "#16a34a"}}>
                               {summary.kalanBorc < 0 ? `Siz ona borçlusunuz: ${money(Math.abs(summary.kalanBorc))}` : money(summary.kalanBorc)}
                             </b>
-                          </div>
-                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Kâr Payı (Toplam)</div><b>{money(summary.totalKarPayi)}</b></div>
-                          <div className="rounded-lg bg-emerald-50 p-2"><div className="text-xs text-slate-500">Gerçekleşen Kâr</div><b>{money(summary.gerceklesenKarPayi)}</b></div>
-                          <div className="rounded-lg bg-sky-50 p-2"><div className="text-xs text-slate-500">Ödenen Kâr Payı</div><b>{money(summary.totalOdenenKarPayi)}</b></div>
-                          <div className="rounded-lg p-2" style={{background: summary.kalanKarPayiBorcu > 0.01 ? "#fef2f2" : "#f0fdf4"}}>
-                            <div className="text-xs text-slate-500">Kalan Kâr Payı Borcu</div>
-                            <b style={{color: summary.kalanKarPayiBorcu > 0.01 ? "#dc2626" : "#16a34a"}}>{money(summary.kalanKarPayiBorcu)}</b>
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
