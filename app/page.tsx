@@ -1822,19 +1822,33 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const sellerCustomerIds = new Set(customers.filter((c) => c.seller_account_id === sellerId).map((c) => c.id));
     // "Satış" kutusu bilinçli olarak kümülatif (tüm zamanlar) kalıyor - dönem kapanışıyla sıfırlanmıyor.
     const totalSatis = sellerSales.reduce((sum, s) => sum + toNum(s.total), 0);
-    // Kâr payı (toplam) - SADECE son kapanıştan sonra yapılmış satışlardan
-    const totalKarPayi = sellerSales
-      .filter((s) => new Date(s.created_at) > sinceDate)
-      .reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
+    // Kâr Payı (Toplam) ve Gerçekleşen Kâr - satıcının kendi "kâr payı cari hesabı" gibi, TÜM ZAMANLAR
+    // üzerinden sürekli devam eden bir bakiye. Dönem kapanışıyla sıfırlanmaz: her yeni satış hak edilen
+    // kârı artırır, her "Kâr Payı Öde" ödemesi bakiyeyi düşürür - ne kadar ödenirse ödensin, kalan borç
+    // her zaman doğru görünür.
+    const totalKarPayi = sellerSales.reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
     // Satışın sadece FİİLEN TAHSİL EDİLMİŞ kısmı satıcının elinde olabilir - bu yüzden
     // "bize borç" ve "gerçekleşen kâr" tam satış tutarı üzerinden değil, her tahsilatın
     // (payment_allocations) o satışa düşen oranı üzerinden hesaplanır (anlıkKar/karDetay
-    // ile aynı yöntem). Ayrıca SADECE son kapanıştan sonraki tahsisler sayılır.
+    // ile aynı yöntem).
     const saleMap = new Map(sellerSales.map((s) => [s.id, s]));
-    const sellerAllocs = paymentAllocations.filter((a) => sellerSaleIds.has(a.sale_id) && new Date(a.created_at) > sinceDate);
+    // "Size Kalan Borç" (ayrı bir kavram - satıcının SİZE verdiği tahsilat karşılığı) hâlâ SADECE son
+    // kapanıştan bu yana hesaplanır, o yüzden bunun için AYRICA dönem-sınırlı bir hesap tutuyoruz.
+    const sellerAllocsPeriyot = paymentAllocations.filter((a) => sellerSaleIds.has(a.sale_id) && new Date(a.created_at) > sinceDate);
+    let gerceklesenKarPayiPeriyot = 0;
+    for (const alloc of sellerAllocsPeriyot) {
+      const sale = saleMap.get(alloc.sale_id);
+      if (!sale) continue;
+      const total = toNum(sale.total);
+      if (total <= 0) continue;
+      const profit = Number(sale.seller_profit || 0);
+      gerceklesenKarPayiPeriyot += profit * (alloc.amount / total);
+    }
+    // Gerçekleşen Kâr (gösterilen kutu) - TÜM ZAMANLAR üzerinden, kâr payı cari hesabı mantığıyla.
+    const sellerAllocsTumZaman = paymentAllocations.filter((a) => sellerSaleIds.has(a.sale_id));
     let totalBizeBorcOrantili = 0;
     let gerceklesenKarPayi = 0;
-    for (const alloc of sellerAllocs) {
+    for (const alloc of sellerAllocsTumZaman) {
       const sale = saleMap.get(alloc.sale_id);
       if (!sale) continue;
       const total = toNum(sale.total);
@@ -1848,20 +1862,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
     // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler (dönem kapanışı
-    // dışında, ayrı bir ödeme). Bu tutar, hem "Kâr Payı (Toplam)" hem "Gerçekleşen Kâr" kutularından
-    // düşülür ki kutular her zaman "hâlâ ödenmesi gereken net tutarı" göstersin.
-    // Yeni kayıtlar seller_account_id ile bağlı; eski kayıtlar (bu alan eklenmeden önce girilenler)
-    // isim eşleşmesiyle (recipient_name) bulunur.
+    // dışında, ayrı bir ödeme) - TÜM ZAMANLAR, kâr payı cari hesabı mantığına uygun olsun diye.
+    // Bu tutar, hem "Kâr Payı (Toplam)" hem "Gerçekleşen Kâr" kutularından düşülür ki kutular her zaman
+    // "hâlâ ödenmesi gereken net tutarı" göstersin. Yeni kayıtlar seller_account_id ile bağlı; eski
+    // kayıtlar (bu alan eklenmeden önce girilenler) isim eşleşmesiyle (recipient_name) bulunur.
     const sellerName = sellerAccountMap.get(sellerId)?.name || "";
     const totalOdenenKarPayi = odemeler
-      .filter((o) => o.tip === "kar_payi" && new Date(o.created_at) > sinceDate && (o.seller_account_id === sellerId || (!o.seller_account_id && o.recipient_name === sellerName)))
+      .filter((o) => o.tip === "kar_payi" && (o.seller_account_id === sellerId || (!o.seller_account_id && o.recipient_name === sellerName)))
       .reduce((sum, o) => sum + toNum(o.tutar), 0);
     const netTotalKarPayi = totalKarPayi - totalOdenenKarPayi;
     const netGerceklesenKarPayi = gerceklesenKarPayi - totalOdenenKarPayi;
-    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı - (satıcının size zaten transfer ettiği tutar), ikisi de son kapanıştan bu yana.
+    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı (bu dönem) - (satıcının size zaten transfer ettiği tutar), ikisi de son kapanıştan bu yana.
     // Eksi çıkabilir: satıcı kendi kâr payı dahil HER ŞEYİ size verdiyse, eksi değer "siz ona borçlusunuz" anlamına gelir
     // (dönem kapanışında kâr payı öde mekanizmasıyla ona geri ödenir).
-    const kalanBorc = totalTahsilat - gerceklesenKarPayi - totalTeslimEdilen;
+    const kalanBorc = totalTahsilat - gerceklesenKarPayiPeriyot - totalTeslimEdilen;
     return { totalSatis, totalKarPayi: netTotalKarPayi, gerceklesenKarPayi: netGerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat };
   };
 
