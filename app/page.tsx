@@ -3,7 +3,6 @@
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
-import PartiFotoWizard from "@/components/PartiFotoWizard";
 
 // Supabase/PostgREST varsayılan olarak tek istekte sınırlı sayıda satır döndürür.
 // Kayıt sayısı arttıkça (500+, 1000+ vb.) sabit bir .limit() eski kayıtları sessizce
@@ -905,8 +904,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [uploadingBatchPhoto, setUploadingBatchPhoto] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" as "ana" | "cep_boy" });
-  // Fotoğraftan toplu parti girişi sihirbazı (seçili partiye kalem ekler)
-  const [fotoWizardAcik, setFotoWizardAcik] = useState(false);
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as string, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
@@ -1401,6 +1398,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     () => Array.from(sellerRealizedProfitSinceClose.values()).reduce((s, v) => s + v, 0),
     [sellerRealizedProfitSinceClose]
   );
+
+  // Dönem kapanışı ekranında satıcı kutusu "ne kadar ödeyeceğim"i gösterir, o yüzden
+  // dönem içinde yapılmış kâr payı ödemeleri düşülür. Brüt harita
+  // (sellerRealizedProfitSinceClose) olduğu gibi kalır: dağıtılacak ŞİRKET kârı,
+  // satıcıya ödeme yapılıp yapılmadığından bağımsızdır - onu net yapmak kârı
+  // yanlış şekilde düşürürdü.
+  const sellerRemainingProfitShare = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of sellerAccounts) {
+      const brut = sellerRealizedProfitSinceClose.get(s.id) || 0;
+      const odenen = odemeler
+        .filter((o) => o.tip === "kar_payi"
+          && (o.seller_account_id === s.id || (!o.seller_account_id && o.recipient_name === s.name))
+          && !o.kapanis_period_id)
+        .reduce((t, o) => t + toNum(o.tutar), 0);
+      map.set(s.id, Math.round((brut - odenen) * 100) / 100);
+    }
+    return map;
+  }, [sellerAccounts, sellerRealizedProfitSinceClose, odemeler]);
 
   // Dönem kapanışında dağıtılacak toplam kâr = şirket kârı (anlıkKar) + satıcıların bu dönem gerçekleşen kâr payları
   const donemKapanisKari = useMemo(
@@ -3943,7 +3959,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.08</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.09</p>
           </div>
         </div>
 
@@ -4643,17 +4659,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Alış fiyatı (otomatik hesaplanır, isterseniz değiştirin)" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
-                {!isSellerRole && (
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={!batchForm.batchId}
-                    onClick={() => setFotoWizardAcik(true)}
-                    title={!batchForm.batchId ? "Önce parti seçin" : "Fotoğraftan toplu giriş"}
-                  >
-                    📷 Fotoğraftan Ekle
-                  </button>
-                )}
               </div>
               {batchForm.batchId && batchForm.productId && (() => {
                 const batch = batchMap.get(batchForm.batchId);
@@ -4669,19 +4674,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 return <p className="mt-2 text-sm text-emerald-600">✓ {supplier?.name}: ${usdPrice} × {batch.usd_kuru} kur = {money(Math.round(usdPrice * batch.usd_kuru * 100) / 100)} olarak hesaplandı.</p>;
               })()}
 
-              {fotoWizardAcik && batchForm.batchId && !isSellerRole && (
-                <div style={{ marginTop: 16 }}>
-                  <PartiFotoWizard
-                    batchId={batchForm.batchId}
-                    onTamamlandi={(n) => {
-                      setFotoWizardAcik(false);
-                      setMessage(`${n} kalem partiye eklendi.`);
-                      loadAll();
-                    }}
-                    onKapat={() => setFotoWizardAcik(false)}
-                  />
-                </div>
-              )}
 
               {!isSellerRole && (
                 <div className="product-add-wrap" style={{marginTop: 16}}>
@@ -7032,10 +7024,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 )}
                 <div className="rounded-xl bg-slate-100 p-4">Müşteri cari<br /><b>{money(totals.customerDebt)}</b></div>
                 {sellerAccounts.map((s) => {
-                  const tutar = sellerRealizedProfitSinceClose.get(s.id) || 0;
-                  if (tutar <= 0) return null;
+                  const kalan = sellerRemainingProfitShare.get(s.id) || 0;
+                  const brut = sellerRealizedProfitSinceClose.get(s.id) || 0;
+                  if (kalan <= 0) return null;
                   return (
-                    <div key={s.id} className="rounded-xl bg-sky-50 border border-sky-200 p-4">{s.name} payı (gerçekleşen kâr)<br /><b>{money(tutar)}</b></div>
+                    <div key={s.id} className="rounded-xl bg-sky-50 border border-sky-200 p-4">
+                      {s.name} payı (ödenecek kalan)<br /><b>{money(kalan)}</b>
+                      {brut !== kalan && (
+                        <><br /><span className="text-xs text-slate-500">gerçekleşen {money(brut)} · ödenen {money(brut - kalan)}</span></>
+                      )}
+                    </div>
                   );
                 })}
               </div>
