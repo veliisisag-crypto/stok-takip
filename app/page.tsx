@@ -3,6 +3,7 @@
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
+import PartiFotoWizard from "@/components/PartiFotoWizard";
 
 // Supabase/PostgREST varsayılan olarak tek istekte sınırlı sayıda satır döndürür.
 // Kayıt sayısı arttıkça (500+, 1000+ vb.) sabit bir .limit() eski kayıtları sessizce
@@ -405,6 +406,10 @@ type Odeme = {
   batch_id: string | null;
   recipient_name: string | null;
   seller_account_id?: string | null;
+  // Kâr payı ödemesi kapanmış bir dönemi kapatıyorsa o dönemin id'si; cari döneme ait
+  // ödemelerde boş. Zaman damgası bu ayrımı yapamaz (kapanıştan dakikalar sonra girilen
+  // ödeme yeni döneme düşerdi), o yüzden ayrı alan tutuluyor.
+  kapanis_period_id?: string | null;
   tutar: number;
   aciklama: string | null;
   created_by: string | null;
@@ -770,6 +775,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [odemeSupplierId, setOdemeSupplierId] = useState("");
   const [odemeBatchId, setOdemeBatchId] = useState("");
   const [odemeKarPayiAlici, setOdemeKarPayiAlici] = useState("");
+  // "Bu ödeme son kapanışın kâr payı" işareti - kapanıştan sonra girilen gecikmiş ödemeler için.
+  const [odemeSonKapanisaAit, setOdemeSonKapanisaAit] = useState(false);
   const [odemeTutar, setOdemeTutar] = useState("");
   const [odemeKimden, setOdemeKimden] = useState<string[]>([]);
   const [odemeKimdenSecim, setOdemeKimdenSecim] = useState("");
@@ -898,6 +905,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [uploadingBatchPhoto, setUploadingBatchPhoto] = useState(false);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" as "ana" | "cep_boy" });
+  // Fotoğraftan toplu parti girişi sihirbazı (seçili partiye kalem ekler)
+  const [fotoWizardAcik, setFotoWizardAcik] = useState(false);
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Aslı" as string, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "Stok", sellerProfit: "", note: "", paraSahibi: "", variant: "ana" as "ana" | "cep_boy" });
   const [periodForm, setPeriodForm] = useState({ name: `Dönem ${today()}`, sponsor: "0", asli: "0", mihrimah: "0", productCost: "0", shippingCost: "0" });
 
@@ -1822,11 +1831,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const sellerCustomerIds = new Set(customers.filter((c) => c.seller_account_id === sellerId).map((c) => c.id));
     // "Satış" kutusu bilinçli olarak kümülatif (tüm zamanlar) kalıyor - dönem kapanışıyla sıfırlanmıyor.
     const totalSatis = sellerSales.reduce((sum, s) => sum + toNum(s.total), 0);
-    // Kâr Payı (Toplam) ve Gerçekleşen Kâr - satıcının kendi "kâr payı cari hesabı" gibi, TÜM ZAMANLAR
-    // üzerinden sürekli devam eden bir bakiye. Dönem kapanışıyla sıfırlanmaz: her yeni satış hak edilen
-    // kârı artırır, her "Kâr Payı Öde" ödemesi bakiyeyi düşürür - ne kadar ödenirse ödensin, kalan borç
-    // her zaman doğru görünür.
-    const totalKarPayi = sellerSales.reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
+    // Kâr Payı (Toplam) ve Gerçekleşen Kâr - DÖNEM BAZLI: son kapanıştan bu yana.
+    // Daha önce tüm zamanlar üzerinden hesaplanıyordu; bu, kapanışta zaten kapatılmış kârı
+    // tekrar borç gibi gösterdiği için kaldırıldı. Üç kalem de (hak edilen kâr, gerçekleşen
+    // kâr, ödenen kâr payı) aynı tarih sınırını kullanmalı - biri dönemsel biri kümülatif
+    // olursa rakamlar hiçbir zaman sıfırlanmaz.
+    const totalKarPayi = sellerSales
+      .filter((s) => new Date(s.created_at) > sinceDate)
+      .reduce((sum, s) => sum + Number(s.seller_profit || 0), 0);
     // Satışın sadece FİİLEN TAHSİL EDİLMİŞ kısmı satıcının elinde olabilir - bu yüzden
     // "bize borç" ve "gerçekleşen kâr" tam satış tutarı üzerinden değil, her tahsilatın
     // (payment_allocations) o satışa düşen oranı üzerinden hesaplanır (anlıkKar/karDetay
@@ -1844,20 +1856,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const profit = Number(sale.seller_profit || 0);
       gerceklesenKarPayiPeriyot += profit * (alloc.amount / total);
     }
-    // Gerçekleşen Kâr (gösterilen kutu) - TÜM ZAMANLAR üzerinden, kâr payı cari hesabı mantığıyla.
+    // "Bize Borç" ayrı bir kavram ve kümülatif kalıyor - satıcının elindeki toplam para.
     const sellerAllocsTumZaman = paymentAllocations.filter((a) => sellerSaleIds.has(a.sale_id));
     let totalBizeBorcOrantili = 0;
-    let gerceklesenKarPayi = 0;
     for (const alloc of sellerAllocsTumZaman) {
       const sale = saleMap.get(alloc.sale_id);
       if (!sale) continue;
       const total = toNum(sale.total);
       if (total <= 0) continue;
-      const oran = alloc.amount / total;
       const profit = Number(sale.seller_profit || 0);
-      totalBizeBorcOrantili += (toNum(sale.cost) - profit) * oran;
-      gerceklesenKarPayi += profit * oran;
+      totalBizeBorcOrantili += (toNum(sale.cost) - profit) * (alloc.amount / total);
     }
+    // Gösterilen "Gerçekleşen Kâr" kutusu, "Size Kalan Borç" ile aynı dönemsel değeri kullanır.
+    // Tahsilat tarihine göre ayrılır (satış tarihine göre değil): kapanıştan önce yapılmış bir
+    // satışın parası bu dönem geldiyse, kârı bu dönemde gerçekleşmiş sayılır.
+    const gerceklesenKarPayi = gerceklesenKarPayiPeriyot;
     const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
@@ -1868,7 +1881,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     // kayıtlar (bu alan eklenmeden önce girilenler) isim eşleşmesiyle (recipient_name) bulunur.
     const sellerName = sellerAccountMap.get(sellerId)?.name || "";
     const totalOdenenKarPayi = odemeler
-      .filter((o) => o.tip === "kar_payi" && (o.seller_account_id === sellerId || (!o.seller_account_id && o.recipient_name === sellerName)))
+      .filter((o) => o.tip === "kar_payi"
+        && (o.seller_account_id === sellerId || (!o.seller_account_id && o.recipient_name === sellerName))
+        // Tarih damgasına GÜVENİLMEZ: kapanış 07:18'de yapılıp ödeme 07:58'de girilirse
+        // zaman damgası onu yeni döneme yazar. Ödemenin hangi dönemi kapattığı artık açıkça
+        // kapanis_period_id ile tutuluyor; boşsa ödeme cari döneme aittir.
+        && !o.kapanis_period_id)
       .reduce((sum, o) => sum + toNum(o.tutar), 0);
     const netTotalKarPayi = totalKarPayi - totalOdenenKarPayi;
     const netGerceklesenKarPayi = gerceklesenKarPayi - totalOdenenKarPayi;
@@ -2802,12 +2820,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // Kâr payı alıcısı bir satıcıysa (Aslı/Mihrimah gibi bir ortak değilse), ismin yanında
       // sağlam bir ID bağlantısı da tutuyoruz - isim eşleştirmesi kırılgan olduğu için.
       const karPayiSellerAccountId = odemeTip === "kar_payi" ? (sellerAccounts.find((s) => s.name === odemeKarPayiAlici)?.id || null) : null;
+      // Kullanıcı "son kapanışa ait" dediyse, ödemeyi kapanan döneme bağla - yoksa cari
+      // dönemin kâr payı bakiyesinden düşülür ve bakiye eksiye geçer.
+      const sonKapanan = periods.filter((p) => p.closed && p.closed_at)
+        .sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
+      const kapanisPeriodId = (odemeTip === "kar_payi" && odemeSonKapanisaAit && sonKapanan) ? sonKapanan.id : null;
       const { data: odemeInserted, error: odemeErr } = await supabase.from("odemeler").insert({
         tip: odemeTip,
         supplier_id: odemeTip === "toptanci" ? odemeSupplierId : null,
         batch_id: odemeTip === "kar_payi" ? null : odemeBatchId,
         recipient_name: odemeTip === "kar_payi" ? odemeKarPayiAlici : null,
         seller_account_id: karPayiSellerAccountId,
+        kapanis_period_id: kapanisPeriodId,
         tutar,
         aciklama: odemeTip === "toptanci" ? `${supplierMap.get(odemeSupplierId)?.name || ""} — ${batchName}` : odemeTip === "kar_payi" ? odemeKarPayiAlici : batchName,
         created_by: createdBy,
@@ -3919,7 +3943,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.02</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.08</p>
           </div>
         </div>
 
@@ -4619,6 +4643,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Alış fiyatı (otomatik hesaplanır, isterseniz değiştirin)" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
+                {!isSellerRole && (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!batchForm.batchId}
+                    onClick={() => setFotoWizardAcik(true)}
+                    title={!batchForm.batchId ? "Önce parti seçin" : "Fotoğraftan toplu giriş"}
+                  >
+                    📷 Fotoğraftan Ekle
+                  </button>
+                )}
               </div>
               {batchForm.batchId && batchForm.productId && (() => {
                 const batch = batchMap.get(batchForm.batchId);
@@ -4633,6 +4668,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 if (usdPrice === null) return <p className="mt-2 text-sm text-red-600">⚠️ "{product?.name}" ürününde "{supplier?.name}" için USD fiyatı girilmemiş. Önce ürün kartından bu alanı doldurun.</p>;
                 return <p className="mt-2 text-sm text-emerald-600">✓ {supplier?.name}: ${usdPrice} × {batch.usd_kuru} kur = {money(Math.round(usdPrice * batch.usd_kuru * 100) / 100)} olarak hesaplandı.</p>;
               })()}
+
+              {fotoWizardAcik && batchForm.batchId && !isSellerRole && (
+                <div style={{ marginTop: 16 }}>
+                  <PartiFotoWizard
+                    batchId={batchForm.batchId}
+                    onTamamlandi={(n) => {
+                      setFotoWizardAcik(false);
+                      setMessage(`${n} kalem partiye eklendi.`);
+                      loadAll();
+                    }}
+                    onKapat={() => setFotoWizardAcik(false)}
+                  />
+                </div>
+              )}
 
               {!isSellerRole && (
                 <div className="product-add-wrap" style={{marginTop: 16}}>
@@ -5350,6 +5399,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <option key={s.id} value={s.name}>{s.name} (satıcı)</option>
                       ))}
                     </select>
+                    <label className="mt-2 flex items-start gap-2 text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={odemeSonKapanisaAit}
+                        onChange={(e) => setOdemeSonKapanisaAit(e.target.checked)}
+                      />
+                      <span>
+                        Bu ödeme <b>son kapanışın</b> kâr payı
+                        <span className="block text-xs text-slate-500">
+                          Kapanışı yaptıktan sonra ödemeyi girerken işaretle. İşaretlenmezse
+                          ödeme cari dönemden düşülür ve bakiye eksiye geçer.
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 )}
               </div>
