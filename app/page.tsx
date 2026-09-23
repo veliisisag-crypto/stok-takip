@@ -1300,20 +1300,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const getCustomerCollectedTotal = (customerId: string) => {
     const manualPayments = getCustomerManualPaymentsTotal(customerId);
-    // Eski peşin satışlar: payments tablosu kullanılmaya başlamadan önce girilmiş,
-    // hiçbir tahsilat kaydına bağlanmamış satışlar.
-    //
-    // Eskiden bu tespit "aynı tutarda ve 5 saniye içinde bir ödeme var mı" varsayımıyla
-    // yapılıyordu. Satışın ödemesi başka bir gün girildiğinde eşleşme tutmuyor ve satış
-    // tutarı payments toplamına EK OLARAK sayılıyordu; müşteri fazla ödemiş görünüp
-    // bakiyesi sıfıra düşüyordu. Bağ artık payment_allocations üzerinden kuruluyor -
-    // tahsilatın hangi satışa ait olduğunun tek doğru kaynağı orası.
+    // Eski peşin satışlar (payments tablosunda kaydı olmayanlar)
+    // Eskiden "aynı tutarda ve 5 saniye içinde bir ödeme var mı" varsayımı kullanılıyordu.
+    // Satışın ödemesi başka gün girilince eşleşme tutmuyor ve satış tutarı payments
+    // toplamına EK OLARAK sayılıyordu; müşteri fazla ödemiş görünüp bakiyesi sıfıra
+    // düşüyordu. Bağ artık payment_allocations üzerinden kuruluyor.
     const tahsilatiOlanSatislar = new Set(paymentAllocations.map((a) => a.sale_id));
     const oldPaidSales = activeSales
-      .filter((s) => s.customer_id === customerId
-        && s.paid
-        && s.sale_type === "Normal satış"
-        && !tahsilatiOlanSatislar.has(s.id))
+      .filter((s) => s.customer_id === customerId && s.paid
+        && s.sale_type === "Normal satış" && !tahsilatiOlanSatislar.has(s.id))
       .reduce((sum, s) => sum + toNum(s.total), 0);
     return manualPayments + oldPaidSales;
   };
@@ -2184,6 +2179,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           }
         }
       }
+    }
+
+    // Müşterinin önceden yaptığı, mahsup edilecek satış bulunamadığı için havada kalmış
+    // ödemeleri bu yeni satışa dağıt. Bu çağrı olmadan avans ödemeler, bir sonraki ödeme
+    // işlemine kadar mahsupsuz kalıyor ve satış "cari borç" görünmeye devam ediyordu.
+    try {
+      await allocatePaymentsForCustomer(customer.id);
+    } catch (err) {
+      console.warn("allocate after sale error", err);
     }
 
     await logAction("Satış eklendi", "sales", `${customer.name} - ${saleForm.variant === "cep_boy" ? "Cep-" : ""}${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
@@ -3961,7 +3965,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.10</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.11</p>
           </div>
         </div>
 
