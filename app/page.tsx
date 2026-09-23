@@ -1300,19 +1300,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const getCustomerCollectedTotal = (customerId: string) => {
     const manualPayments = getCustomerManualPaymentsTotal(customerId);
-    // Eski peşin satışlar (payments tablosunda kaydı olmayanlar)
-    const paymentCustomerIds = new Set(activePayments.map((p) => p.customer_id));
+    // Eski peşin satışlar: payments tablosu kullanılmaya başlamadan önce girilmiş,
+    // hiçbir tahsilat kaydına bağlanmamış satışlar.
+    //
+    // Eskiden bu tespit "aynı tutarda ve 5 saniye içinde bir ödeme var mı" varsayımıyla
+    // yapılıyordu. Satışın ödemesi başka bir gün girildiğinde eşleşme tutmuyor ve satış
+    // tutarı payments toplamına EK OLARAK sayılıyordu; müşteri fazla ödemiş görünüp
+    // bakiyesi sıfıra düşüyordu. Bağ artık payment_allocations üzerinden kuruluyor -
+    // tahsilatın hangi satışa ait olduğunun tek doğru kaynağı orası.
+    const tahsilatiOlanSatislar = new Set(paymentAllocations.map((a) => a.sale_id));
     const oldPaidSales = activeSales
-      .filter((s) => s.customer_id === customerId && s.paid && s.sale_type === "Normal satış")
-      .reduce((sum, s) => {
-        // Bu satış için payments'ta kayıt var mı?
-        const hasPayment = activePayments.some(
-          (p) => p.customer_id === customerId &&
-          Math.abs(toNum(p.amount) - toNum(s.total)) < 0.01 &&
-          Math.abs(new Date(p.created_at).getTime() - new Date(s.created_at).getTime()) < 5000
-        );
-        return hasPayment ? sum : sum + toNum(s.total);
-      }, 0);
+      .filter((s) => s.customer_id === customerId
+        && s.paid
+        && s.sale_type === "Normal satış"
+        && !tahsilatiOlanSatislar.has(s.id))
+      .reduce((sum, s) => sum + toNum(s.total), 0);
     return manualPayments + oldPaidSales;
   };
 
@@ -3959,7 +3961,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.09</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.10</p>
           </div>
         </div>
 
