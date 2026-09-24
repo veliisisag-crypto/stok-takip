@@ -875,6 +875,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [stokDetaySort, setStokDetaySort] = useState<{col: string; dir: "asc"|"desc"}>({col: "tarih", dir: "asc"});
   const [saleLoading, setSaleLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Satış iptal penceresi: hangi satış, para ne olacak, iade kimden ödenecek
+  const [iptalEdilecekSatis, setIptalEdilecekSatis] = useState<Sale | null>(null);
+  const [iptalParaAkibeti, setIptalParaAkibeti] = useState<"hesapta" | "iade">("hesapta");
+  const [iptalIadeKimden, setIptalIadeKimden] = useState("");
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [expandedSellerDistPeriodId, setExpandedSellerDistPeriodId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
@@ -1313,8 +1317,32 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return manualPayments + oldPaidSales;
   };
 
+  // İşaretli bakiye. Eksi değer = müşterinin bizde parası var (alacaklı).
+  // Eskiden Math.max ile sıfıra kırpılıyordu; fazla ödeme yapmış müşteri
+  // "Ödendi / 0" görünüyor, paranın nerede olduğu kaybolup sistemde hata
+  // varmış izlenimi veriyordu.
   const getCustomerBalance = (customerId: string) =>
-    Math.max(getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId), 0);
+    getCustomerSalesTotal(customerId) - getCustomerCollectedTotal(customerId);
+
+  // Müşterinin bizde duran parası (alacağı). Yoksa 0.
+  const getCustomerCredit = (customerId: string) =>
+    Math.max(-getCustomerBalance(customerId), 0);
+
+  // Satış / ön sipariş formlarında müşteri seçilince çıkan bilgi şeridi.
+  // Amaç: iptal edilmiş satıştan ya da fazla ödemeden kalan paranın
+  // gözden kaçmaması. Engelleyici değil, sadece hatırlatır.
+  const MusteriKredisi = ({ customerId }: { customerId: string }) => {
+    if (!customerId) return null;
+    const kredi = getCustomerCredit(customerId);
+    if (kredi <= 0) return null;
+    const ad = customers.find((c) => c.id === customerId)?.name || "Bu cari";
+    return (
+      <div className="md:col-span-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+        <b>{ad}</b> için sistemde <b>{money(kredi)}</b> alacak duruyor.
+        Bu satış kaydedildiğinde tutar otomatik mahsup edilecek.
+      </div>
+    );
+  };
 
   // Her partideki toplam alınan adet (bought) - birim ek maliyet hesaplamak için
   const batchBoughtTotal = useMemo(() => {
@@ -1466,7 +1494,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const scopedCustomers = isSellerRole ? myCustomers : customers;
     const scopedActivePayments = isSellerRole ? myActivePayments : activePayments;
     const scopedActiveSales = isSellerRole ? myActiveSales : activeSales;
-    const customerDebt = scopedCustomers.reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
+    // Sadece borçlular toplanır. Alacaklı müşteriler buradan düşülmez -
+    // alacak ile borç ayrı kalemlerdir, netleştirmek alacağı gizler.
+    const customerDebt = scopedCustomers.reduce(
+      (sum, c) => sum + Math.max(getCustomerBalance(c.id), 0), 0);
     const stockValue = batchItems.reduce((sum, item) => sum + Math.max(item.bought - getBatchSoldQtyForItem(item), 0) * item.buy_price, 0);
     const totalStock = products.filter((p) => !p.passive).reduce((sum, p) => sum + getProductStock(p.id), 0);
     const lastClosedPeriod = periods.filter((p) => p.closed && p.closed_at).sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime())[0];
@@ -1885,7 +1916,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     // satışın parası bu dönem geldiyse, kârı bu dönemde gerçekleşmiş sayılır.
     const gerceklesenKarPayi = gerceklesenKarPayiPeriyot;
     const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
-    const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id)).reduce((sum, c) => sum + getCustomerBalance(c.id), 0);
+    const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id))
+      .reduce((sum, c) => sum + Math.max(getCustomerBalance(c.id), 0), 0);
     const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
     // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler (dönem kapanışı
     // dışında, ayrı bir ödeme) - TÜM ZAMANLAR, kâr payı cari hesabı mantığına uygun olsun diye.
@@ -2224,22 +2256,76 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const deleteSale = async (saleId: string) => {
+  // Bir kişinin kasasında duran para (harcanmamış tahsilat toplamı)
+  const kasaBakiyesi = (kisi: string) =>
+    payments
+      .filter((p) => !p.cancelled && p.para_sahibi === kisi)
+      .reduce((t, p) => t + Number(p.kasa_tutari || 0), 0);
+
+  // Kasadan para çıkar: kişinin tahsilat kayıtlarından en eskiden başlayarak
+  // kasa_tutari düşülür. Toptancı ödemesiyle aynı mantık - eksi kasa_tutari
+  // oluşturmaz, veritabanı kısıtı da buna izin vermez.
+  const kasadanDus = async (kisi: string, tutar: number, aciklamaEk: string) => {
+    let kalan = tutar;
+    const kayitlar = payments
+      .filter((p) => !p.cancelled && p.para_sahibi === kisi && Number(p.kasa_tutari || 0) > 0)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    for (const kayit of kayitlar) {
+      if (kalan <= 0) break;
+      const mevcut = Number(kayit.kasa_tutari || 0);
+      const kullanilan = Math.min(mevcut, kalan);
+      const eskiAciklama = kayit.aciklama || "";
+      const { error } = await supabase.from("payments").update({
+        kasa_tutari: mevcut - kullanilan,
+        aciklama: `${eskiAciklama ? eskiAciklama + ", " : ""}${Math.round(kullanilan)} TL ${aciklamaEk}`,
+      }).eq("id", kayit.id);
+      if (error) throw error;
+      kalan -= kullanilan;
+    }
+    if (kalan > 0.5) throw new Error(`${kisi} kasasında yeterli para yok, ${money(kalan)} eksik kaldı.`);
+  };
+
+  const deleteSale = async (saleId: string, iade?: { kimden: string }) => {
     if (deletingId) return;
     setDeletingId(saleId);
     const sale = sales.find((s) => s.id === saleId);
+
+    // İade varsa ÖNCE parayı çıkar. Kasa yetmezse satış iptal edilmeden
+    // hata verir; yarım kalmış durum oluşmaz.
+    if (iade && sale) {
+      const tutar = toNum(sale.total);
+      try {
+        await kasadanDus(iade.kimden, tutar, `iade (satış ${toTR(sale.created_at)})`);
+        const { data: u } = await supabase.auth.getUser();
+        const { error: iadeErr } = await supabase.from("payments").insert({
+          customer_id: sale.customer_id,
+          amount: -tutar,
+          kasa_tutari: 0,
+          payment_method: sale.payment_method || "nakit",
+          para_sahibi: iade.kimden,
+          note: `İade - ${productMap.get(sale.product_id)?.name || ""} satışı iptal edildi`,
+          user_email: u.user?.email || currentUserEmail,
+          workspace: activeWorkspace,
+        });
+        if (iadeErr) throw iadeErr;
+      } catch (err) {
+        setDeletingId(null);
+        return showError(err);
+      }
+    }
+
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
     if (sale) {
-      // Peşin satışsa ilgili payment'ı sil
-      if (sale.paid && sale.sale_type === "Normal satış") {
-        const { data: allocData } = await supabase.from("payment_allocations").select("payment_id").eq("sale_id", saleId);
-        if (allocData && allocData.length > 0) {
-          const paymentIds = allocData.map((a: {payment_id: string}) => a.payment_id);
-          await supabase.from("payment_allocations").delete().eq("sale_id", saleId);
-          await supabase.from("payments").delete().in("id", paymentIds);
-        }
-      }
+      // Ödeme kaydına DOKUNULMUYOR.
+      //
+      // Eskiden peşin satış iptal edilirken ilişkili payments satırı siliniyordu.
+      // FIFO mahsupta bir ödeme herhangi bir satışa bağlanabildiği için bu,
+      // müşterinin gerçekten ödediği parayı yok ediyordu; ödeme birden fazla
+      // satışa bölünmüşse diğerlerinin mahsubu da gidiyordu.
+      //
+      // Doğrusu: satış iptal edilir, mahsup çözülür, para müşterinin
+      // hesabında açıkta bekler ve bir sonraki satışa FIFO ile yazılır.
       try {
         await allocatePaymentsForCustomer(sale.customer_id);
       } catch (err) {
@@ -2358,83 +2444,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return "Cari borç";
   };
 
+  // Mahsup artık veritabanındaki mahsup_yenile() fonksiyonunda hesaplanıyor.
+  //
+  // Buradaki eski istemci tarafı mantık kaldırıldı. Sebepleri:
+  //   * Sadece paid=false satışları dolduruyor, ödenmiş satışların mahsubunu
+  //     silip yerine koymuyordu. 22-24 Eylül'deki bozulmaların kaynağı buydu.
+  //   * "Aynı tutar + aynı dakika" varsayımıyla ödeme eşleştiriyordu.
+  //   * Üç ayrı isteğe bölündüğü için ortada hata alınca yarım kalıyordu.
+  //
+  // Yeni fonksiyon tek transaction'da, FIFO ile, sıfırdan kurar.
+  // payment_allocations üzerindeki trigger sales.paid_amount'u otomatik
+  // günceller, burada ayrıca yazmaya gerek yok.
   const allocatePaymentsForCustomer = async (customerId: string) => {
-    const [salesRes, paymentsRes] = await Promise.all([
-      supabase
-        .from("sales")
-        .select("id,total,paid,paid_amount,cancelled,created_at")
-        .eq("customer_id", customerId)
-        .eq("cancelled", false)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("payments")
-        .select("id,amount,cancelled,created_at")
-        .eq("customer_id", customerId)
-        .order("created_at", { ascending: true }),
-    ]);
-
-    if (salesRes.error) throw salesRes.error;
-    if (paymentsRes.error) throw paymentsRes.error;
-
-    const activePays = (paymentsRes.data || []).filter((p) => p.cancelled !== true);
-    const salesToAlloc = (salesRes.data || []);
-    // Peşin satışlara ait payment'ları hariç tut — onlar zaten direkt allocation'a eklenmiş
-    const pesinSaleTotals = salesToAlloc
-      .filter((s) => s.paid)
-      .map((s) => ({ amount: toNum(s.total), created_at: s.created_at?.slice(0,16) }));
-    const cariPays = activePays.filter((p) => {
-      const key = `${toNum(p.amount)}-${p.created_at?.slice(0,16)}`;
-      return !pesinSaleTotals.some((ps) => `${ps.amount}-${ps.created_at}` === key);
-    });
-    const salesToAlloc2 = salesToAlloc.filter((s) => !s.paid);
-
-    // Her satış için paid_amount hesapla
-    let remainingManualPayments = cariPays.reduce((sum, p) => sum + toNum(p.amount), 0);
-    const saleUpdates = salesToAlloc2.map((sale) => {
-      const total = toNum(sale.total);
-      const paidAmount = Math.max(0, Math.min(total, remainingManualPayments));
-      remainingManualPayments -= paidAmount;
-      return { id: sale.id, total, paidAmount, paid: false };
-    });
-
-    // payment_allocations: sadece cari ödeme allocation'larını sil
-    if (cariPays.length > 0) {
-      await supabase.from("payment_allocations").delete().in(
-        "payment_id",
-        cariPays.map((p) => p.id)
-      );
-    }
-
-    // Her ödemeyi satışlara dağıt
-    const allocations: { payment_id: string; sale_id: string; amount: number; created_at: string; workspace: string }[] = [];
-    let saleQueue = [...saleUpdates];
-    for (const pay of cariPays) {
-      let payRemaining = toNum(pay.amount);
-      for (const sale of saleQueue) {
-        if (payRemaining <= 0) break;
-        const alreadyAllocated = allocations
-          .filter((a) => a.sale_id === sale.id)
-          .reduce((s, a) => s + a.amount, 0);
-        const remaining = sale.paidAmount - alreadyAllocated;
-        const thisAlloc = Math.min(payRemaining, Math.max(remaining, 0));
-        if (thisAlloc > 0) {
-          allocations.push({ payment_id: pay.id, sale_id: sale.id, amount: thisAlloc, created_at: pay.created_at, workspace: activeWorkspace });
-          payRemaining -= thisAlloc;
-        }
-      }
-    }
-
-    // Toplu insert
-    if (allocations.length > 0) {
-      await supabase.from("payment_allocations").insert(allocations);
-    }
-
-    // sales tablosunu güncelle
-    const results = await Promise.all(
-      saleUpdates.map((s) => supabase.from("sales").update({ paid_amount: s.paidAmount }).eq("id", s.id))
-    );
-    const firstError = results.find((r) => r.error)?.error;
-    if (firstError) throw firstError;
+    if (!customerId) return;
+    const { error } = await supabase.rpc("mahsup_yenile", { p_customer_id: customerId });
+    if (error) throw error;
   };
 
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -2554,6 +2578,112 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const getSahsiKolonAdi = (tip: "toptanci" | "kargo" | "diger", alan: "veli" | "asli" | "mihrimah"): keyof BatchCost => {
     if (tip === "toptanci") return alan;
     return `${tip}_${alan}` as keyof BatchCost;
+  };
+
+  // Satış iptal penceresi. Tek ekranda: para ne olacak, iade kimden ödenecek.
+  const SatisIptalModal = () => {
+    const sale = iptalEdilecekSatis;
+    if (!sale) return null;
+    const tutar = toNum(sale.total);
+    const urun = productMap.get(sale.product_id)?.name || "-";
+    const musteri = customerMap.get(sale.customer_id)?.name || "-";
+    const tahsilEdilen = paymentAllocations
+      .filter((a) => a.sale_id === sale.id)
+      .reduce((t, a) => t + toNum(a.amount), 0);
+
+    const kasaSahipleri = Array.from(
+      new Set(payments.filter((p) => !p.cancelled && p.para_sahibi).map((p) => p.para_sahibi as string))
+    ).sort();
+    const secilenBakiye = iptalIadeKimden ? kasaBakiyesi(iptalIadeKimden) : 0;
+    const iadeMumkun = tahsilEdilen > 0;
+    const yetersiz = iptalParaAkibeti === "iade" && iptalIadeKimden !== "" && secilenBakiye < tutar;
+    const onaylanabilir = iptalParaAkibeti === "hesapta"
+      || (iptalIadeKimden !== "" && !yetersiz);
+
+    const kapat = () => { setIptalEdilecekSatis(null); setIptalIadeKimden(""); };
+
+    return (
+      <div
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200000,
+                 display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        onClick={kapat}
+      >
+        <div className="card" style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+             onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-1">Satışı iptal et</h3>
+          <p className="text-sm text-slate-500 mb-4">
+            {musteri} &middot; {urun} &middot; {money(tutar)}
+          </p>
+
+          <div className="mb-4">
+            <div className="label mb-2">Para ne olacak?</div>
+            <label className="flex items-start gap-2 mb-2 text-sm">
+              <input type="radio" className="mt-1" checked={iptalParaAkibeti === "hesapta"}
+                     onChange={() => setIptalParaAkibeti("hesapta")} />
+              <span>
+                <b>Müşterinin hesabında kalsın</b>
+                <span className="block text-xs text-slate-500">
+                  Bir sonraki satışında otomatik mahsup edilir.
+                </span>
+              </span>
+            </label>
+            <label className={`flex items-start gap-2 text-sm ${iadeMumkun ? "" : "opacity-40"}`}>
+              <input type="radio" className="mt-1" disabled={!iadeMumkun}
+                     checked={iptalParaAkibeti === "iade"}
+                     onChange={() => setIptalParaAkibeti("iade")} />
+              <span>
+                <b>İade edildi</b>
+                <span className="block text-xs text-slate-500">
+                  {iadeMumkun
+                    ? "Para kasadan çıkar, tarihçede iade kaydı oluşur."
+                    : "Bu satışın tahsilatı yok, iade edilecek para bulunmuyor."}
+                </span>
+              </span>
+            </label>
+          </div>
+
+          {iptalParaAkibeti === "iade" && (
+            <div className="mb-4">
+              <div className="label mb-1">Kimden ödendi?</div>
+              <select className="input" value={iptalIadeKimden}
+                      onChange={(e) => setIptalIadeKimden(e.target.value)}>
+                <option value="">Seçin...</option>
+                {kasaSahipleri.map((k) => (
+                  <option key={k} value={k}>{k} - kasada {money(kasaBakiyesi(k))}</option>
+                ))}
+              </select>
+              {yetersiz && (
+                <p className="mt-2 text-sm text-red-600">
+                  {iptalIadeKimden} kasasında {money(secilenBakiye)} var, {money(tutar)} iade edilemez.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 mb-4">
+            Ürün stoğa geri dönecek. Sağlam değilse ayrıca fire kaydı girin.
+          </div>
+
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary flex-1" onClick={kapat}>Vazgeç</button>
+            <button
+              type="button"
+              className="btn-danger"
+              style={{ flex: 2 }}
+              disabled={!onaylanabilir || deletingId === sale.id}
+              onClick={async () => {
+                const id = sale.id;
+                const iade = iptalParaAkibeti === "iade" ? { kimden: iptalIadeKimden } : undefined;
+                kapat();
+                await deleteSale(id, iade);
+              }}
+            >
+              {deletingId === sale.id ? "..." : "Satışı iptal et"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const kasaHavuzlari = useMemo(() => {
@@ -3310,8 +3440,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
 
     // 3) Hiç ön ödeme yoksa ve cari borç seçiliyse, cari bakiyesindeki fazla ödemeleri otomatik eşleştir
-    if (advanceTotal === 0 && convertPaid === "false") {
-      try { await allocatePaymentsForCustomer(po.customer_id); } catch (err) { console.warn("allocate error", err); }
+    // Mahsup HER DURUMDA yeniden kurulur. Eskiden sadece avans yoksa ve
+    // satış peşin değilse çağrılıyordu; avanslı dönüşümlerde yukarıda elle
+    // yazılan mahsuplar olduğu gibi kalıyor ve FIFO sırasıyla uyuşmuyordu.
+    // mahsup_yenile sıfırdan kurduğu için yukarıdaki elle yazımlar zararsız
+    // hale gelir, sonuç her yolda aynı olur.
+    try {
+      await allocatePaymentsForCustomer(po.customer_id);
+    } catch (err) {
+      console.warn("allocate error", err);
     }
 
     await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", {
@@ -3331,7 +3468,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const markPayment = async (customerId: string) => {
     const balance = getCustomerBalance(customerId);
-    if (balance <= 0) return;
+    if (balance <= 0) return;   // borcu yok ya da zaten alacaklı
     const { data: userData } = await supabase.auth.getUser();
     const userEmail = userData.user?.email || null;
     const { error } = await supabase.from("payments").insert({ customer_id: customerId, amount: balance, user_email: userEmail, workspace: activeWorkspace });
@@ -3796,6 +3933,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
+      <SatisIptalModal />
       {/* Lightbox */}
       {lightboxImg && (
         <div
@@ -3990,7 +4128,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.12</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.16</p>
           </div>
         </div>
 
@@ -5957,8 +6095,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   const customerPayments = activePayments.filter((p) => p.customer_id === c.id);
                   const totalSales = getCustomerSalesTotal(c.id);
                   const collected = getCustomerCollectedTotal(c.id);
-                  const status = c.passive ? "Pasif" : balance <= 0 ? "Ödendi" : "Borç Açık";
-                  const statusColor = c.passive ? "#64748b" : balance <= 0 ? "#16a34a" : "#dc2626";
+                  const status = c.passive ? "Pasif"
+                    : balance < 0 ? "Alacaklı"
+                    : balance === 0 ? "Ödendi" : "Borç Açık";
+                  const statusColor = c.passive ? "#64748b"
+                    : balance < 0 ? "#2563eb"
+                    : balance === 0 ? "#16a34a" : "#dc2626";
 
                   return (
                     <div key={c.id} id={`cari-card-${c.id}`} className={`product-card ${isOpen ? "product-card--open" : ""}`}>
@@ -6149,6 +6291,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     onChange={(v) => setPreorderForm({ ...preorderForm, customerId: v })}
                     options={sortedActiveCustomers.map((c) => ({ value: c.id, label: c.name }))}
                   />
+                  <div className="mt-2">
+                    <MusteriKredisi customerId={preorderForm.customerId} />
+                  </div>
                 </div>
                 <div>
                   <label className="label">Not (opsiyonel)</label>
@@ -6871,6 +7016,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   onChange={(v) => setSaleForm({ ...saleForm, customerId: v })}
                   options={sortedActiveCustomers.map((c) => ({ value: c.id, label: c.name }))}
                 />
+                <MusteriKredisi customerId={saleForm.customerId} />
                 <SearchableSelect
                   placeholder="Ürün ara..."
                   value={saleForm.productId}
@@ -7010,7 +7156,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           : <span key="note" style={{color:"#cbd5e1"}}>—</span>),
                     isEditing
                       ? <div key="actions" className="flex gap-2"><button type="button" className="btn" disabled={isLoading(`sale-save-${sale.id}`)} onClick={() => withLoading(`sale-save-${sale.id}`, () => saveSaleEdit(sale.id))}>{isLoading(`sale-save-${sale.id}`) ? "..." : "Kaydet"}</button><button type="button" className="btn-secondary" onClick={() => cancelSaleEdit(sale.id)}>Vazgeç</button></div>
-                      : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" disabled={deletingId === sale.id} onClick={() => deleteSale(sale.id)}>{deletingId === sale.id ? "..." : "Sil"}</button></div>,
+                      : <div key="actions" className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => startSaleEdit(sale)}>Değiştir</button><button type="button" className="btn-danger" disabled={deletingId === sale.id} onClick={() => { setIptalEdilecekSatis(sale); setIptalParaAkibeti("hesapta"); setIptalIadeKimden(""); }}>{deletingId === sale.id ? "..." : "Sil"}</button></div>,
                   ];
                 })}
               />

@@ -2,7 +2,7 @@
 
 git status
 git add .
-git commit -m "ek düzenlemeler v3.11"
+git commit -m "ek düzenlemeler v3.16"
 git push
 
 
