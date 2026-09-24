@@ -2014,6 +2014,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!batch?.usd_kuru) return setMessage("Bu partiye henüz USD kuru girilmemiş. Önce Parti Maliyet Kaydı'ndan USD kurunu girin.");
     if (bought <= 0 || buyPrice <= 0) return setMessage("Adet ve alış fiyatı 0'dan büyük olmalı.");
 
+    // Aynı partide aynı ürün + variant + depo ikinci kez eklenemez.
+    // Cep boy ayrı bir variant olduğu için ayrı satır olarak kalabilir.
+    // Veritabanında da benzersiz indeks var; buradaki kontrol sadece
+    // kullanıcıya anlamlı mesaj göstermek için.
+    const mevcutKalem = batchItems.find(
+      (bi) => bi.batch_id === batchId
+        && bi.product_id === productId
+        && (bi.variant || "ana") === batchForm.variant
+        && (bi.depo || "Stok") === batchForm.depo
+    );
+    if (mevcutKalem) {
+      const urunAdi = productMap.get(productId)?.name || "Bu ürün";
+      const variantEtiketi = batchForm.variant === "cep_boy" ? " (cep boy)" : "";
+      return setMessage(
+        `${urunAdi}${variantEtiketi} bu partide zaten var — ${mevcutKalem.bought} adet. ` +
+        `Adedi artırmak için parti kalemleri listesinden o satırı düzenleyin.`
+      );
+    }
+
     const { error } = await supabase.from("batch_items").insert({
       product_id: productId,
       batch_id: batchId,
@@ -2024,7 +2043,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       variant: batchForm.variant,
       workspace: activeWorkspace,
     });
-    if (error) return showError(error);
+    if (error) {
+      // Postgres benzersiz indeks ihlali (batch_items_parti_urun_uniq)
+      if ((error as { code?: string }).code === "23505") {
+        return setMessage("Bu ürün bu partide zaten var. Mevcut satırı düzenleyin.");
+      }
+      return showError(error);
+    }
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}${batchForm.variant === "cep_boy" ? " (Cep Boy)" : ""}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo, variant: batchForm.variant });
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "Stok", variant: "ana" });
     setMessage("Parti ürün kaydı eklendi.");
@@ -3965,7 +3990,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.11</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.12</p>
           </div>
         </div>
 
