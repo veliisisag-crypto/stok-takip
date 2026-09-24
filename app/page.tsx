@@ -896,7 +896,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
-  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", usdTyuksel: "", usdThasan: "", usdTamir: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "", usdTyuksel: "", usdThasan: "", usdTamir: "", manualPrice: "" });
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("");
@@ -1646,11 +1646,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       usd_fiyat_tyuksel: newProduct.usdTyuksel ? Number(newProduct.usdTyuksel) : null,
       usd_fiyat_thasan: newProduct.usdThasan ? Number(newProduct.usdThasan) : null,
       usd_fiyat_tamir: newProduct.usdTamir ? Number(newProduct.usdTamir) : null,
+      manual_price: newProduct.manualPrice ? Number(newProduct.manualPrice) : null,
       workspace: activeWorkspace,
     });
     if (error) return showError(error);
-    await logAction("Ürün eklendi", "products", name, { code, usd_tyuksel: newProduct.usdTyuksel || null, usd_thasan: newProduct.usdThasan || null, usd_tamir: newProduct.usdTamir || null });
-    setNewProduct({ name: "", genderCategory: "Kadın", image: "", usdTyuksel: "", usdThasan: "", usdTamir: "" });
+    await logAction("Ürün eklendi", "products", name, { code, usd_tyuksel: newProduct.usdTyuksel || null, usd_thasan: newProduct.usdThasan || null, usd_tamir: newProduct.usdTamir || null, satis_fiyati: newProduct.manualPrice || null });
+    setNewProduct({ name: "", genderCategory: "Kadın", image: "", usdTyuksel: "", usdThasan: "", usdTamir: "", manualPrice: "" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
   };
@@ -4128,7 +4129,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.16</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.17</p>
           </div>
         </div>
 
@@ -4299,6 +4300,39 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
                       <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select>
                       <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                      <div className="field-label">
+                        T-Yüksel (USD)
+                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="örn. 12"
+                               value={newProduct.usdTyuksel}
+                               onChange={(e) => setNewProduct({ ...newProduct, usdTyuksel: e.target.value })} />
+                      </div>
+                      <div className="field-label">
+                        T-Hasan (USD)
+                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="örn. 14"
+                               value={newProduct.usdThasan}
+                               onChange={(e) => setNewProduct({ ...newProduct, usdThasan: e.target.value })} />
+                      </div>
+                      <div className="field-label">
+                        T-Amir (USD)
+                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="opsiyonel"
+                               value={newProduct.usdTamir}
+                               onChange={(e) => setNewProduct({ ...newProduct, usdTamir: e.target.value })} />
+                      </div>
+                      <div className="field-label">
+                        Satış Fiyatı (TL)
+                        <input className="input" type="number" step="1" inputMode="decimal" placeholder="örn. 1500"
+                               value={newProduct.manualPrice}
+                               onChange={(e) => setNewProduct({ ...newProduct, manualPrice: e.target.value })} />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Fiyatlar opsiyoneldir, sonradan ürün kartından da girilebilir. Toptancı USD fiyatı
+                      parti girişinde alış tutarını otomatik hesaplar; satış fiyatı yeni parti kalemlerine
+                      varsayılan olarak yazılır.
+                    </p>
+                    <div className="mt-3">
                       <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
                     </div>
                     {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
