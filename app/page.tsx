@@ -1638,7 +1638,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       imageUrl = await uploadImageToStorage(newProduct.image, code);
     }
 
-    const { error } = await supabase.from("products").insert({
+    const { data: eklenen, error } = await supabase.from("products").insert({
       name,
       code,
       gender_category: newProduct.genderCategory,
@@ -1648,12 +1648,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       usd_fiyat_tamir: newProduct.usdTamir ? Number(newProduct.usdTamir) : null,
       manual_price: newProduct.manualPrice ? Number(newProduct.manualPrice) : null,
       workspace: activeWorkspace,
-    });
+    }).select().single();
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code, usd_tyuksel: newProduct.usdTyuksel || null, usd_thasan: newProduct.usdThasan || null, usd_tamir: newProduct.usdTamir || null, satis_fiyati: newProduct.manualPrice || null });
     setNewProduct({ name: "", genderCategory: "Kadın", image: "", usdTyuksel: "", usdThasan: "", usdTamir: "", manualPrice: "" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
+    return eklenen?.id as string | undefined;
   };
 
   const updateProduct = async (productId: string, patch: Partial<Product>) => {
@@ -2582,6 +2583,89 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   // Satış iptal penceresi. Tek ekranda: para ne olacak, iade kimden ödenecek.
+  // Tek bir "yeni ürün" formu. Hem Ürünler sekmesinde hem parti giriş
+  // ekranında aynısı kullanılır - iki ayrı kopya tutulduğunda biri
+  // güncellenip diğeri unutuluyordu.
+  //
+  // partiModu: parti giriş ekranından açıldığında kayıt bittikten sonra
+  // panel kapanır ve yeni ürün parti formunda otomatik seçilir, kullanıcı
+  // kaldığı yerden devam eder.
+  const YeniUrunFormu = ({ partiModu = false }: { partiModu?: boolean }) => {
+    const [acik, setAcik] = useState(false);
+    const kaydet = async () => {
+      const yeniId = await addProductDefinition();
+      if (!yeniId) return;                    // hata oldu, panel açık kalsın
+      if (partiModu) {
+        setBatchForm((prev) => ({ ...prev, productId: yeniId }));
+        setAcik(false);
+      }
+    };
+    return (
+      <div className={`product-add-wrap ${partiModu ? "" : "product-add-wrap--top"}`}
+           style={partiModu ? { marginTop: 16 } : undefined}>
+        <details className="w-full" open={acik}
+                 onToggle={(e) => setAcik((e.target as HTMLDetailsElement).open)}>
+          <summary className="product-add-btn" style={{ listStyle: "none", cursor: "pointer" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            {partiModu ? "Listede yok mu? Yeni Ürün Ekle" : "Yeni Ürün Ekle"}
+          </summary>
+          <div className="product-add-form-panel">
+            <div className="grid gap-3 md:grid-cols-3">
+              <input className="input" maxLength={50} placeholder="Ürün adı (max 50)"
+                     value={newProduct.name}
+                     onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
+              <select className="input" value={newProduct.genderCategory}
+                      onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}>
+                <option>Kadın</option><option>Erkek</option><option>Unisex</option>
+              </select>
+              <label className="input cursor-pointer text-center">
+                {newProduct.image ? "Resim seçildi" : "Resim Seç"}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") }));
+                  reader.readAsDataURL(file);
+                }} />
+              </label>
+            </div>
+
+            <p className="mt-3 mb-1 text-xs text-slate-500">
+              Fiyatlar opsiyonel - şimdi girersen sonra ürün kartına gitmene gerek kalmaz.
+              Toptancı $ fiyatı parti girişinde alış tutarını otomatik hesaplar, satış fiyatı
+              yeni parti kalemlerine varsayılan olarak yazılır.
+            </p>
+            <div className="grid gap-3 md:grid-cols-4">
+              <input className="input" type="number" min="0" step="0.01" placeholder="T-Yüksel ($)"
+                     value={newProduct.usdTyuksel}
+                     onChange={(e) => setNewProduct({ ...newProduct, usdTyuksel: e.target.value })} />
+              <input className="input" type="number" min="0" step="0.01" placeholder="T-Hasan ($)"
+                     value={newProduct.usdThasan}
+                     onChange={(e) => setNewProduct({ ...newProduct, usdThasan: e.target.value })} />
+              <input className="input" type="number" min="0" step="0.01" placeholder="T-Amir ($)"
+                     value={newProduct.usdTamir}
+                     onChange={(e) => setNewProduct({ ...newProduct, usdTamir: e.target.value })} />
+              <input className="input" type="number" min="0" step="1" placeholder="Satış fiyatı (TL)"
+                     value={newProduct.manualPrice}
+                     onChange={(e) => setNewProduct({ ...newProduct, manualPrice: e.target.value })} />
+            </div>
+
+            {newProduct.image ? (
+              <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" />
+            ) : null}
+
+            <div className="mt-3">
+              <button type="button" className="btn" onClick={kaydet}>
+                {partiModu ? "Ürünü Ekle ve Partiye Dön" : "Kaynak Ürün Ekle"}
+              </button>
+            </div>
+          </div>
+        </details>
+      </div>
+    );
+  };
+
   const SatisIptalModal = () => {
     const sale = iptalEdilecekSatis;
     if (!sale) return null;
@@ -4129,7 +4213,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.17</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.18</p>
           </div>
         </div>
 
@@ -4289,56 +4373,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 )}
               </div>
               {!isSellerRole && (
-              <div className="product-add-wrap product-add-wrap--top">
-                <details className="w-full">
-                  <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    Yeni Ürün Ekle
-                  </summary>
-                  <div className="product-add-form-panel">
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
-                      <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select>
-                      <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
-                    </div>
-                    <div className="mt-3 grid gap-3 md:grid-cols-4">
-                      <div className="field-label">
-                        T-Yüksel (USD)
-                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="örn. 12"
-                               value={newProduct.usdTyuksel}
-                               onChange={(e) => setNewProduct({ ...newProduct, usdTyuksel: e.target.value })} />
-                      </div>
-                      <div className="field-label">
-                        T-Hasan (USD)
-                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="örn. 14"
-                               value={newProduct.usdThasan}
-                               onChange={(e) => setNewProduct({ ...newProduct, usdThasan: e.target.value })} />
-                      </div>
-                      <div className="field-label">
-                        T-Amir (USD)
-                        <input className="input" type="number" step="0.01" inputMode="decimal" placeholder="opsiyonel"
-                               value={newProduct.usdTamir}
-                               onChange={(e) => setNewProduct({ ...newProduct, usdTamir: e.target.value })} />
-                      </div>
-                      <div className="field-label">
-                        Satış Fiyatı (TL)
-                        <input className="input" type="number" step="1" inputMode="decimal" placeholder="örn. 1500"
-                               value={newProduct.manualPrice}
-                               onChange={(e) => setNewProduct({ ...newProduct, manualPrice: e.target.value })} />
-                      </div>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">
-                      Fiyatlar opsiyoneldir, sonradan ürün kartından da girilebilir. Toptancı USD fiyatı
-                      parti girişinde alış tutarını otomatik hesaplar; satış fiyatı yeni parti kalemlerine
-                      varsayılan olarak yazılır.
-                    </p>
-                    <div className="mt-3">
-                      <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
-                    </div>
-                    {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
-                  </div>
-                </details>
-              </div>
+              <YeniUrunFormu />
               )}
               <div className="product-search-wrap">
                 <div className="product-search-inner">
@@ -4879,29 +4914,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
 
               {!isSellerRole && (
-                <div className="product-add-wrap" style={{marginTop: 16}}>
-                  <details className="w-full">
-                    <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                      Listede yok mu? Yeni Ürün Ekle
-                    </summary>
-                    <div className="product-add-form-panel">
-                      <div className="grid gap-3 md:grid-cols-4">
-                        <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
-                        <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select>
-                        <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
-                        <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
-                      </div>
-                      <p className="mt-3 mb-1 text-xs text-slate-500">Toptancı $ fiyatları (opsiyonel - şimdi girersen sonra ürün kartına gitmene gerek kalmaz):</p>
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Yüksel ($)" value={newProduct.usdTyuksel} onChange={(e) => setNewProduct({ ...newProduct, usdTyuksel: e.target.value })} />
-                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Hasan ($)" value={newProduct.usdThasan} onChange={(e) => setNewProduct({ ...newProduct, usdThasan: e.target.value })} />
-                        <input className="input" type="number" min="0" step="0.01" placeholder="T-Amir ($)" value={newProduct.usdTamir} onChange={(e) => setNewProduct({ ...newProduct, usdTamir: e.target.value })} />
-                      </div>
-                      {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
-                    </div>
-                  </details>
-                </div>
+                <YeniUrunFormu partiModu />
               )}
               </div>
             </Card>
