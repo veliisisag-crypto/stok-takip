@@ -2698,11 +2698,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     return (
       <div
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200000,
+        style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 200000,
                  display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
         onClick={kapat}
       >
-        <div className="card" style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+        <div className="card"
+             style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto",
+                      background: "#ffffff", opacity: 1, borderRadius: 16, padding: 20,
+                      boxShadow: "0 20px 50px rgba(0,0,0,0.35)" }}
              onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-bold mb-1">Satışı iptal et</h3>
           <p className="text-sm text-slate-500 mb-4">
@@ -3326,7 +3329,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     // Satışa dönüşmüş kalemi olan ön sipariş silinemez; silinirse satış
     // kaydı kaynağını kaybeder ve ön siparişin ne olduğu izlenemez hale gelir.
-    const donusmusKalem = preorderItems.filter((i) => i.preorder_id === id && i.sale_id);
+    // Sadece AKTİF satışa bağlı kalemler engeller. İptal edilmiş satışın
+    // sale_id bağı kalemde durmaya devam eder; onu "dönüşmüş" saymak, iptal
+    // sonrası tekrar bekleyen duruma dönmüş ön siparişin silinmesini
+    // hatalı şekilde engelliyordu.
+    const iptalEdilmemisSatisIds = new Set(
+      sales.filter((sa) => !sa.cancelled).map((sa) => sa.id)
+    );
+    const donusmusKalem = preorderItems.filter(
+      (i) => i.preorder_id === id && i.sale_id && iptalEdilmemisSatisIds.has(i.sale_id)
+    );
     if (donusmusKalem.length > 0) {
       return setMessage(
         `Bu ön siparişin ${donusmusKalem.length} kalemi satışa dönüşmüş, silinemez. ` +
@@ -4225,7 +4237,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.19</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.22</p>
           </div>
         </div>
 
@@ -6580,7 +6592,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <td style={{padding:"7px 10px"}}>
                           {pay.payment_method === "nakit" ? "Nakit" : pay.payment_method === "banka" ? "Banka" : <span style={{color:"#cbd5e1"}}>—</span>}
                         </td>
-                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>{isPendingAdvance ? <span style={{color:"#cbd5e1"}}>—</span> : money(pay.amount)}</td>
+                        <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500}}>
+                          {/* Bekleyen ön ödemenin tutarı da yazılır. Eskiden "—" gösteriliyordu
+                              ama alttaki TOPLAM bu tutarı sayıyordu; satırların toplamı ile
+                              gösterilen toplam tutmuyor, eksik para varmış gibi görünüyordu. */}
+                          {money(pay.amount)}
+                        </td>
                         <td style={{padding:"7px 10px", minWidth: 110}}>
                           {editingPaymentRowId === pay.id ? (
                             <input
@@ -7021,7 +7038,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <div className="text-sm rounded-lg p-3 mb-3" style={{background:"#fffbeb", color:"#92400e", border:"1px solid #fde68a"}}>
                     💰 Bu siparişe daha önce <b>{money(advanceTotal)}</b> ön ödeme alınmış.
                     {saleTotalPreview > 0 && (
-                      <> Satış tutarı <b>{money(saleTotalPreview)}</b> girilirse, kalan <b>{money(remainderPreview)}</b> için aşağıdaki ödeme türü geçerli olur.</>
+                      remainderPreview > 0
+                        ? <> Satış tutarı <b>{money(saleTotalPreview)}</b> girilirse, kalan <b>{money(remainderPreview)}</b> için aşağıdaki ödeme türü geçerli olur.</>
+                        : <> Satış tutarı <b>{money(saleTotalPreview)}</b> girilirse ön ödeme tamamını karşılar, ayrıca tahsil edilecek tutar kalmaz.
+                            {advanceTotal - saleTotalPreview > 0 && (
+                              <> Artan <b>{money(advanceTotal - saleTotalPreview)}</b> müşterinin hesabında alacak olarak kalır,
+                              bir sonraki satışına mahsup edilir.</>
+                            )}
+                          </>
                     )}
                   </div>
                 )}
@@ -7030,6 +7054,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <label className="label">Birim Fiyat</label>
                     <input className="input" type="number" min="0" placeholder="Birim fiyat" value={convertPrices[item.id] || ""} onChange={(e) => setConvertPrices({ [item.id]: e.target.value })} />
                   </div>
+                  {/* Ön ödeme satışın tamamını karşılıyorsa tahsil edilecek tutar yok;
+                      ödeme türü sormak anlamsız, kutu gizlenir. */}
+                  {!(advanceTotal > 0 && saleTotalPreview > 0 && remainderPreview <= 0) && (
                   <div>
                     <label className="label">{advanceTotal > 0 ? "Kalan Tutar İçin Ödeme Türü" : "Ödeme Türü"}</label>
                     <select className="input" value={convertPaid} onChange={(e) => { setConvertPaid(e.target.value); if (e.target.value === "false") setConvertParaSahibi(""); }}>
@@ -7038,6 +7065,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <option value="nakit">Peşin - Nakit alındı</option>
                     </select>
                   </div>
+                  )}
                   {(convertPaid === "banka" || convertPaid === "nakit") && (
                     <div>
                       <label className="label">Para kimde? *</label>
