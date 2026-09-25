@@ -275,6 +275,8 @@ type PreorderItem = {
   product_id: string;
   qty: number;
   variant?: "ana" | "cep_boy";
+  // Bu kalem hangi satışa dönüştü. Boşsa kalem hâlâ bekliyor.
+  sale_id?: string | null;
 };
 
 type Preorder = {
@@ -2318,6 +2320,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     const { error } = await supabase.from("sales").update({ cancelled: true }).eq("id", saleId);
     if (error) return showError(error);
+
+    // Bu satış bir ön siparişten geldiyse, kalem yeniden "bekliyor" olmalı.
+    const { data: bagliKalemler } = await supabase
+      .from("preorder_items").select("preorder_id").eq("sale_id", saleId);
+    for (const k of bagliKalemler || []) {
+      await preorderDurumGuncelle(k.preorder_id as string);
+    }
     if (sale) {
       // Ödeme kaydına DOKUNULMUYOR.
       //
@@ -3313,11 +3322,45 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const deletePreorder = async (id: string) => {
     const po = preorders.find((p) => p.id === id);
-    if (!confirm("Bu ön sipariş silinecek. Emin misiniz?")) return;
+    if (!po) return;
+
+    // Satışa dönüşmüş kalemi olan ön sipariş silinemez; silinirse satış
+    // kaydı kaynağını kaybeder ve ön siparişin ne olduğu izlenemez hale gelir.
+    const donusmusKalem = preorderItems.filter((i) => i.preorder_id === id && i.sale_id);
+    if (donusmusKalem.length > 0) {
+      return setMessage(
+        `Bu ön siparişin ${donusmusKalem.length} kalemi satışa dönüşmüş, silinemez. ` +
+        `Önce ilgili satışları iptal edin.`
+      );
+    }
+
+    // Alınmış ön ödeme varsa uyar: para müşterinin hesabında kalacak.
+    const avanslar = payments.filter((p) => p.preorder_id === id && !p.cancelled);
+    const avansToplam = avanslar.reduce((t, p) => t + toNum(p.amount), 0);
+    const musteriAdi = customerMap.get(po.customer_id)?.name || "";
+    const uyari = avansToplam > 0
+      ? `\n\nBu ön siparişe ${money(avansToplam)} ön ödeme alınmış. Para SİLİNMEZ, ` +
+        `${musteriAdi} hesabında alacak olarak kalır ve sonraki satışına mahsup edilir. ` +
+        `Para iade edilecekse ödeme kaydından ayrıca işlem yapın.`
+      : "";
+    if (!confirm(`Bu ön sipariş silinecek. Emin misiniz?${uyari}`)) return;
+
+    // Avansların ön sipariş bağını kopar; para müşterinin kaydı olarak kalır.
+    // Eskiden bu satırlar silinen bir ön siparişi işaret etmeye devam ediyordu.
+    if (avanslar.length > 0) {
+      await supabase.from("payments")
+        .update({ preorder_id: null })
+        .eq("preorder_id", id);
+    }
+
     await supabase.from("preorder_items").delete().eq("preorder_id", id);
     const { error } = await supabase.from("preorders").delete().eq("id", id);
     if (error) return showError(error);
-    await logAction("Ön sipariş silindi", "preorders", customerMap.get(po?.customer_id || "")?.name || "");
+    await logAction("Ön sipariş silindi", "preorders", musteriAdi,
+      avansToplam > 0 ? { serbest_kalan_on_odeme: avansToplam } : undefined);
+    if (avansToplam > 0) {
+      try { await allocatePaymentsForCustomer(po.customer_id); } catch (err) { console.warn(err); }
+    }
     loadAll();
   };
 
@@ -3376,6 +3419,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setAdvanceNote("");
     setAdvanceParaSahibi("");
     loadAll();
+  };
+
+  // preorders.status'un TEK yazarı. Durum kalemlerden türetilir:
+  // her kalem iptal edilmemiş bir satışa bağlıysa "tamamlandı", değilse "bekliyor".
+  // Satış iptal edildiğinde de çağrılır, ön sipariş kendiliğinden yeniden açılır.
+  const preorderDurumGuncelle = async (preorderId: string) => {
+    const { data: items } = await supabase
+      .from("preorder_items").select("id,sale_id").eq("preorder_id", preorderId);
+    if (!items || items.length === 0) return;
+
+    const bagliSatisIds = items.map((i) => i.sale_id).filter(Boolean) as string[];
+    let aktifSatis = new Set<string>();
+    if (bagliSatisIds.length > 0) {
+      const { data: ss } = await supabase
+        .from("sales").select("id").in("id", bagliSatisIds).eq("cancelled", false);
+      aktifSatis = new Set((ss || []).map((x: { id: string }) => x.id));
+    }
+    const hepsiTeslim = items.every((i) => i.sale_id && aktifSatis.has(i.sale_id));
+    await supabase.from("preorders")
+      .update({ status: hepsiTeslim ? "tamamlandı" : "bekliyor" })
+      .eq("id", preorderId);
   };
 
   const convertToSales = async () => {
@@ -3447,63 +3511,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
     const { data: newSales, error } = await supabase.from("sales").insert(rows).select("id,total");
     if (error) return showError(error);
-    // Bu item'ı sil
-    await supabase.from("preorder_items").delete().eq("id", item.id);
-    // Kalan item var mı kontrol et, yoksa ön siparişi tamamlandı yap
-    const remaining = preorderItems.filter((i) => i.preorder_id === po.id && i.id !== item.id);
-    if (remaining.length === 0) {
-      await supabase.from("preorders").update({ status: "tamamlandı" }).eq("id", po.id);
-    }
+    // Kalem SİLİNMEZ, satışa bağlanır. Satış sonradan iptal edilirse bağ
+    // düşer ve ön sipariş kalemi kendiliğinden yeniden "bekliyor" olur.
+    await supabase.from("preorder_items")
+      .update({ sale_id: newSales?.[0]?.id ?? null })
+      .eq("id", item.id);
+    await preorderDurumGuncelle(po.id);
 
-    // 1) Ön ödeme varsa: her ön ödeme için, o ödemeden SONRA kapanmış bir dönem var mı kontrol et
-    if (advanceTotal > 0 && newSales && newSales.length > 0) {
-      let remainingAdvanceToAllocate = advanceApplied;
-      for (const payment of advancePayments) {
-        if (remainingAdvanceToAllocate <= 0) break;
-        const paymentPortion = Math.min(Number(payment.amount), remainingAdvanceToAllocate);
-        const periodClosedAfter = periods.some((per) => per.closed && per.closed_at && new Date(per.closed_at) > new Date(payment.created_at));
-
-        if (periodClosedAfter) {
-          // Dönem kapanmış: eski ödeme kaydına dokunma, sadece bu döneme ait yeni bir allocation ekle
-          const allocations = newSales.map((s: { id: string; total: number }) => ({
-            payment_id: payment.id,
-            sale_id: s.id,
-            amount: (s.total / saleTotalTarget) * paymentPortion,
-            created_at: new Date().toISOString(),
-            workspace: activeWorkspace,
-          }));
-          await supabase.from("payment_allocations").insert(allocations);
-        } else {
-          // Dönem kapanmamış: ön ödeme kaydını silip tek, temiz bir peşin tahsilat kaydına dönüştür
-          await supabase.from("payments").delete().eq("id", payment.id);
-          const { data: cleanPay, error: cleanErr } = await supabase
-            .from("payments")
-            .insert({
-              customer_id: po.customer_id,
-              amount: paymentPortion,
-              payment_method: payment.payment_method,
-              kasa_tutari: paymentPortion,
-              para_sahibi: payment.para_sahibi || null,
-              user_email: payment.user_email,
-              created_at: payment.created_at,
-              workspace: activeWorkspace,
-            })
-            .select()
-            .single();
-          if (!cleanErr && cleanPay) {
-            const allocations = newSales.map((s: { id: string; total: number }) => ({
-              payment_id: cleanPay.id,
-              sale_id: s.id,
-              amount: (s.total / saleTotalTarget) * paymentPortion,
-              created_at: cleanPay.created_at,
-              workspace: activeWorkspace,
-            }));
-            await supabase.from("payment_allocations").insert(allocations);
-          }
-        }
-        remainingAdvanceToAllocate -= paymentPortion;
-      }
-    }
+    // Ön ödeme artık ÖZEL OLARAK İŞLENMİYOR.
+    //
+    // Eskiden avans kaydı silinip yeniden oluşturuluyor, mahsupları elle
+    // yazılıyordu. Satış iptal edilse orijinal ödeme kaydı kaybolmuş oluyordu.
+    // Avans müşterinin parasıdır; aşağıdaki mahsup_yenile çağrısı onu FIFO ile
+    // zaten bu satışa bağlar.
 
     // 2) Ön ödemenin karşılamadığı kalan tutar için (varsa), seçilen ödeme türüne göre yeni tahsilat ekle
     if (remainder > 0 && convertPaid !== "false" && newSales && newSales.length > 0) {
@@ -3512,16 +3532,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .insert({ customer_id: po.customer_id, amount: remainder, user_email: currentUserEmail, payment_method: paymentMethod, kasa_tutari: remainder, para_sahibi: convertParaSahibi, seller_account_id: currentSellerAccount?.id || null, workspace: activeWorkspace })
         .select()
         .single();
-      if (!payErr && payData) {
-        const allocations = newSales.map((s: { id: string; total: number }) => ({
-          payment_id: payData.id,
-          sale_id: s.id,
-          amount: (s.total / saleTotalTarget) * remainder,
-          created_at: payData.created_at,
-          workspace: activeWorkspace,
-        }));
-        await supabase.from("payment_allocations").insert(allocations);
-      }
+      if (payErr) return showError(payErr);
+      // Mahsup elle yazılmaz; aşağıdaki mahsup_yenile FIFO ile kurar.
     }
 
     // 3) Hiç ön ödeme yoksa ve cari borç seçiliyse, cari bakiyesindeki fazla ödemeleri otomatik eşleştir
@@ -4213,7 +4225,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.18</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.19</p>
           </div>
         </div>
 
