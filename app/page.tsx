@@ -1701,11 +1701,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const name = newCustomerName.trim();
     if (!name || name.length > 50) return setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
-    const { error } = await supabase.from("customers").insert({ name, seller_account_id: currentSellerAccount?.id || null, created_by: currentUserEmail || null, workspace: activeWorkspace });
+    const { data: eklenen, error } = await supabase.from("customers")
+      .insert({ name, seller_account_id: currentSellerAccount?.id || null, created_by: currentUserEmail || null, workspace: activeWorkspace })
+      .select().single();
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
     loadAll();
+    return eklenen?.id as string | undefined;
   };
 
   const updateCustomerName = async (customerId: string, name: string) => {
@@ -2599,6 +2602,45 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // partiModu: parti giriş ekranından açıldığında kayıt bittikten sonra
   // panel kapanır ve yeni ürün parti formunda otomatik seçilir, kullanıcı
   // kaldığı yerden devam eder.
+  // Tek bir "yeni cari" formu. Cari sekmesinde ve satış ekranında aynısı kullanılır.
+  // satisModu: satış ekranından açıldığında kayıt bittikten sonra panel kapanır ve
+  // yeni cari satış formunda otomatik seçili gelir, kullanıcı kaldığı yerden devam eder.
+  const YeniCariFormu = ({ satisModu = false }: { satisModu?: boolean }) => {
+    const [acik, setAcik] = useState(false);
+    const kaydet = async () => {
+      const yeniId = await addCustomer();
+      if (!yeniId) return;                 // hata oldu, panel açık kalsın
+      if (satisModu) {
+        setSaleForm((prev) => ({ ...prev, customerId: yeniId }));
+        setAcik(false);
+      }
+    };
+    return (
+      <div className="product-add-wrap product-add-wrap--top">
+        <details className="w-full" open={acik}
+                 onToggle={(e) => setAcik((e.target as HTMLDetailsElement).open)}>
+          <summary className="product-add-btn"
+                   style={{ listStyle: "none", cursor: "pointer", fontSize: "0.8rem" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Yeni Cari Ekle
+          </summary>
+          <div className="product-add-form-panel">
+            <div className="flex flex-wrap gap-3">
+              <input className="input max-w-md" maxLength={50} placeholder="Cari adı (max 50 karakter)"
+                     value={newCustomerName}
+                     onChange={(e) => setNewCustomerName(e.target.value)} />
+              <button type="button" className="btn" onClick={kaydet}>
+                {satisModu ? "Cariyi Ekle ve Satışa Dön" : "Cari Ekle"}
+              </button>
+            </div>
+          </div>
+        </details>
+      </div>
+    );
+  };
+
   const YeniUrunFormu = ({ partiModu = false }: { partiModu?: boolean }) => {
     const [acik, setAcik] = useState(false);
     const kaydet = async () => {
@@ -2614,11 +2656,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
            style={partiModu ? { marginTop: 16 } : undefined}>
         <details className="w-full" open={acik}
                  onToggle={(e) => setAcik((e.target as HTMLDetailsElement).open)}>
-          <summary className="product-add-btn" style={{ listStyle: "none", cursor: "pointer" }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20">
+          <summary className="product-add-btn"
+                   style={{ listStyle: "none", cursor: "pointer", fontSize: "0.8rem" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            {partiModu ? "Listede yok mu? Yeni Ürün Ekle" : "Yeni Ürün Ekle"}
+            Yeni Ürün Ekle
           </summary>
           <div className="product-add-form-panel">
             <div className="grid gap-3 md:grid-cols-3">
@@ -4237,7 +4280,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.22</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.25</p>
           </div>
         </div>
 
@@ -6132,20 +6175,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
 
               {/* Add Customer */}
-              <div className="product-add-wrap product-add-wrap--top">
-                <details className="w-full">
-                  <summary className="product-add-btn" style={{listStyle:"none", cursor:"pointer"}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    Yeni Cari Ekle
-                  </summary>
-                  <div className="product-add-form-panel">
-                    <div className="flex flex-wrap gap-3">
-                      <input className="input max-w-md" maxLength={50} placeholder="Cari adı (max 50 karakter)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} />
-                      <button type="button" className="btn" onClick={addCustomer}>Cari Ekle</button>
-                    </div>
-                  </div>
-                </details>
-              </div>
+<YeniCariFormu />
 
               {/* Search */}
               <div className="product-search-wrap">
@@ -6429,7 +6459,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div key={po.id} className="border rounded-xl p-4 mb-3 bg-white">
                       <div className="flex justify-between items-start flex-wrap gap-2">
                         <div>
-                          <div className="font-semibold text-slate-800">{customer?.name || "—"}</div>
+                          <div className="font-semibold text-slate-800"><button type="button" onClick={() => goToCustomer(po.customer_id)}
+                            style={{background:"none", border:"none", padding:0, font:"inherit", color:"#2563eb",
+                                    cursor:"pointer", textDecoration:"underline", textAlign:"left"}}>
+                            {customer?.name || "—"}
+                          </button></div>
                           <div className="text-xs text-slate-500 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)} {po.note ? `· ${po.note}` : ""}</div>
                           {advanceTotal > 0 && (
                             <div className="text-xs font-semibold mt-1" style={{color:"#92400e"}}>
@@ -6467,7 +6501,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     <div key={po.id} className="border rounded-xl p-4 mb-3 bg-slate-50">
                       <div className="flex justify-between items-start flex-wrap gap-2">
                         <div>
-                          <div className="font-semibold text-slate-500">{customer?.name || "—"} <span className="text-xs text-green-600 font-semibold ml-1">✓ Tamamlandı</span></div>
+                          <div className="font-semibold text-slate-500"><button type="button" onClick={() => goToCustomer(po.customer_id)}
+                            style={{background:"none", border:"none", padding:0, font:"inherit", color:"#2563eb",
+                                    cursor:"pointer", textDecoration:"underline", textAlign:"left"}}>
+                            {customer?.name || "—"}
+                          </button> <span className="text-xs text-green-600 font-semibold ml-1">✓ Tamamlandı</span></div>
                           <div className="text-xs text-slate-400 mt-0.5">{toTR(po.created_at, true)} · {shortUserName(po.created_by)}</div>
                           <ul className="mt-1 space-y-0.5">
                             {items.map((item) => (
@@ -7096,6 +7134,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div className="space-y-4">
             <Card title="Yeni Satış Girişi">
               <p className="mb-5 text-slate-500">Satış girebilmek için önce cari kaydı ve ürün kaydı var olmalıdır.</p>
+              {!isSellerRole && <YeniCariFormu satisModu />}
               <div className="grid gap-3 md:grid-cols-4">
                 <SearchableSelect
                   placeholder="Cari ara..."
