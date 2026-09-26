@@ -877,6 +877,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [stokDetaySort, setStokDetaySort] = useState<{col: string; dir: "asc"|"desc"}>({col: "tarih", dir: "asc"});
   const [saleLoading, setSaleLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Yeni cari / yeni ürün panellerinin açık-kapalı durumu.
+  // ÖNEMLİ: bu state ana bileşende durmalı. Panel bileşenlerinin İÇİNDE
+  // useState kullanılırsa, her tuş vuruşunda ana bileşen yeniden render olur,
+  // React iç içe tanımlı bileşeni yeni bir tip sanar ve baştan kurar -
+  // panel kapanır, input odağı kaybolur, yazı yazılamaz.
+  const [cariPanelAcik, setCariPanelAcik] = useState(false);
+  const [urunPanelAcik, setUrunPanelAcik] = useState(false);
   // Satış iptal penceresi: hangi satış, para ne olacak, iade kimden ödenecek
   const [iptalEdilecekSatis, setIptalEdilecekSatis] = useState<Sale | null>(null);
   const [iptalParaAkibeti, setIptalParaAkibeti] = useState<"hesapta" | "iade">("hesapta");
@@ -2606,14 +2613,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // satisModu: satış ekranından açıldığında kayıt bittikten sonra panel kapanır ve
   // yeni cari satış formunda otomatik seçili gelir, kullanıcı kaldığı yerden devam eder.
   const YeniCariFormu = ({ satisModu = false }: { satisModu?: boolean }) => {
-    const [acik, setAcik] = useState(false);
+    const acik = cariPanelAcik;
+    const setAcik = setCariPanelAcik;
     const kaydet = async () => {
       const yeniId = await addCustomer();
       if (!yeniId) return;                 // hata oldu, panel açık kalsın
-      if (satisModu) {
-        setSaleForm((prev) => ({ ...prev, customerId: yeniId }));
-        setAcik(false);
-      }
+      if (satisModu) setSaleForm((prev) => ({ ...prev, customerId: yeniId }));
+      setAcik(false);
     };
     return (
       <div className="product-add-wrap product-add-wrap--top">
@@ -2642,14 +2648,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const YeniUrunFormu = ({ partiModu = false }: { partiModu?: boolean }) => {
-    const [acik, setAcik] = useState(false);
+    const acik = urunPanelAcik;
+    const setAcik = setUrunPanelAcik;
     const kaydet = async () => {
       const yeniId = await addProductDefinition();
       if (!yeniId) return;                    // hata oldu, panel açık kalsın
-      if (partiModu) {
-        setBatchForm((prev) => ({ ...prev, productId: yeniId }));
-        setAcik(false);
-      }
+      if (partiModu) setBatchForm((prev) => ({ ...prev, productId: yeniId }));
+      setAcik(false);
     };
     return (
       <div className={`product-add-wrap ${partiModu ? "" : "product-add-wrap--top"}`}
@@ -4280,7 +4285,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.25</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.26</p>
           </div>
         </div>
 
@@ -4439,9 +4444,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   </div>
                 )}
               </div>
-              {!isSellerRole && (
-              <YeniUrunFormu />
-              )}
+              {!isSellerRole && YeniUrunFormu({})}
               <div className="product-search-wrap">
                 <div className="product-search-inner">
                   <svg className="product-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -4980,9 +4983,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               })()}
 
 
-              {!isSellerRole && (
-                <YeniUrunFormu partiModu />
-              )}
+              {!isSellerRole && YeniUrunFormu({ partiModu: true })}
               </div>
             </Card>
             )}
@@ -6175,7 +6176,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
 
               {/* Add Customer */}
-<YeniCariFormu />
+{YeniCariFormu({})}
 
               {/* Search */}
               <div className="product-search-wrap">
@@ -7134,7 +7135,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <div className="space-y-4">
             <Card title="Yeni Satış Girişi">
               <p className="mb-5 text-slate-500">Satış girebilmek için önce cari kaydı ve ürün kaydı var olmalıdır.</p>
-              {!isSellerRole && <YeniCariFormu satisModu />}
+              {!isSellerRole && YeniCariFormu({ satisModu: true })}
               <div className="grid gap-3 md:grid-cols-4">
                 <SearchableSelect
                   placeholder="Cari ara..."
