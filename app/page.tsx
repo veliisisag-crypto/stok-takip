@@ -1311,20 +1311,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .filter((payment) => payment.customer_id === customerId)
       .reduce((sum, payment) => sum + toNum(payment.amount), 0);
 
-  const getCustomerCollectedTotal = (customerId: string) => {
-    const manualPayments = getCustomerManualPaymentsTotal(customerId);
-    // Eski peşin satışlar (payments tablosunda kaydı olmayanlar)
-    // Eskiden "aynı tutarda ve 5 saniye içinde bir ödeme var mı" varsayımı kullanılıyordu.
-    // Satışın ödemesi başka gün girilince eşleşme tutmuyor ve satış tutarı payments
-    // toplamına EK OLARAK sayılıyordu; müşteri fazla ödemiş görünüp bakiyesi sıfıra
-    // düşüyordu. Bağ artık payment_allocations üzerinden kuruluyor.
-    const tahsilatiOlanSatislar = new Set(paymentAllocations.map((a) => a.sale_id));
-    const oldPaidSales = activeSales
-      .filter((s) => s.customer_id === customerId && s.paid
-        && s.sale_type === "Normal satış" && !tahsilatiOlanSatislar.has(s.id))
-      .reduce((sum, s) => sum + toNum(s.total), 0);
-    return manualPayments + oldPaidSales;
-  };
+  // Müşteriden tahsil edilen toplam. TEK KAYNAK: payments tablosu.
+  //
+  // Eskiden buraya bir uyum kodu eklenmişti: toplu veri aktarımında "peşin"
+  // işaretlenmiş ama ödeme kaydı oluşturulmamış 83 satışın tutarı da tahsilata
+  // ekleniyordu. Cari kartı doğru rakamı gösteriyor, borç detay tablosu ise
+  // sadece mahsuplara baktığı için aynı müşteri için farklı borç gösteriyordu.
+  //
+  // 28.09.2026'da o satışların eksik ödeme kayıtları oluşturuldu
+  // (12_pesin_satis_odeme_backfill.sql), uyum kodu da kaldırıldı.
+  // Artık her ekran aynı kaynaktan okuyor ve ayrışamaz.
+  const getCustomerCollectedTotal = (customerId: string) =>
+    getCustomerManualPaymentsTotal(customerId);
 
   // İşaretli bakiye. Eksi değer = müşterinin bizde parası var (alacaklı).
   // Eskiden Math.max ile sıfıra kırpılıyordu; fazla ödeme yapmış müşteri
@@ -3726,6 +3724,44 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     XLSX.writeFile(wb, `Donem_Tahsilatlari_${today()}.xlsx`);
   };
 
+  // Stok detayı dışa aktarma. Ekranda ne görünüyorsa o aktarılır:
+  // aynı sıralama, aynı satırlar. Özet ve detay görünümü ayrı sütun düzeni kullanır.
+  const exportStokToExcel = (
+    mode: "ozet" | "detay",
+    ozet: { urun: string; tur: string; asilKalan: number; asilDeger: number; cepKalan: number; cepDeger: number }[],
+    detay: { alisTarihi: string; parti: string; urun: string; boy: string; tur: string; kalan: number; alisFiyati: number }[],
+  ) => {
+    const rows: (string | number)[][] = [];
+    if (mode === "detay") {
+      rows.push(["Alış Tarihi", "Parti", "Ürün Adı", "Boy", "Tür", "Kalan", "Alış Fiyatı", "Toplam Değer"]);
+      detay.forEach((r) => rows.push([
+        toTR(r.alisTarihi), r.parti, r.urun, r.boy, r.tur,
+        r.kalan, Number(r.alisFiyati), Number(r.kalan * r.alisFiyati),
+      ]));
+      rows.push([]);
+      rows.push(["TOPLAM", "", `${detay.length} kalem`, "", "",
+        detay.reduce((t, r) => t + r.kalan, 0), "",
+        detay.reduce((t, r) => t + r.kalan * r.alisFiyati, 0)]);
+    } else {
+      rows.push(["Ürün Adı", "Tür", "Asıl Kalan", "Asıl Değer", "Cep Boy Kalan", "Cep Boy Değer", "Toplam Kalan", "Toplam Değer"]);
+      ozet.forEach((r) => rows.push([
+        r.urun, r.tur, r.asilKalan, Number(r.asilDeger), r.cepKalan, Number(r.cepDeger),
+        r.asilKalan + r.cepKalan, Number(r.asilDeger + r.cepDeger),
+      ]));
+      rows.push([]);
+      rows.push(["TOPLAM", `${ozet.length} ürün`,
+        ozet.reduce((t, r) => t + r.asilKalan, 0), ozet.reduce((t, r) => t + r.asilDeger, 0),
+        ozet.reduce((t, r) => t + r.cepKalan, 0), ozet.reduce((t, r) => t + r.cepDeger, 0),
+        ozet.reduce((t, r) => t + r.asilKalan + r.cepKalan, 0),
+        ozet.reduce((t, r) => t + r.asilDeger + r.cepDeger, 0)]);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, mode === "detay" ? "Stok Detay" : "Stok Özet");
+    XLSX.writeFile(wb, `Stok_${mode === "detay" ? "Detay" : "Ozet"}_${today()}.xlsx`);
+  };
+
   const exportKarDetayToExcel = () => {
     const rows: (string | number)[][] = [];
     rows.push(["Tarih", "Cari", "Ürün", "Adet", "Satış", "Tahsilat", "Maliyet", "Ek Maliyet", "Kar"]);
@@ -4285,7 +4321,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.26</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.28</p>
           </div>
         </div>
 
@@ -6823,7 +6859,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const toplamCepDeger = sorted.reduce((s, r) => s + r.cepDeger, 0);
 
           // Detaylı görünüm: parti bazında, tek satır - Cep Boy ayrı bir "ürün" gibi listelenir, en eski alış tarihi en üstte.
-          type DetayRow = { key: string; productId: string; urun: string; tur: string; parti: string; alisTarihi: string; kalan: number; alisFiyati: number };
+          type DetayRow = { key: string; productId: string; urun: string; boy: "Asıl" | "Cep Boy"; tur: string; parti: string; alisTarihi: string; kalan: number; alisFiyati: number };
           const detayRows: DetayRow[] = [];
           if (stokDetayMode === "detay") {
             for (const bi of batchItems) {
@@ -6835,7 +6871,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               detayRows.push({
                 key: bi.id,
                 productId: product.id,
-                urun: bi.variant === "cep_boy" ? `Cep-${product.name}` : product.name,
+                urun: product.name,
+                // Asıl / cep boy ayrımı ayrı kolonda. Eskiden sadece ürün adına
+                // "Cep-" öneki ekleniyordu, listede gözden kaçıyordu.
+                boy: bi.variant === "cep_boy" ? "Cep Boy" : "Asıl",
                 tur: product.gender_category || "-",
                 parti: batchMap.get(bi.batch_id)?.name || "-",
                 alisTarihi: bi.created_at,
@@ -6871,6 +6910,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ) : (
                         <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setStokDetayMode("ozet")}>← Geri Dön</button>
                       )}
+                      <button type="button" className="btn-secondary" style={{padding:"4px 12px"}}
+                              onClick={() => exportStokToExcel(stokDetayMode, sorted, detaySorted)}>Excel'e Aktar</button>
                       <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => { setShowStokDetay(false); setStokDetayMode("ozet"); }}>Kapat</button>
                     </div>
                   </div>
@@ -6883,12 +6924,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         {detayTh("tarih","Alış Tarihi")}
                         {detayTh("parti","Parti")}
                         {detayTh("urun","Ürün Adı")}
+                        <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Boy</th>
                         <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Tür</th>
                         {detayTh("kalan","Kalan")}
                         {detayTh("alis","Alış Fiyatı")}
                       </tr>
                       <tr>
-                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={4}>Toplamı ({detaySorted.length} kalem)</td>
+                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={5}>Toplamı ({detaySorted.length} kalem)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{detaySorted.reduce((s, r) => s + r.kalan, 0)}</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(detaySorted.reduce((s, r) => s + r.kalan * r.alisFiyati, 0))}</td>
                       </tr>
@@ -6900,6 +6942,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <td style={{padding:"7px 10px",color:"#64748b",whiteSpace:"nowrap"}}>{r.parti}</td>
                           <td style={{padding:"7px 10px",fontWeight:500}}>
                             <button type="button" onClick={() => { setShowStokDetay(false); setStokDetayMode("ozet"); goToProduct(r.productId); }} style={{background:"none", border:"none", padding:0, color:"#2563eb", fontWeight:600, cursor:"pointer", textDecoration:"underline", fontSize:"inherit"}}>{r.urun}</button>
+                          </td>
+                          <td style={{padding:"7px 10px"}}>
+                            <span style={{fontSize:"0.7rem",fontWeight:600,padding:"2px 8px",borderRadius:999,
+                                          background: r.boy === "Cep Boy" ? "#fef3c7" : "#e0f2fe",
+                                          color: r.boy === "Cep Boy" ? "#92400e" : "#075985"}}>{r.boy}</span>
                           </td>
                           <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
                           <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.kalan}</td>
