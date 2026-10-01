@@ -1884,7 +1884,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     const sellerSales = activeSales.filter((s) => s.seller_account_id === sellerId);
     const sellerSaleIds = new Set(sellerSales.map((s) => s.id));
-    const sellerCustomerIds = new Set(customers.filter((c) => c.seller_account_id === sellerId).map((c) => c.id));
     // "Satış" kutusu bilinçli olarak kümülatif (tüm zamanlar) kalıyor - dönem kapanışıyla sıfırlanmıyor.
     const totalSatis = sellerSales.reduce((sum, s) => sum + toNum(s.total), 0);
     // Kâr Payı (Toplam) ve Gerçekleşen Kâr - DÖNEM BAZLI: son kapanıştan bu yana.
@@ -1928,8 +1927,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     // satışın parası bu dönem geldiyse, kârı bu dönemde gerçekleşmiş sayılır.
     const gerceklesenKarPayi = gerceklesenKarPayiPeriyot;
     const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
-    const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id))
-      .reduce((sum, c) => sum + Math.max(getCustomerBalance(c.id), 0), 0);
     // İKİ FARKLI KAVRAM, karıştırılmamalı:
     //
     // 1) elindenGecenTahsilat = satıcının KENDİ hesabından girdiği ödemeler.
@@ -1949,6 +1946,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const totalTahsilat = paymentAllocations
       .filter((a) => tahsilEdilenSaleIds.has(a.sale_id))
       .reduce((sum, a) => sum + toNum(a.amount), 0);
+
+    // Cari Borcu = satıcının SATIŞLARININ tahsil edilmemiş kısmı.
+    //
+    // Eskiden customers.seller_account_id üzerinden hesaplanıyordu: müşteri kaydı
+    // satıcının hesabına bağlı değilse (başkası oluşturmuşsa) satışı sayılıyor
+    // ama borcu sayılmıyordu. Meryem-Adana'da 500'lük cari satış girildiği halde
+    // kutu 0 gösteriyordu.
+    const cariBorcu = Math.max(totalSatis - totalTahsilat, 0);
     // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler (dönem kapanışı
     // dışında, ayrı bir ödeme) - TÜM ZAMANLAR, kâr payı cari hesabı mantığına uygun olsun diye.
     // Bu tutar, hem "Kâr Payı (Toplam)" hem "Gerçekleşen Kâr" kutularından düşülür ki kutular her zaman
@@ -4408,7 +4413,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.32</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.33</p>
           </div>
         </div>
 
