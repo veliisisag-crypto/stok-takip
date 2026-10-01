@@ -1930,7 +1930,25 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const totalTeslimEdilen = sellerTransfers.filter((t) => t.seller_account_id === sellerId && new Date(t.created_at) > sinceDate).reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const cariBorcu = customers.filter((c) => sellerCustomerIds.has(c.id))
       .reduce((sum, c) => sum + Math.max(getCustomerBalance(c.id), 0), 0);
-    const totalTahsilat = activePayments.filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate).reduce((sum, p) => sum + toNum(p.amount), 0);
+    // İKİ FARKLI KAVRAM, karıştırılmamalı:
+    //
+    // 1) elindenGecenTahsilat = satıcının KENDİ hesabından girdiği ödemeler.
+    //    "Size Kalan Borç" hesabı bunu kullanır: müşteri doğrudan size ödediyse
+    //    o para satıcının elinden geçmemiştir, ona borç/alacak doğurmaz.
+    const elindenGecenTahsilat = activePayments
+      .filter((p) => p.seller_account_id === sellerId && new Date(p.created_at) > sinceDate)
+      .reduce((sum, p) => sum + toNum(p.amount), 0);
+
+    // 2) totalTahsilat = satıcının SATIŞLARINDAN tahsil edilen toplam.
+    //    Ekrandaki "Tahsilat" kutusu bunu gösterir; yanındaki "Satış" ve
+    //    "Cari Borcu" kutularıyla aynı temeli kullanır, üçü tutarlı olur.
+    //    Eskiden burada da elindenGecenTahsilat kullanılıyordu: satışların
+    //    parası tamamen tahsil edildiği halde, ödemeleri satıcı girmediyse
+    //    kutu düşük görünüyordu (Esengül: 25.700 satış, 7.450 tahsilat).
+    const tahsilEdilenSaleIds = new Set(sellerSales.map((s) => s.id));
+    const totalTahsilat = paymentAllocations
+      .filter((a) => tahsilEdilenSaleIds.has(a.sale_id))
+      .reduce((sum, a) => sum + toNum(a.amount), 0);
     // "Ödemeler" ekranından "Kâr Payı Öde" ile satıcıya elden/banka yapılan ödemeler (dönem kapanışı
     // dışında, ayrı bir ödeme) - TÜM ZAMANLAR, kâr payı cari hesabı mantığına uygun olsun diye.
     // Bu tutar, hem "Kâr Payı (Toplam)" hem "Gerçekleşen Kâr" kutularından düşülür ki kutular her zaman
@@ -1947,10 +1965,34 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .reduce((sum, o) => sum + toNum(o.tutar), 0);
     const netTotalKarPayi = totalKarPayi - totalOdenenKarPayi;
     const netGerceklesenKarPayi = gerceklesenKarPayi - totalOdenenKarPayi;
-    // Size Kalan Borç = Tahsilat - Gerçekleşen Kâr Payı (bu dönem) - (satıcının size zaten transfer ettiği tutar), ikisi de son kapanıştan bu yana.
-    // Eksi çıkabilir: satıcı kendi kâr payı dahil HER ŞEYİ size verdiyse, eksi değer "siz ona borçlusunuz" anlamına gelir
-    // (dönem kapanışında kâr payı öde mekanizmasıyla ona geri ödenir).
-    const kalanBorc = totalTahsilat - gerceklesenKarPayiPeriyot - totalTeslimEdilen;
+    // Size Kalan Borç = Tahsilat - (hak edilen kâr payı - ödenen kâr payı) - teslim edilen tutar.
+    // Hepsi son kapanıştan bu yana.
+    //
+    // Kâr payının ÖDENEN kısmı düşülmeli: eskiden brüt gerçekleşen kâr payı
+    // kullanılıyordu, kâr payı ödendikten sonra bile "siz ona borçlusunuz"
+    // yazmaya devam ediyordu. Satıcı kartındaki kâr payı kutusu sıfırlanıp bu
+    // kutunun sıfırlanmaması tam olarak bu yüzdendi.
+    //
+    // Eksi çıkabilir: satıcı kendi kâr payı dahil HER ŞEYİ size verdiyse,
+    // eksi değer "siz ona borçlusunuz" anlamına gelir.
+    // Size Kalan Borç = satıcının KASASINDA ŞU AN DURAN PARA - henüz ödenmemiş kâr payı
+    //
+    // "Kasasında duran para" = payments.para_sahibi, yani "para kimde?" sorusunun
+    // cevabı. Satıcı parayı size teslim ettiğinde transfer kaydı para_sahibi'ni
+    // değiştirir, bu bakiye kendiliğinden düşer.
+    //
+    // Bu yüzden totalTeslimEdilen AYRICA ÇIKARILMAZ: eski formül onu iki kez
+    // düşüyordu (bir kez kasa bakiyesinden, bir kez elle), Hasret'te 57.900,
+    // Saliha'da 189 gibi anlamsız rakamlar buradan çıkıyordu.
+    //
+    // Cari (tahsil edilmemiş) satışlar hesaba hiç girmez - para henüz alınmamış.
+    //
+    // Pozitif: satıcı size borçlu. Negatif: siz ona borçlusunuz.
+    const saticiKasasi = activePayments
+      .filter((p) => p.para_sahibi === sellerName)
+      .reduce((t, p) => t + toNum(p.kasa_tutari || 0), 0);
+    const kalanBorc = saticiKasasi
+      - Math.max(gerceklesenKarPayiPeriyot - totalOdenenKarPayi, 0);
     return { totalSatis, totalKarPayi: netTotalKarPayi, gerceklesenKarPayi: netGerceklesenKarPayi, totalBizeBorc: totalBizeBorcOrantili, totalTeslimEdilen, kalanBorc, cariBorcu, totalTahsilat };
   };
 
@@ -1959,7 +2001,52 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const recordSellerTransfer = async (sellerId: string, amount: number, alici: string, note: string) => {
     if (!amount || amount <= 0) return setMessage("Geçerli bir tutar girin.");
     if (!alici) return setMessage("Parayı kimin teslim aldığını seçmelisin.");
+    const sellerKasaAdi = sellerAccountMap.get(sellerId)?.name || "";
+    const mevcutKasa = kasaBakiyesi(sellerKasaAdi);
+    if (amount > mevcutKasa + 0.5) {
+      return setMessage(`${sellerKasaAdi} kasasında ${money(mevcutKasa)} var, ${money(amount)} teslim edilemez.`);
+    }
     try {
+      // Para FİİLEN el değiştiriyor: kasa kayıtlarının sahibi de değişmeli.
+      // Eskiden sadece seller_transfers'a log atılıyordu, kasa havuzları
+      // değişmiyordu - satıcı parayı teslim ettiği halde kasasında görünmeye
+      // devam ediyor, teslim alan ortağın kasasına hiç geçmiyordu.
+      let kalan = amount;
+      const kayitlar = payments
+        .filter((p) => !p.cancelled && p.para_sahibi === sellerKasaAdi && Number(p.kasa_tutari || 0) > 0)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+      for (const kayit of kayitlar) {
+        if (kalan <= 0.001) break;
+        const kasa = Number(kayit.kasa_tutari || 0);
+        if (kasa <= kalan + 0.001) {
+          // Kaydın tamamı taşınıyor: sahibi değişir
+          const { error: e1 } = await supabase.from("payments")
+            .update({ para_sahibi: alici }).eq("id", kayit.id);
+          if (e1) throw e1;
+          kalan -= kasa;
+        } else {
+          // Kayıt bölünüyor: kalan kadarı taşınır, gerisi satıcıda kalır.
+          // Taşınan kısım için tutarı 0 olan bir kasa kaydı açılır - tahsilat
+          // toplamlarını ve cari bakiyeyi etkilemez, sadece kasayı taşır.
+          const { error: e2 } = await supabase.from("payments")
+            .update({ kasa_tutari: kasa - kalan }).eq("id", kayit.id);
+          if (e2) throw e2;
+          const { error: e3 } = await supabase.from("payments").insert({
+            customer_id: kayit.customer_id,
+            amount: 0,
+            kasa_tutari: kalan,
+            para_sahibi: alici,
+            payment_method: kayit.payment_method,
+            note: `Kasa transferi - ${sellerKasaAdi} → ${alici}`,
+            user_email: currentUserEmail,
+            workspace: activeWorkspace,
+          });
+          if (e3) throw e3;
+          kalan = 0;
+        }
+      }
+
       const { error } = await supabase.from("seller_transfers").insert({ seller_account_id: sellerId, amount, alici, note: note || null, created_by: currentUserEmail });
       if (error) throw error;
       const sellerName = sellerAccountMap.get(sellerId)?.name || "";
@@ -4321,7 +4408,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.28</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.32</p>
           </div>
         </div>
 
