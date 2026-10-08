@@ -871,6 +871,43 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showKarDetay, setShowKarDetay] = useState(false);
   const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
   const [showMusteriDetay, setShowMusteriDetay] = useState(false);
+  // ---------------------------------------------------------------------
+  // DEPOLAR
+  // ---------------------------------------------------------------------
+  // Depo listesi workspace'e göre. Kuzey tek depo kullanıyor ("Stok"),
+  // Güney iki fiziksel depoya ayrıldı. Karışık liste göstermiyoruz - yanlış
+  // depo seçme riski yaratır.
+  const DEPOLAR: Record<string, string[]> = {
+    kuzey: ["Stok"],
+    guney: ["Adana-Depo", "Samsun-Depo"],
+  };
+  const depoListesi = DEPOLAR[activeWorkspace] || ["Stok"];
+
+  // Kullanıcıya göre varsayılan depo. Satış ve parti formlarında seçili gelir
+  // ama DEĞİŞTİRİLEBİLİR - Aslı bazen Neşe adına satış giriyor.
+  const varsayilanDepo = (email: string, ws: string) => {
+    const liste = DEPOLAR[ws] || ["Stok"];
+    if (ws === "guney") {
+      const e = (email || "").toLowerCase();
+      if (e.includes("asli") || e.includes("aslı")) return "Samsun-Depo";
+      if (e.includes("nese") || e.includes("neşe")) return "Adana-Depo";
+    }
+    return liste[0];
+  };
+
+  // Stok raporunda depo filtresi: belirli bir depo ya da "hepsi"
+  const [stokDepoFiltre, setStokDepoFiltre] = useState<string>("hepsi");
+
+  // Workspace veya kullanıcı değiştiğinde formların deposunu yeniden ayarla.
+  // Güney'den Kuzey'e geçildiğinde "Adana-Depo" seçili kalırsa hiçbir stok
+  // bulunamaz, o yüzden workspace değişiminde sıfırlanması şart.
+  useEffect(() => {
+    const d = varsayilanDepo(currentUserEmail, activeWorkspace);
+    setSaleForm((prev) => ({ ...prev, depo: d }));
+    setBatchForm((prev) => ({ ...prev, depo: d }));
+    setStokDepoFiltre("hepsi");
+  }, [activeWorkspace, currentUserEmail]);
+
   const [showStokDetay, setShowStokDetay] = useState(false);
   const [stokDetayMode, setStokDetayMode] = useState<"ozet" | "detay">("ozet");
   const [stokSort, setStokSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "urun", dir: "asc"});
@@ -1065,10 +1102,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { data: userData } = await supabase.auth.getUser();
       const email = userData.user?.email || "";
       setCurrentUserEmail(email);
-      const defaultDepo = email.includes("mihrimah") ? "Stok" : "Stok";
+      // Varsayılan depo workspace belirlendikten sonra atanıyor (aşağıda).
       const defaultSeller: Seller = email.includes("mihrimah") ? "Mihrimah" : "Aslı";
-      setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
-      setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
+      setSaleForm((prev) => ({ ...prev, seller: defaultSeller }));
 
       // Workspace (Kuzey/Güney) erişimini belirle. Tek workspace'i olan herkes ona sabitlenir;
       // birden fazlası olan (Veli, Aslı) son seçtiği workspace'te kalır (localStorage), o da
@@ -3821,17 +3857,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const exportStokToExcel = (
     mode: "ozet" | "detay",
     ozet: { urun: string; tur: string; asilKalan: number; asilDeger: number; cepKalan: number; cepDeger: number }[],
-    detay: { alisTarihi: string; parti: string; urun: string; boy: string; tur: string; kalan: number; alisFiyati: number }[],
+    detay: { alisTarihi: string; parti: string; urun: string; boy: string; depo: string; tur: string; kalan: number; alisFiyati: number }[],
   ) => {
     const rows: (string | number)[][] = [];
     if (mode === "detay") {
-      rows.push(["Alış Tarihi", "Parti", "Ürün Adı", "Boy", "Tür", "Kalan", "Alış Fiyatı", "Toplam Değer"]);
+      rows.push(["Alış Tarihi", "Parti", "Ürün Adı", "Boy", "Depo", "Tür", "Kalan", "Alış Fiyatı", "Toplam Değer"]);
       detay.forEach((r) => rows.push([
-        toTR(r.alisTarihi), r.parti, r.urun, r.boy, r.tur,
+        toTR(r.alisTarihi), r.parti, r.urun, r.boy, r.depo, r.tur,
         r.kalan, Number(r.alisFiyati), Number(r.kalan * r.alisFiyati),
       ]));
       rows.push([]);
-      rows.push(["TOPLAM", "", `${detay.length} kalem`, "", "",
+      rows.push(["TOPLAM", "", `${detay.length} kalem`, "", "", "",
         detay.reduce((t, r) => t + r.kalan, 0), "",
         detay.reduce((t, r) => t + r.kalan * r.alisFiyati, 0)]);
     } else {
@@ -4238,9 +4274,20 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const qty = Math.min(Math.max(Number(splitQty)||1, 1), kalan);
         const kalanDiger = kalan - qty;
         const handleSplit = async () => {
+          const urunAdi = productMap.get(item.product_id)?.name || "";
+          const partiAdi = batchMap.get(item.batch_id)?.name || "";
+          // Depo transferi loglanır. Bu kayıt olmadan malın ne zaman, kim
+          // tarafından, hangi depodan hangi depoya taşındığı izlenemiyordu.
+          const logla = async (tasinan: number, tamami: boolean) => {
+            await logAction("Depo transferi", "batch_items",
+              `${urunAdi}${item.variant === "cep_boy" ? " (Cep Boy)" : ""} / ${partiAdi}`,
+              { kaynak_depo: mevcutDepo, hedef_depo: newDepo, adet: tasinan,
+                stokta_kalan: kalan, tamami_tasindi: tamami, batch_item_id: item.id });
+          };
           if (qty >= kalan) {
             // Tümü yeni depoya — sadece depo güncelle
             await updateBatchItem(item.id, { depo: newDepo });
+            await logla(kalan, true);
           } else {
             // Mevcut satırın bought'unu kalan - qty kadar azalt (satılanlar korunur)
             const yeniBought = item.bought - qty;
@@ -4256,6 +4303,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               variant: item.variant || "ana",
               workspace: item.workspace || activeWorkspace,
             });
+            await logla(qty, false);
             loadAll();
           }
           setSplitModal(null);
@@ -4413,7 +4461,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.33</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.34</p>
           </div>
         </div>
 
@@ -4739,9 +4787,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                               updateBatchItem(item.id, { depo: newDepo });
                                             }
                                           }}>
-                                            <option value="Stok">Stok</option>
-                                            <option value="Stok">Stok</option>
-                                            <option value="Belirsiz">Belirsiz</option>
+                                            {depoListesi.map((d) => (
+                                              <option key={d} value={d}>{d}</option>
+                                            ))}
+                                            {!depoListesi.includes(item.depo || "") && item.depo && (
+                                              <option value={item.depo}>{item.depo} (eski)</option>
+                                            )}
                                           </select>
                                         </label>
                                       </div>
@@ -6916,8 +6967,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         {showStokDetay && (() => {
           // Ürün bazında tek satır - Asıl Ürün ve Cep Boy ayrı kolon gruplarında toplanır (parti ayrımı olmadan).
           type StokRow = { productId: string; urun: string; tur: string; asilKalan: number; asilDeger: number; cepKalan: number; cepDeger: number };
+          // Depo filtresi: "hepsi" ya da belirli bir depo
+          const depoUygun = (bi: BatchItem) =>
+            stokDepoFiltre === "hepsi" || (bi.depo || "") === stokDepoFiltre;
+
           const byProduct = new Map<string, StokRow>();
           for (const bi of batchItems) {
+            if (!depoUygun(bi)) continue;
             const product = productMap.get(bi.product_id);
             if (!product || product.passive) continue;
             const sold = getBatchSoldQtyForItem(bi);
@@ -6951,10 +7007,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const toplamCepDeger = sorted.reduce((s, r) => s + r.cepDeger, 0);
 
           // Detaylı görünüm: parti bazında, tek satır - Cep Boy ayrı bir "ürün" gibi listelenir, en eski alış tarihi en üstte.
-          type DetayRow = { key: string; productId: string; urun: string; boy: "Asıl" | "Cep Boy"; tur: string; parti: string; alisTarihi: string; kalan: number; alisFiyati: number };
+          type DetayRow = { key: string; productId: string; urun: string; boy: "Asıl" | "Cep Boy"; depo: string; tur: string; parti: string; alisTarihi: string; kalan: number; alisFiyati: number };
           const detayRows: DetayRow[] = [];
           if (stokDetayMode === "detay") {
             for (const bi of batchItems) {
+              if (!depoUygun(bi)) continue;
               const product = productMap.get(bi.product_id);
               if (!product || product.passive) continue;
               const sold = getBatchSoldQtyForItem(bi);
@@ -6967,6 +7024,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 // Asıl / cep boy ayrımı ayrı kolonda. Eskiden sadece ürün adına
                 // "Cep-" öneki ekleniyordu, listede gözden kaçıyordu.
                 boy: bi.variant === "cep_boy" ? "Cep Boy" : "Asıl",
+                depo: bi.depo || "Belirsiz",
                 tur: product.gender_category || "-",
                 parti: batchMap.get(bi.batch_id)?.name || "-",
                 alisTarihi: bi.created_at,
@@ -7002,6 +7060,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       ) : (
                         <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => setStokDetayMode("ozet")}>← Geri Dön</button>
                       )}
+                      {depoListesi.length > 1 && (
+                        <select className="input" style={{width:"auto",padding:"4px 10px",fontSize:"0.85rem"}}
+                                value={stokDepoFiltre} onChange={(e) => setStokDepoFiltre(e.target.value)}>
+                          <option value="hepsi">Tüm depolar</option>
+                          {depoListesi.map((d) => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      )}
                       <button type="button" className="btn-secondary" style={{padding:"4px 12px"}}
                               onClick={() => exportStokToExcel(stokDetayMode, sorted, detaySorted)}>Excel'e Aktar</button>
                       <button type="button" className="btn-secondary" style={{padding:"4px 12px"}} onClick={() => { setShowStokDetay(false); setStokDetayMode("ozet"); }}>Kapat</button>
@@ -7017,12 +7082,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         {detayTh("parti","Parti")}
                         {detayTh("urun","Ürün Adı")}
                         <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Boy</th>
+                        {stokDepoFiltre === "hepsi" && depoListesi.length > 1 && (
+                          <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Depo</th>
+                        )}
                         <th style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#64748b",position:"sticky",top:0,backgroundColor:"#f8fafc",zIndex:2,height:37}}>Tür</th>
                         {detayTh("kalan","Kalan")}
                         {detayTh("alis","Alış Fiyatı")}
                       </tr>
                       <tr>
-                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={5}>Toplamı ({detaySorted.length} kalem)</td>
+                        <td style={{padding:"7px 10px",fontWeight:600,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}} colSpan={stokDepoFiltre === "hepsi" && depoListesi.length > 1 ? 6 : 5}>Toplamı ({detaySorted.length} kalem)</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{detaySorted.reduce((s, r) => s + r.kalan, 0)}</td>
                         <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,position:"sticky",top:37,backgroundColor:"#f0fdf4",zIndex:2,borderBottom:"1.5px solid #bbf7d0"}}>{money(detaySorted.reduce((s, r) => s + r.kalan * r.alisFiyati, 0))}</td>
                       </tr>
@@ -7040,6 +7108,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                           background: r.boy === "Cep Boy" ? "#fef3c7" : "#e0f2fe",
                                           color: r.boy === "Cep Boy" ? "#92400e" : "#075985"}}>{r.boy}</span>
                           </td>
+                          {stokDepoFiltre === "hepsi" && depoListesi.length > 1 && (
+                            <td style={{padding:"7px 10px",color:"#475569",whiteSpace:"nowrap"}}>{r.depo}</td>
+                          )}
                           <td style={{padding:"7px 10px",color:"#64748b"}}>{r.tur}</td>
                           <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600}}>{r.kalan}</td>
                           <td style={{padding:"7px 10px",textAlign:"right",color:"#64748b"}}>{money(r.alisFiyati)}</td>
@@ -7283,15 +7354,39 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   options={sortedActiveCustomers.map((c) => ({ value: c.id, label: c.name }))}
                 />
                 <MusteriKredisi customerId={saleForm.customerId} />
+                {/* Depo seçimi. Kullanıcıya göre varsayılan gelir ama değiştirilebilir -
+                    Aslı bazen Neşe adına satış giriyor. Tek depolu workspace'te gizli. */}
+                {depoListesi.length > 1 && (
+                  <select className="input" value={saleForm.depo}
+                          onChange={(e) => setSaleForm({ ...saleForm, depo: e.target.value, batchId: "" })}>
+                    {depoListesi.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                        {saleForm.productId
+                          ? ` — ${batchItemsForProduct(saleForm.productId)
+                               .filter((i) => i.depo === d && (i.variant || "ana") === saleForm.variant)
+                               .reduce((t, i) => t + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0)} adet`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <SearchableSelect
                   placeholder="Ürün ara..."
                   value={saleForm.productId}
                   onChange={(v) => setSaleForm({ ...saleForm, productId: v, batchId: "", variant: "ana" })}
                   options={sortedActiveProducts
-                    .filter((p) => batchItemsForProduct(p.id).some((i) => i.bought - getBatchSoldQtyForItem(i) > 0))
+                    // Seçili depoda stoğu olmayan ürünü listeye koymuyoruz: başka
+                    // depoda var diye seçilip sonra "yetersiz stok" hatası almak
+                    // kullanıcıyı şaşırtıyor.
+                    .filter((p) => batchItemsForProduct(p.id)
+                      .some((i) => i.depo === saleForm.depo && i.bought - getBatchSoldQtyForItem(i) > 0))
                     .map((p) => {
-                      const anaStok = getProductVariantStock(p.id, "ana");
-                      const cepStok = getProductVariantStock(p.id, "cep_boy");
+                      const depoStogu = (v: "ana" | "cep_boy") => batchItemsForProduct(p.id)
+                        .filter((i) => i.depo === saleForm.depo && (i.variant || "ana") === v)
+                        .reduce((t, i) => t + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const anaStok = depoStogu("ana");
+                      const cepStok = depoStogu("cep_boy");
                       return { value: p.id, label: cepStok > 0 ? `${p.name} — Stok:${anaStok} Cep:${cepStok}` : `${p.name} — Stok: ${anaStok}` };
                     })}
                 />
