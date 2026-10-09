@@ -4461,7 +4461,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.34</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.35</p>
           </div>
         </div>
 
@@ -4893,7 +4893,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               <div className="product-batch-section">
                                 <h4 className="product-batch-title">Parti Detayları</h4>
                                 <div className="product-batch-table">
-                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div><div>İşlem</div></div>
+                                  <div className="product-batch-thead"><div>Parti</div><div>Alındı</div><div>Satıldı</div><div>Kalan</div><div>Alış</div><div>Satış</div><div className="product-batch-h-depo">Depo</div><div>İşlem</div></div>
                                   {batchItemsForProduct(p.id).length ? batchItemsForProduct(p.id).map((item) => {
                                     const sold = getBatchSoldQtyForItem(item);
                                     const kalan = item.bought - sold;
@@ -4915,6 +4915,35 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                           <div className="product-batch-cell">{kalan}</div>
                                           <div className="product-batch-cell">{money(item.buy_price)}</div>
                                           <div className="product-batch-cell">{money(item.sale_price)}</div>
+                                          <div className="product-batch-cell">
+                                            {depoListesi.length > 1 && kalan > 0 ? (
+                                              // Depo doğrudan buradan değiştirilebilir. Kalan 1'den
+                                              // fazlaysa kısmi taşıma penceresi açılır.
+                                              <select
+                                                style={{fontSize:"0.65rem", padding:"2px 4px", borderRadius:6, border:"1px solid #cbd5e1", width:"100%"}}
+                                                value={item.depo || ""}
+                                                onChange={(e) => {
+                                                  const newDepo = e.target.value;
+                                                  if (!newDepo || newDepo === item.depo) return;
+                                                  if (kalan > 1) {
+                                                    setSplitModal({ item, newDepo });
+                                                    setSplitQty(String(kalan));
+                                                  } else {
+                                                    updateBatchItem(item.id, { depo: newDepo });
+                                                    logAction("Depo transferi", "batch_items",
+                                                      `${p.name}${item.variant === "cep_boy" ? " (Cep Boy)" : ""} / ${batchMap.get(item.batch_id)?.name || ""}`,
+                                                      { kaynak_depo: item.depo || "Belirsiz", hedef_depo: newDepo, adet: 1, tamami_tasindi: true, batch_item_id: item.id });
+                                                  }
+                                                }}>
+                                                {depoListesi.map((d) => <option key={d} value={d}>{d}</option>)}
+                                                {!depoListesi.includes(item.depo || "") && item.depo && (
+                                                  <option value={item.depo}>{item.depo} (eski)</option>
+                                                )}
+                                              </select>
+                                            ) : (
+                                              <span style={{fontSize:"0.7rem", color:"#64748b"}}>{item.depo || "-"}</span>
+                                            )}
+                                          </div>
                                           <div className="product-batch-cell">
                                             {kalan > 0 && (
                                               <button
@@ -5145,6 +5174,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <input className="input" type="number" placeholder="Toplam sipariş/adet" value={batchForm.bought} onChange={(e) => setBatchForm({ ...batchForm, bought: e.target.value })} />
                 <input className="input" type="number" placeholder="Alış fiyatı (otomatik hesaplanır, isterseniz değiştirin)" value={batchForm.buyPrice} onChange={(e) => setBatchForm({ ...batchForm, buyPrice: e.target.value })} />
                 <input className="input" type="number" placeholder="Hedef satış fiyatı" value={batchForm.salePrice} onChange={(e) => setBatchForm({ ...batchForm, salePrice: e.target.value })} />
+                {/* Depo seçimi. Tek depolu workspace'te (Kuzey) gizlenir, orada
+                    seçecek bir şey yok. Varsayılan kullanıcıya göre gelir. */}
+                {depoListesi.length > 1 && (
+                  <select className="input" value={batchForm.depo}
+                          onChange={(e) => setBatchForm({ ...batchForm, depo: e.target.value })}>
+                    {depoListesi.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                )}
                 <button type="button" className="btn" onClick={addBatchProduct}>Partiye Ürün Ekle</button>
               </div>
               {batchForm.batchId && batchForm.productId && (() => {
@@ -7759,9 +7796,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         .product-batch-section { margin-bottom: 16px; }
         .product-batch-title { font-size: 0.875rem; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
         .product-batch-table { background: white; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
-        .product-batch-thead { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px minmax(64px, 1fr); padding: 8px 6px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
-        .product-batch-thead > div:not(:first-child) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
-        .product-batch-row { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px minmax(64px, 1fr); padding: 10px 6px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
+        .product-batch-thead { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px 96px minmax(64px, 1fr); padding: 8px 6px; background: #f8fafc; font-size: 0.6rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; border-bottom: 1.5px solid #e2e8f0; align-items: end; }
+        .product-batch-thead > div:not(:first-child):not(.product-batch-h-depo) { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; line-height: 1; }
+        .product-batch-h-depo { writing-mode: horizontal-tb; }
+        .product-batch-row { display: grid; grid-template-columns: minmax(75px, 1.3fr) 34px 34px 34px 62px 62px 96px minmax(64px, 1fr); padding: 10px 6px; border-bottom: 1px solid #f1f5f9; font-size: 0.8125rem; }
         .product-batch-row:last-child { border-bottom: none; }
         .product-batch-cell { color: #334155; }
         .product-batch-cell--name { font-weight: 600; color: #0f172a; }
@@ -7773,7 +7811,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           .product-info-chips { grid-template-columns: 1fr; }
           .product-info-chips--sm { grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
           .product-batch-table { overflow-x: auto; }
-          .product-batch-thead, .product-batch-row { min-width: 400px; }
+          .product-batch-thead, .product-batch-row { min-width: 500px; }
           .product-row { flex-wrap: wrap; padding: 12px; }
           .product-row-left { flex-basis: 100%; margin-bottom: 6px; }
           .product-row-stats { flex-basis: 100%; justify-content: space-between; }
