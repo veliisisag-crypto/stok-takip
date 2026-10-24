@@ -803,6 +803,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [convertPrices, setConvertPrices] = useState<Record<string, string>>({});
   const [convertPaid, setConvertPaid] = useState<string>("false");
   const [convertSellerProfit, setConvertSellerProfit] = useState<string>("");
+  // Ön siparişi satışa dönüştürürken satıcı seçimi. Yönetici (Aslı/Mihrimah)
+  // başkası adına dönüştürebilmeli; boş = ortağın kendi satışı.
+  const [convertSellerId, setConvertSellerId] = useState<string>("");
   const [convertParaSahibi, setConvertParaSahibi] = useState<string>("");
 
   const [search, setSearch] = useState("");
@@ -3562,6 +3565,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setConvertPrices({ [item.id]: "" });
     setConvertPaid("false");
     setConvertSellerProfit("");
+    setConvertSellerId("");
     setConvertParaSahibi("");
     setConvertVariant(item.variant || "ana");
     setConvertModal({ preorder: po, item });
@@ -3638,7 +3642,18 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     const product = productMap.get(item.product_id);
     if (!product) return;
-    const seller: Seller | null = isSellerRole ? null : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
+    // Satıcı belirleme:
+    //  - satıcı rolündeyse kendi hesabı
+    //  - yönetici bir satıcı seçtiyse o satıcı
+    //  - yönetici kimseyi seçmediyse kendi adına (ortak satışı)
+    const secilenSatici = isSellerRole
+      ? currentSellerAccount
+      : (convertSellerId ? sellerAccounts.find((x) => x.id === convertSellerId) || null : null);
+    const seller: Seller | null = secilenSatici
+      ? (secilenSatici.name as Seller)
+      : (currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı");
+    // Kâr payı yalnızca bir alt satıcı adına satış yapılıyorsa girilir.
+    const karPayiVar = !!secilenSatici;
     // Dönüştürme anında seçilen/onaylanan varyanta (Asıl/Cep Boy) göre KESİN filtrele -
     // ön sipariş kaydedilirken seçilen değer varsayılan olarak gelir ama burada değiştirilebilir,
     // tahmin etmiyoruz, ne seçiliyse ondan düşülür.
@@ -3671,7 +3686,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const rowShareOfAdvance = saleTotalTarget > 0 ? (rowTotal / saleTotalTarget) * advanceApplied : 0;
       const rowShareOfNewPayment = remainder > 0 && convertPaid !== "false" ? (rowTotal / saleTotalTarget) * remainder : 0;
       const rowPaidAmount = Math.min(rowTotal, rowShareOfAdvance + rowShareOfNewPayment);
-      const sellerProfitTotal = isSellerRole ? Number(convertSellerProfit || 0) : 0;
+      const sellerProfitTotal = karPayiVar ? Number(convertSellerProfit || 0) : 0;
       const rowSellerProfit = item.qty > 0 ? (take / item.qty) * sellerProfitTotal : 0;
       rows.push({
         customer_id: po.customer_id,
@@ -3686,8 +3701,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         paid: rowPaidAmount >= rowTotal,
         paid_amount: rowPaidAmount,
         payment_method: paymentMethod,
-        seller_account_id: currentSellerAccount?.id || null,
-        seller_profit: isSellerRole ? rowSellerProfit : null,
+        seller_account_id: secilenSatici?.id || null,
+        seller_profit: karPayiVar ? rowSellerProfit : null,
         variant: bi.variant || "ana",
         workspace: activeWorkspace,
       });
@@ -4461,7 +4476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.35</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.36</p>
           </div>
         </div>
 
@@ -7361,17 +7376,37 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       </select>
                     </div>
                   )}
-                  {isSellerRole && (
+                  {/* Yönetici başkası adına dönüştürebilir. Varsayılan kendisi
+                      (ortak satışı); bir alt satıcı seçilirse kâr payı kutusu açılır. */}
+                  {!isSellerRole && sellerAccounts.filter((x) => x.active).length > 0 && (
                     <div>
-                      <label className="label">Kendi Karım (₺)</label>
-                      <input className="input" type="number" min="0" placeholder="Örn: 200" value={convertSellerProfit} onChange={(e) => setConvertSellerProfit(e.target.value)} />
+                      <label className="label">Satıcı</label>
+                      <select className="input" value={convertSellerId}
+                              onChange={(e) => { setConvertSellerId(e.target.value); if (!e.target.value) setConvertSellerProfit(""); }}>
+                        <option value="">Kendi satışım ({currentUserEmail.includes("mihrimah") ? "Mihrimah" : "Aslı"})</option>
+                        {sellerAccounts.filter((x) => x.active).map((x) => (
+                          <option key={x.id} value={x.id}>{x.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {(isSellerRole || convertSellerId) && (
+                    <div>
+                      <label className="label">
+                        {isSellerRole
+                          ? "Kendi Karım (₺)"
+                          : `${sellerAccounts.find((x) => x.id === convertSellerId)?.name || "Satıcı"} Kâr Payı (₺)`}
+                      </label>
+                      <input className="input" type="number" min="0" placeholder="Örn: 200"
+                             value={convertSellerProfit}
+                             onChange={(e) => setConvertSellerProfit(e.target.value)} />
                     </div>
                   )}
                 </div>
                 {message && <p className="text-sm text-red-600 mt-2">{message}</p>}
                 <div className="flex gap-2 mt-4">
                   <button type="button" className="btn" disabled={isLoading("convertToSales")} onClick={() => withLoading("convertToSales", convertToSales)}>{isLoading("convertToSales") ? "..." : "Satışa Dönüştür"}</button>
-                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); setConvertSellerProfit(""); setConvertParaSahibi(""); }}>Vazgeç</button>
+                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); setConvertSellerProfit(""); setConvertParaSahibi(""); setConvertSellerId(""); }}>Vazgeç</button>
                 </div>
               </div>
             </div>
