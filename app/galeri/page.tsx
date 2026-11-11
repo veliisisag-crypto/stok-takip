@@ -10,6 +10,8 @@ type Product = {
   image_url: string | null;
   passive: boolean;
   manual_price: number | null;
+  manual_price_guney: number | null;
+  workspace: "kuzey" | "guney";
 };
 
 type BatchItem = {
@@ -21,39 +23,78 @@ type BatchItem = {
   created_at: string;
 };
 
+type Workspace = "kuzey" | "guney";
+
+// Galeri varsayılan olarak GÜNEY verisini gösterir.
+// Kuzey galerisi gerekirse: /galeri?ws=kuzey
+const getWorkspace = (): Workspace => {
+  if (typeof window === "undefined") return "guney";
+  const ws = new URLSearchParams(window.location.search).get("ws");
+  return ws === "kuzey" ? "kuzey" : "guney";
+};
+
+// Supabase tek istekte en fazla 1000 satır döndürür; hepsini sayfa sayfa çek.
+const PAGE = 1000;
+async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = data || [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 export default function GaleriPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [soldByBatchItem, setSoldByBatchItem] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
 
+  const [ws, setWs] = useState<Workspace | null>(null);
+
   useEffect(() => {
-    supabase
-      .from("products")
-      .select("id,name,gender_category,image_url,passive,manual_price")
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (data) setProducts(data as Product[]);
-      });
+    const workspace = getWorkspace();
+    setWs(workspace);
+    // Güney, Kuzey'in ürün kataloğunu da kullanır; Kuzey sadece kendi ürünlerini.
+    const katalog: Workspace[] = workspace === "guney" ? ["kuzey", "guney"] : ["kuzey"];
 
-    supabase
-      .from("batch_items")
-      .select("id,product_id,bought,sale_price,variant,created_at")
-      .then(({ data, error }) => {
-        if (error) { console.warn("batch_items okunamadı", error); return; }
-        if (data) setBatchItems(data as BatchItem[]);
-      });
-
-    supabase
-      .rpc("get_sold_qty_by_batch_item", { p_workspace: "kuzey" })
-      .then(({ data, error }) => {
-        if (error) { console.warn("get_sold_qty_by_batch_item hata", error); return; }
+    (async () => {
+      try {
+        const [prods, items, sold] = await Promise.all([
+          fetchAll<Product>((f, t) =>
+            supabase
+              .from("products")
+              .select("id,name,gender_category,image_url,passive,manual_price,manual_price_guney,workspace")
+              .in("workspace", katalog)
+              .order("created_at", { ascending: true })
+              .order("id", { ascending: true })
+              .range(f, t)
+          ),
+          fetchAll<BatchItem>((f, t) =>
+            supabase
+              .from("batch_items")
+              .select("id,product_id,bought,sale_price,variant,created_at")
+              .eq("workspace", workspace)
+              .order("created_at", { ascending: true })
+              .order("id", { ascending: true })
+              .range(f, t)
+          ),
+          fetchAll<{ batch_item_id: string; toplam_satilan: number }>((f, t) =>
+            supabase.rpc("get_sold_qty_by_batch_item", { p_workspace: workspace }).range(f, t)
+          ),
+        ]);
+        setProducts(prods);
+        setBatchItems(items);
         const map: Record<string, number> = {};
-        for (const row of (data || []) as { batch_item_id: string; toplam_satilan: number }[]) {
-          map[row.batch_item_id] = Number(row.toplam_satilan || 0);
-        }
+        for (const row of sold) map[row.batch_item_id] = Number(row.toplam_satilan || 0);
         setSoldByBatchItem(map);
-      });
+      } catch (e) {
+        console.warn("galeri verisi okunamadı", e);
+      }
+    })();
   }, []);
 
   const close = useCallback(() => setLightbox(null), []);
@@ -85,7 +126,9 @@ export default function GaleriPage() {
     .map((p) => {
       const ana = getVariantInfo(p.id, "ana");
       const cep = getVariantInfo(p.id, "cep_boy");
-      const fallbackPrice = Number(p.manual_price || 0);
+      const fallbackPrice = Number(
+        (ws === "guney" ? p.manual_price_guney : p.manual_price) || 0
+      );
       const hasStock = (ana?.stock || 0) > 0 || (cep?.stock || 0) > 0;
       return { product: p, ana, cep, fallbackPrice, hasStock };
     });
