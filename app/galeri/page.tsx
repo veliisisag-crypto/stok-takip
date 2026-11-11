@@ -115,10 +115,11 @@ export default function GaleriPage() {
     return { stock, price };
   };
 
-  const groups: { gender: string }[] = [
-    { gender: "Erkek" },
-    { gender: "Kadın" },
-    { gender: "Unisex" },
+  // Sıra: önce Kadın, sonra Erkek, en son Unisex. Her bölümün kendi renk vurgusu var.
+  const groups: { gender: string; accent: string }[] = [
+    { gender: "Kadın", accent: "#e879a6" },
+    { gender: "Erkek", accent: "#60a5fa" },
+    { gender: "Unisex", accent: "#c4b5fd" },
   ];
 
   const visibleProducts = products
@@ -139,29 +140,43 @@ export default function GaleriPage() {
       background: "#0a0a0a",
       padding: "12px",
     }}>
-      {groups.map(({ gender }) => {
+      {groups.map(({ gender, accent }, gi) => {
         const group = visibleProducts
           .filter((row) => row.product.gender_category === gender)
           .sort((a, b) => (b.hasStock ? 1 : 0) - (a.hasStock ? 1 : 0));
         if (!group.length) return null;
         return (
-          <div key={gender} style={{ marginBottom: 16 }}>
+          <div key={gender} style={{ marginBottom: 16, marginTop: gi === 0 ? 0 : 28 }}>
+            {/* Bölüm başlığı: kaydırırken üstte sabit kalır, hangi bölümde olunduğu hep görünür */}
             <div style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 5,
+              background: "#0a0a0a",
               display: "flex",
               alignItems: "center",
               gap: 10,
+              padding: "10px 2px",
               marginBottom: 8,
+              borderBottom: `2px solid ${accent}`,
             }}>
               <div style={{
+                width: 4,
+                alignSelf: "stretch",
+                borderRadius: 2,
+                background: accent,
+              }} />
+              <div style={{
                 color: "#ffffff",
-                fontSize: "0.7rem",
-                fontWeight: 700,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                opacity: 0.5,
+                fontSize: "1.1rem",
+                fontWeight: 800,
                 whiteSpace: "nowrap",
               }}>{gender}</div>
-              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.1)" }} />
+              <div style={{
+                color: accent,
+                fontSize: "0.8rem",
+                fontWeight: 600,
+              }}>{group.length} ürün</div>
             </div>
             <div style={{
               display: "grid",
