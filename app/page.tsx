@@ -731,7 +731,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   // Workspace (Kuzey/Güney) - Aslı ve Veli ikisi arasında geçiş yapabilir, diğer herkes tek workspace'e sabit.
-  const [activeWorkspace, setActiveWorkspace] = useState<"kuzey" | "guney">("kuzey");
+  const [activeWorkspace, setActiveWorkspace] = useState<"kuzey" | "guney">("guney");
   const [allowedWorkspaces, setAllowedWorkspaces] = useState<string[]>(["kuzey"]);
   const [sellerAccounts, setSellerAccounts] = useState<SellerAccount[]>([]);
   const [sellerSettlements, setSellerSettlements] = useState<SellerSettlement[]>([]);
@@ -1114,9 +1114,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // geçersizse (örn. hiç seçim yapılmamışsa) ilk izinli workspace'e düşer.
       const { data: waRow } = await supabase.from("workspace_access").select("workspaces").eq("email", email.toLowerCase()).maybeSingle();
       const myWorkspaces: string[] = (waRow?.workspaces && waRow.workspaces.length) ? waRow.workspaces : ["kuzey"];
-      setAllowedWorkspaces(myWorkspaces);
-      const stored = typeof window !== "undefined" ? window.localStorage.getItem("activeWorkspace") : null;
-      const resolvedWorkspace = (stored === "kuzey" || stored === "guney") && myWorkspaces.includes(stored) ? stored : myWorkspaces[0];
+      void myWorkspaces;
+      // Kuzey arayüzden kaldırıldı: uygulama herkes için sabit olarak Güney'de açılır.
+      // Kuzey verisi veritabanında olduğu gibi duruyor, sadece görüntülenmiyor.
+      // Geçiş kapalı olsun diye izinli liste tek elemanlı tutuluyor.
+      setAllowedWorkspaces(["guney"]);
+      const resolvedWorkspace = "guney" as "kuzey" | "guney";
       setActiveWorkspace(resolvedWorkspace as "kuzey" | "guney");
       // Ürün/Toptancı kataloğu asimetrik: Güney workspace'indeyken Kuzey'in kataloğu da görünür
       // (kullanılabilir), Kuzey'deyken sadece Kuzey'in kendi kataloğu görünür.
@@ -4415,7 +4418,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onClick={toggleWorkspace}
             title={allowedWorkspaces.length > 1 ? "Workspace değiştirmek için tıkla" : undefined}
           >
-            Ticari Takip{activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700, color:"#ea580c", background:"#fff7ed", border:"1px solid #fdba74", borderRadius:5, padding:"2px 6px", verticalAlign:"middle"}}>GÜNEY</span>}
+            Ticari Takip
           </h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
@@ -4493,7 +4496,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               onClick={toggleWorkspace}
             >
               👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
-              {activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700}}>· GÜNEY</span>}
+              
             </div>
           )}
           {menu.map(([key, label]) => (
