@@ -1244,7 +1244,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  // "Ticari Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
+  // "Stok Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
   const toggleWorkspace = () => {
     if (allowedWorkspaces.length < 2) return;
     switchWorkspace(activeWorkspace === "kuzey" ? "guney" : "kuzey");
@@ -4418,7 +4418,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onClick={toggleWorkspace}
             title={allowedWorkspaces.length > 1 ? "Workspace değiştirmek için tıkla" : undefined}
           >
-            Ticari Takip
+            Stok Takip
           </h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
@@ -4479,7 +4479,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.36</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.38</p>
           </div>
         </div>
 
