@@ -731,7 +731,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   // Workspace (Kuzey/Güney) - Aslı ve Veli ikisi arasında geçiş yapabilir, diğer herkes tek workspace'e sabit.
-  const [activeWorkspace, setActiveWorkspace] = useState<"kuzey" | "guney">("guney");
+  const [activeWorkspace, setActiveWorkspace] = useState<"kuzey" | "guney">("kuzey");
   const [allowedWorkspaces, setAllowedWorkspaces] = useState<string[]>(["kuzey"]);
   const [sellerAccounts, setSellerAccounts] = useState<SellerAccount[]>([]);
   const [sellerSettlements, setSellerSettlements] = useState<SellerSettlement[]>([]);
@@ -1114,12 +1114,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // geçersizse (örn. hiç seçim yapılmamışsa) ilk izinli workspace'e düşer.
       const { data: waRow } = await supabase.from("workspace_access").select("workspaces").eq("email", email.toLowerCase()).maybeSingle();
       const myWorkspaces: string[] = (waRow?.workspaces && waRow.workspaces.length) ? waRow.workspaces : ["kuzey"];
-      void myWorkspaces;
-      // Kuzey arayüzden kaldırıldı: uygulama herkes için sabit olarak Güney'de açılır.
-      // Kuzey verisi veritabanında olduğu gibi duruyor, sadece görüntülenmiyor.
-      // Geçiş kapalı olsun diye izinli liste tek elemanlı tutuluyor.
-      setAllowedWorkspaces(["guney"]);
-      const resolvedWorkspace = "guney" as "kuzey" | "guney";
+      setAllowedWorkspaces(myWorkspaces);
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem("activeWorkspace") : null;
+      const resolvedWorkspace = (stored === "kuzey" || stored === "guney") && myWorkspaces.includes(stored) ? stored : myWorkspaces[0];
       setActiveWorkspace(resolvedWorkspace as "kuzey" | "guney");
       // Ürün/Toptancı kataloğu asimetrik: Güney workspace'indeyken Kuzey'in kataloğu da görünür
       // (kullanılabilir), Kuzey'deyken sadece Kuzey'in kendi kataloğu görünür.
@@ -1244,7 +1241,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  // "Stok Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
+  // "Ticari Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
   const toggleWorkspace = () => {
     if (allowedWorkspaces.length < 2) return;
     switchWorkspace(activeWorkspace === "kuzey" ? "guney" : "kuzey");
@@ -4418,7 +4415,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onClick={toggleWorkspace}
             title={allowedWorkspaces.length > 1 ? "Workspace değiştirmek için tıkla" : undefined}
           >
-            Stok Takip
+            Ticari Takip{activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700, color:"#ea580c", background:"#fff7ed", border:"1px solid #fdba74", borderRadius:5, padding:"2px 6px", verticalAlign:"middle"}}>GÜNEY</span>}
           </h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
@@ -4479,7 +4476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.38</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.36</p>
           </div>
         </div>
 
@@ -4496,7 +4493,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               onClick={toggleWorkspace}
             >
               👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
-              
+              {activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700}}>· GÜNEY</span>}
             </div>
           )}
           {menu.map(([key, label]) => (
