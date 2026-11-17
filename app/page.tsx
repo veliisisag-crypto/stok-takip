@@ -1241,7 +1241,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  // "Ticari Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
+  // "Stok Takip" başlığına tıklanınca çağrılır - sadece iki workspace'e de erişimi olanlarda anlamlıdır.
   const toggleWorkspace = () => {
     if (allowedWorkspaces.length < 2) return;
     switchWorkspace(activeWorkspace === "kuzey" ? "guney" : "kuzey");
@@ -4415,7 +4415,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onClick={toggleWorkspace}
             title={allowedWorkspaces.length > 1 ? "Workspace değiştirmek için tıkla" : undefined}
           >
-            Ticari Takip{activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700, color:"#ea580c", background:"#fff7ed", border:"1px solid #fdba74", borderRadius:5, padding:"2px 6px", verticalAlign:"middle"}}>GÜNEY</span>}
+            Stok Takip
           </h1>
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
@@ -4476,7 +4476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.36</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.40</p>
           </div>
         </div>
 
@@ -4493,7 +4493,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               onClick={toggleWorkspace}
             >
               👤 {currentUserEmail.includes("mihrimah") ? "Mihrimah" : currentUserEmail.includes("asli") ? "Aslı" : currentUserEmail.includes("veli") ? "Veli" : currentUserEmail.split("@")[0]}
-              {activeWorkspace === "guney" && <span style={{marginLeft:6, fontSize:"0.65rem", fontWeight:700}}>· GÜNEY</span>}
+              
             </div>
           )}
           {menu.map(([key, label]) => (
@@ -4606,32 +4606,38 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 {!isSellerRole && (
                   <div style={{display:"flex", gap:8}}>
                     <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{fontSize:"0.8rem", padding:"6px 12px"}}
-                      onClick={async () => {
-                        const shareUrl = `${window.location.origin}/galeri`;
-                        if (navigator.share) {
-                          try {
-                            await navigator.share({ title: "Ürün Kataloğu", url: shareUrl });
-                          } catch (err) {
-                            if ((err as Error)?.name !== "AbortError") {
-                              console.warn("Paylaşım başarısız", err);
+                    {([
+                      ["/galeri", "🔗 Paylaşım Linki", "Ürün Kataloğu"],
+                      ["/galeri?fiyat=yok", "🔗 Fiyatsız Link", "Ürün Kataloğu"],
+                    ] as const).map(([path, etiket, baslik]) => (
+                      <button
+                        key={path}
+                        type="button"
+                        className="btn-secondary"
+                        style={{fontSize:"0.8rem", padding:"6px 12px"}}
+                        onClick={async () => {
+                          const shareUrl = `${window.location.origin}${path}`;
+                          if (navigator.share) {
+                            try {
+                              await navigator.share({ title: baslik, url: shareUrl });
+                            } catch (err) {
+                              if ((err as Error)?.name !== "AbortError") {
+                                console.warn("Paylaşım başarısız", err);
+                              }
+                            }
+                          } else {
+                            try {
+                              await navigator.clipboard.writeText(shareUrl);
+                              setMessage("Paylaşım linki panoya kopyalandı.");
+                            } catch {
+                              setMessage(shareUrl);
                             }
                           }
-                        } else {
-                          try {
-                            await navigator.clipboard.writeText(shareUrl);
-                            setMessage("Paylaşım linki panoya kopyalandı.");
-                          } catch {
-                            setMessage(shareUrl);
-                          }
-                        }
-                      }}
-                    >
-                      🔗 Paylaşım Linki
-                    </button>
+                        }}
+                      >
+                        {etiket}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
@@ -7649,7 +7655,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               </div>
               {activeWorkspace === "guney" && (
                 <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  Güney'de şirket kârının tamamı Aslı'ya dağıtılır. Neşe'nin payı zaten kendi satışlarındaki kâr payı olarak maliyete yazılmış durumda.
+                  Şirket kârının tamamı Aslı'ya dağıtılır. Neşe'nin payı zaten kendi satışlarındaki kâr payı olarak maliyete yazılmış durumda.
                 </p>
               )}
               <button type="button" className="btn" disabled={isLoading("closePeriod")} onClick={() => withLoading("closePeriod", closePeriod)}>{isLoading("closePeriod") ? "Kapatılıyor..." : "Dönemi Kapat ve Mahsuplaştır"}</button>
