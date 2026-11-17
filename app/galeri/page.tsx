@@ -54,10 +54,13 @@ export default function GaleriPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const [ws, setWs] = useState<Workspace | null>(null);
+  // /galeri?fiyat=yok → fiyatlar gizlenir, sadece stok durumu görünür.
+  const [fiyatGizli, setFiyatGizli] = useState(false);
 
   useEffect(() => {
     const workspace = getWorkspace();
     setWs(workspace);
+    setFiyatGizli(new URLSearchParams(window.location.search).get("fiyat") === "yok");
     // Güney, Kuzey'in ürün kataloğunu da kullanır; Kuzey sadece kendi ürünlerini.
     const katalog: Workspace[] = workspace === "guney" ? ["kuzey", "guney"] : ["kuzey"];
 
@@ -227,7 +230,7 @@ export default function GaleriPage() {
                         borderRadius: 4,
                         whiteSpace: "nowrap",
                       }}>
-                        Büyük Boy · {anaStock > 0 ? "Stokta" : "Tükendi"} · {anaPrice ? Math.round(anaPrice).toLocaleString("tr-TR") : "-"}
+                        Büyük Boy · {anaStock > 0 ? "Stokta" : "Tükendi"}{!fiyatGizli && <> · {anaPrice ? Math.round(anaPrice).toLocaleString("tr-TR") : "-"}</>}
                       </div>
                       {cep && (
                         <div style={{
@@ -239,7 +242,7 @@ export default function GaleriPage() {
                           borderRadius: 4,
                           whiteSpace: "nowrap",
                         }}>
-                          Çanta Boy · {cep.stock > 0 ? "Stokta" : "Tükendi"} · {cep.price ? Math.round(cep.price).toLocaleString("tr-TR") : "-"}
+                          Çanta Boy · {cep.stock > 0 ? "Stokta" : "Tükendi"}{!fiyatGizli && <> · {cep.price ? Math.round(cep.price).toLocaleString("tr-TR") : "-"}</>}
                         </div>
                       )}
                     </div>
