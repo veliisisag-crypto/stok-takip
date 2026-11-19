@@ -4476,7 +4476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.40</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.41</p>
           </div>
         </div>
 
@@ -4616,7 +4616,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         className="btn-secondary"
                         style={{fontSize:"0.8rem", padding:"6px 12px"}}
                         onClick={async () => {
-                          const shareUrl = `${window.location.origin}${path}`;
+                          // Paylaşım linkleri her zaman özel alan adıyla verilir (*.vercel.app bazı hatlarda açılmıyor)
+                          const shareUrl = `https://stok-takip.liberyan.com${path}`;
                           if (navigator.share) {
                             try {
                               await navigator.share({ title: baslik, url: shareUrl });
