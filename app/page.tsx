@@ -882,7 +882,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // depo seçme riski yaratır.
   const DEPOLAR: Record<string, string[]> = {
     kuzey: ["Stok"],
-    guney: ["Adana-Depo", "Samsun-Depo"],
+    guney: ["Adana-Depo", "Samsun-Depo", "Kars-Depo"],
   };
   const depoListesi = DEPOLAR[activeWorkspace] || ["Stok"];
 
@@ -4476,7 +4476,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 pr-28">
           <div>
             <h2 className="text-3xl font-bold">{menu.find((m) => m[0] === active)?.[1]}</h2>
-            <p className="text-slate-500">Eğitim amaçlı yazılım v3.41</p>
+            <p className="text-slate-500">Eğitim amaçlı yazılım v3.42</p>
           </div>
         </div>
 
