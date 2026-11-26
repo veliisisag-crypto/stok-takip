@@ -76,7 +76,7 @@ export default function OAuthConsent() {
     return kutu(
       <>
         <h1 className="mb-2 text-2xl font-bold">Giriş Yap</h1>
-        <p className="mb-4 text-sm text-slate-600">Bağlantıya izin vermek için Redline hesabınla giriş yap.</p>
+        <p className="mb-4 text-sm text-slate-600">Bağlantıya izin vermek için Stok-Takip hesabınla giriş yap.</p>
         <div className="space-y-3">
           <input className="w-full rounded-xl border p-3" placeholder="E-posta" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input className="w-full rounded-xl border p-3" placeholder="Şifre" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -95,7 +95,7 @@ export default function OAuthConsent() {
   return kutu(
     <>
       <h1 className="mb-4 text-2xl font-bold">Bağlantı İzni</h1>
-      <p className="mb-2"><b>{detay.client.name}</b> uygulaması, Redline hesabın adına işlem yapmak istiyor.</p>
+      <p className="mb-2"><b>{detay.client.name}</b> uygulaması, Stok-Takip hesabın adına işlem yapmak istiyor.</p>
       <p className="mb-2 text-sm">Hesap: <b>{detay.user.email}</b></p>
       <p className="mb-6 text-sm">Yönlendirilecek adres: <b>{hedef}</b></p>
       <p className="mb-6 text-xs text-slate-500">Bu adres claude.ai değilse izin verme.</p>
