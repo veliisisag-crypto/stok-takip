@@ -10,14 +10,17 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@supabase/supabase-js": "^2.105.4",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
+    "mcp-handler": "^2.3.1",
     "next": "16.2.6",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
